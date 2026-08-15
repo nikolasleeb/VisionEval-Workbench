@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="title description">
+  <title id="title">Virginia MPO package crosswalk workflow</title>
+  <desc id="description">Official VDOT MPO polygons and Virginia VisionEval Bzone polygons are spatially compared. Bzones with at least one percent area overlap are recorded in a reviewed crosswalk, with Azone and locality identifiers supplying readable regional names.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#315a7d"/>
+    </marker>
+    <style>
+      .heading { font: 700 28px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17324d; }
+      .label { font: 700 21px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #17324d; }
+      .body { font: 17px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #334e68; }
+      .small { font: 15px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; fill: #486581; }
+      .card { fill: #ffffff; stroke: #bcccdc; stroke-width: 2; }
+      .arrow { fill: none; stroke: #315a7d; stroke-width: 4; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="520" rx="24" fill="#f5f8fb"/>
+  <text x="50" y="54" class="heading">How the Virginia MPO crosswalk was created</text>
+
+  <rect x="50" y="92" width="285" height="265" rx="18" class="card"/>
+  <text x="75" y="128" class="label">Source GIS layers</text>
+  <path d="M88 178 L140 147 L192 176 L170 230 L110 234 Z" fill="#ffd166" stroke="#b7791f" stroke-width="3"/>
+  <path d="M175 165 L248 148 L296 190 L280 251 L212 238 Z" fill="#9ad8c5" fill-opacity="0.78" stroke="#287d6d" stroke-width="3"/>
+  <path d="M89 281 L300 281 M159 147 L159 250 M230 149 L230 251" stroke="#9fb3c8" stroke-width="2" stroke-dasharray="7 6"/>
+  <text x="75" y="313" class="body">15 official VDOT MPO polygons</text>
+  <text x="75" y="340" class="body">5,963 VisionEval Bzone polygons</text>
+
+  <path d="M350 224 L430 224" class="arrow"/>
+
+  <rect x="445" y="92" width="310" height="265" rx="18" class="card"/>
+  <text x="470" y="128" class="label">Spatial comparison</text>
+  <rect x="480" y="154" width="240" height="100" rx="12" fill="#e8f1f8" stroke="#6c91b3" stroke-width="2"/>
+  <text x="600" y="190" text-anchor="middle" class="body">Calculate each Bzone's</text>
+  <text x="600" y="216" text-anchor="middle" class="body">area inside an MPO</text>
+  <rect x="500" y="275" width="200" height="52" rx="26" fill="#17324d"/>
+  <text x="600" y="308" text-anchor="middle" style="font:700 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; fill:#ffffff">Include overlap ≥ 1%</text>
+  <text x="600" y="345" text-anchor="middle" class="small">Review every overlap below 99%</text>
+
+  <path d="M770 224 L850 224" class="arrow"/>
+
+  <rect x="865" y="92" width="285" height="265" rx="18" class="card"/>
+  <text x="890" y="128" class="label">Reviewed crosswalk</text>
+  <rect x="895" y="151" width="225" height="165" rx="10" fill="#172b4d"/>
+  <text x="915" y="181" style="font:16px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#b3e5fc">"FRED": {</text>
+  <text x="930" y="208" style="font:16px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#ffffff">"bzones": [ ... ],</text>
+  <text x="930" y="235" style="font:16px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#ffffff">"selectedCount": 189,</text>
+  <text x="930" y="262" style="font:16px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#ffffff">"boundaryCount": 7</text>
+  <text x="915" y="289" style="font:16px ui-monospace, SFMono-Regular, Menlo, monospace; fill:#b3e5fc">}</text>
+  <text x="890" y="340" class="body">Versioned JSON used offline</text>
+
+  <rect x="185" y="406" width="830" height="70" rx="16" fill="#e7f4ef" stroke="#58a58f" stroke-width="2"/>
+  <text x="215" y="437" class="label">Supporting identifiers</text>
+  <text x="215" y="462" class="body">133 Azone/locality records connect Bzone prefixes to readable Virginia locality names.</text>
+  <path d="M600 406 L600 376" class="arrow"/>
+  <text x="1150" y="500" text-anchor="end" class="small">Schematic — not a geographic map</text>
+</svg>

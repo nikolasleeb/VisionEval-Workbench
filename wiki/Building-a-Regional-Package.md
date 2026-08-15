@@ -63,6 +63,77 @@ Create a JSON crosswalk that lists the Bzones assigned to every official region.
 
 The Virginia generator includes a Bzone in every MPO covering at least 1% of its projected area and reports overlaps below 99% as boundary cases. Those thresholds are a documented Virginia-package method, not a universal policy. Choose and defend an appropriate method for the geography being packaged.
 
+### Virginia source-file examples
+
+The local working folder used while developing the Virginia package contained these source examples:
+
+| Working file | Contents found | How it was used |
+| --- | ---: | --- |
+| `VDOT_MPO_STUDY_AREA_BOUNDARY_….geojson` | 15 polygon features | Supplied the official MPO identifiers, names, and study-area boundaries. |
+| `Azones.geojson` | 133 polygon features | Connected five-digit Virginia locality identifiers to VisionEval Azones. |
+| `Bzones.geojson` | 5,963 polygon features | Supplied the `GEOID` polygons compared with each MPO boundary. |
+| `AzonesBzonesVa_geojson.zip` | The Azone and Bzone GeoJSON files | Preserved the downloaded working copies together. |
+| `MPO_Listing_2023-09-01_acc110623_PM.pdf` | A four-page VDOT MPO/locality listing | Provided a human-readable check of MPO names and member localities. |
+| `Notes and Links.docx` | Links to the ArcGIS and Virginia Roads sources | Recorded where the GIS files had been obtained. |
+
+The full GeoJSON working files are not part of the released ZIP or this repository. They are large, and their publishers' terms do not authorize Workbench to redistribute the raw polygons. The builder instead stores source URLs and a small, reproducible Bzone membership crosswalk.
+
+![Schematic showing how official MPO and VisionEval Bzone GIS layers become the Virginia crosswalk](images/virginia-mpo-crosswalk-workflow.svg)
+
+The diagram is intentionally schematic rather than a reproduction of the restricted source geometry. The source features looked like these shortened examples, with coordinates omitted:
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "OBJECTID": 1,
+    "MPO_ID": "DAN",
+    "MPO_NAME": "Danville Metropolitan Planning Organization",
+    "Code": "4"
+  },
+  "geometry": {"type": "Polygon", "coordinates": ["omitted"]}
+}
+```
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "OBJECTID": 1,
+    "Azones": "51001"
+  },
+  "geometry": {"type": "Polygon", "coordinates": ["omitted"]}
+}
+```
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "OBJECTID": 1,
+    "GEOID": "510310206001"
+  },
+  "geometry": {"type": "Polygon", "coordinates": ["omitted"]}
+}
+```
+
+The generated crosswalk is much smaller than the geometry. For example, its reviewed Fredericksburg record identifies the official MPO, lists 189 selected Bzones, and flags seven boundary cases. A shortened record looks like this:
+
+```json
+{
+  "officialMpoId": "FRED",
+  "officialName": "Fredericksburg Area Metropolitan Planning Organization",
+  "bzones": ["511371101042", "511539011012", "…"],
+  "boundaryBzones": [
+    {"geoid": "511371101042", "overlapRatio": 0.016842}
+  ],
+  "selectedCount": 189,
+  "boundaryCount": 7
+}
+```
+
+These examples show the data roles and identifiers without copying the source polygons. When maintaining the package, obtain current data from the authoritative links recorded in `SOURCES.md` rather than treating an old local download as the authoritative source.
+
 ### Model-template scaffold
 
 Provide a model-neutral template containing at least:
