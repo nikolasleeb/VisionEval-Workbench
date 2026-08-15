@@ -126,3 +126,18 @@ jobs:
           body_path: RELEASE_NOTES.md
           fail_on_unmatched_files: true
           files: release-assets/*
+
+
+  upload-assets:
+    if: inputs.approved_publication == true
+    needs: intel
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: intel-release
+          path: release-assets
+      - name: Upload Intel assets without replacing existing release files
+        run: gh release upload v1.0.0 release-assets/* --repo ${{ github.repository }}
