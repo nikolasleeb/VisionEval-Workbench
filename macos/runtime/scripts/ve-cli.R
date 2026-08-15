@@ -15,7 +15,7 @@ setwd("/")
 
 usage <- function(status = 0L) {
   cat(paste(
-    "VisionEval Workbench VE-40-RC6 + PlanRVA alignment patch ARM64 runtime", "", "Commands:",
+    "VisionEval Workbench VE-40-RC6 + household-ID prediction-ordering patch ARM64 runtime", "", "Commands:",
     "  help", "  doctor", "  verify-upstream-release", "  verify-alignment-patch", "  list",
     "  install-sample [name]", "  run <model> [reset|save]", "  export <model>", "  shell", "",
     "Host workspace contract: /workspace/models, /workspace/runs, /workspace/exchange", sep = "\n"))
@@ -27,7 +27,7 @@ if (command == "doctor") {
   required <- c("VEStart", "VEModel", "VETravelDemandMM")
   missing <- setdiff(required, rownames(installed.packages()))
   release <- if (file.exists("/opt/visioneval/RELEASE")) paste(readLines("/opt/visioneval/RELEASE", warn = FALSE), collapse = "\n") else "release metadata missing"
-  cat("VisionEval runtime: OK\nRelease: VE-40-RC6 + PlanRVA alignment patch\nR:", R.version.string, "\nArchitecture:", R.version$arch, "\nRuntime:", runtime, "\nPackages:", paste(required, collapse = ", "), "\n", release, "\n")
+  cat("VisionEval runtime: OK\nRelease: VE-40-RC6 + household-ID prediction-ordering patch\nR:", R.version.string, "\nArchitecture:", R.version$arch, "\nRuntime:", runtime, "\nPackages:", paste(required, collapse = ", "), "\n", release, "\n")
   if (length(missing)) stop("Missing packages: ", paste(missing, collapse = ", "))
   quit(save = "no", status = 0L)
 }

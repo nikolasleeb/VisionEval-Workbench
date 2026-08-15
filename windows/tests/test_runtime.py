@@ -22,7 +22,7 @@ class FakeRunner:
             return subprocess.CompletedProcess(command, 1, "", "not found")
         if "image" in command and "inspect" in command and "--format" in command and "{{json .Config.Labels}}" in command:
             labels = {
-                "org.opencontainers.image.version": "1.0.0-ve-40-rc6-planrva-arm64",
+                "org.opencontainers.image.version": "1.0.0-ve-40-rc6-household-id-ordering-arm64",
                 "org.opencontainers.image.revision": "workbench-build-revision",
                 "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
                 "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,

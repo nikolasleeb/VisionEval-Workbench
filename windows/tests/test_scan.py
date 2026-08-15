@@ -166,7 +166,7 @@ class ComparisonScanTests(unittest.TestCase):
         write_json(request_path, request)
         scan = subprocess.run([
             shutil.which("docker"), "run", "--rm", "--platform", "linux/arm64", "--entrypoint", "Rscript",
-            "-v", f"{self.workspace.root}:/workspace", "local/visioneval:ve-40-rc6-planrva-arm64",
+            "-v", f"{self.workspace.root}:/workspace", "local/visioneval:ve-40-rc6-household-id-ordering-arm64",
             "/workspace/exchange/comparison_scan.R", "/workspace/exchange/docker-request.json",
             "/workspace/exchange/docker-result.json", "/workspace/exchange/docker-progress.json",
         ], capture_output=True, text=True)

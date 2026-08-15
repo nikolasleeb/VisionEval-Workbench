@@ -10,7 +10,7 @@ Run requires:
 
 - Docker Desktop installed and running.
 - A compatible image present at the saved immutable digest.
-- Successful runtime doctor, pinned VE-40-RC6 provenance verification, and PlanRVA household-ID alignment verification.
+- Successful runtime doctor, pinned VE-40-RC6 provenance verification, and household-ID prediction-ordering verification.
 - A valid project and saved scenario changes.
 
 ## Queued and parallel modes
