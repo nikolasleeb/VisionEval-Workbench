@@ -92,4 +92,4 @@ for (mode in c("Walk", "Bike", "Transit")) {
 }
 write_text(alt_path, alt)
 
-cat("Applied VETravelDemandMM composite household-ID alignment patch.\n")
+cat("Applied VETravelDemandMM household-ID prediction-ordering patch.\n")

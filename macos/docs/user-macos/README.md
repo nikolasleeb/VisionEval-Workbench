@@ -44,7 +44,7 @@ Explore, Create, workspace management, and viewing already registered comparison
 
 ## Current platform
 
-This guide covers Apple Silicon macOS with the Docker ARM64 runtime. Intel Mac is not supported. The unofficial Workbench runtime uses the official VisionEval `VE-40-RC6` source plus the Workbench exact household-ID alignment patch required by PlanRVA. It is not an official VisionEval distribution. See [Setup](setup.md) for the managed runtime install and verified local-build procedures.
+This guide covers Apple Silicon macOS with the Docker ARM64 runtime. Intel Mac is not supported. The unofficial Workbench runtime uses the official VisionEval `VE-40-RC6` source plus a Workbench household-ID prediction-ordering patch for `VETravelDemandMM::DoPredictions`. The patch matches complete household identifiers to preserve the original datastore order. It is not an official VisionEval distribution. See [Setup](setup.md) for the managed runtime install and verified local-build procedures.
 
 The PlanRVA and Virginia packages are installed separately from the application. The DMG and ARM64 runtime are specific to Apple Silicon macOS.
 

@@ -41,8 +41,8 @@ if ((git -C $sourceRoot rev-parse HEAD).Trim() -ne $releaseCommit) { throw "Visi
 
 $installedPatch = & $rscript --vanilla -e ".libPaths(c('$($veLibrary.Replace('\','/'))',.libPaths())); value<-packageDescription('VETravelDemandMM')[['VEAlignmentPatch']]; cat(if(is.null(value)) '' else value)" 2>$null
 if ($installedPatch -ne $patchId) {
-    & $rscript --vanilla (Join-Path $projectRoot "runtime\scripts\apply-planrva-alignment-patch.R") $sourceRoot
-    if ($LASTEXITCODE -ne 0) { throw "The PlanRVA compatibility patch could not be applied." }
+    & $rscript --vanilla (Join-Path $projectRoot "runtime\scripts\apply-household-id-prediction-ordering-patch.R") $sourceRoot
+    if ($LASTEXITCODE -ne 0) { throw "The household-ID prediction-ordering compatibility patch could not be applied." }
     New-Item -ItemType Directory -Force -Path (Join-Path $sourceRoot "sources\optional\VETravelDemandMM\data") | Out-Null
     & $rExecutable CMD INSTALL --no-multiarch "--library=$veLibrary" (Join-Path $sourceRoot "sources\optional\VETravelDemandMM")
     if ($LASTEXITCODE -ne 0) { throw "The patched VETravelDemandMM package could not be installed." }
