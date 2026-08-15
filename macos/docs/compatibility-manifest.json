@@ -15,8 +15,8 @@
   "runtimeImage": {
     "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
     "localAlias": "local/visioneval:1.0.0-arm64",
-    "digest": "sha256:b19208b5788e3c9fbb38b7d81dcdb9f052c349453695b69966cad95e827629b0",
-    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:b19208b5788e3c9fbb38b7d81dcdb9f052c349453695b69966cad95e827629b0",
+    "digest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
+    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
     "immutableTag": "1.0.0-arm64-d1fd4e0205be",
     "buildRevision": "d1fd4e0205bee36d633d24f8ee93ef096cb0008f",
     "published": true,

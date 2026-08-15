@@ -22,7 +22,7 @@
     "workbenchVersion": "1.0.0",
     "visionEvalVersion": "VE-40-RC6",
     "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-    "runtimeDigest": "sha256:b19208b5788e3c9fbb38b7d81dcdb9f052c349453695b69966cad95e827629b0",
+    "runtimeDigest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
     "patch": "2026-08-03-composite-household-id-alignment",
     "architecture": "arm64"
   },
