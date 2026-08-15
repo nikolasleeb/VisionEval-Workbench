@@ -15,7 +15,7 @@ Explore, Create, workspace management, and already cached comparisons work witho
 
 Download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg` from the v1.0.0 GitHub release. Open it and drag **VisionEval Workbench.app** to **Applications**.
 
-Version 2.0.0 test builds are unsigned and not notarized. If macOS says the downloaded application is damaged or cannot be opened, select **Cancel** and run this once in Terminal:
+The v1.0.0 application is ad-hoc signed for bundle integrity but is not Apple-notarized. If macOS says the downloaded application is damaged or cannot be opened, select **Cancel** and run this once in Terminal:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/VisionEval Workbench.app"
