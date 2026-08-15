@@ -1,0 +1,23 @@
+VisionEval Workbench
+Copyright 2026 Nikolas Lee-Bishop
+
+The desktop application bundles MapLibre GL JS 6.0.0 for offline interactive
+maps. MapLibre GL JS is licensed under the BSD 3-Clause License. Its license is
+included at public/vendor/maplibre/LICENSE.txt.
+
+The VisionEval Workbench runtime is an unofficial distribution built from the
+official VisionEval VE-40-RC6 source release at commit
+f7ef3389b5626daeba6c86eeda9d172a0f8cccc2. VisionEval is licensed under the
+Apache License, Version 2.0. Its upstream license and source history are
+preserved in the runtime image.
+
+The runtime contains the unofficial Workbench compatibility patch
+2026-08-03-composite-household-id-alignment. The patch restores predictions to
+the original datastore order using complete household identifiers in
+VETravelDemandMM::DoPredictions and the CalculateHouseholdDvmt and
+CalculateAltModeTrips call paths. This patch and container image are not
+official VisionEval releases and do not imply endorsement by VisionEval.
+
+The bundled PlanRVA MM example contains public regional planning model inputs.
+Those data are distinct from the VisionEval software and are provided as-is,
+without warranty. See resources/examples/planrva-mm/NOTICE.md.

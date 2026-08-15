@@ -1,0 +1,28 @@
+Notes:
+- VisionEval.cnf for VERSPM (single stage)
+- Model Structural Parameters: ScriptsDir, InputDir, ParamDir, GeoFile, ModelParamFile
+- Model Description: Model, Region, State
+- Scenario Description (single stage): Scenario, Description, BaseYear, Years
+
+# Model Structural Parameters
+ScriptsDir     : scripts
+InputDir       : inputs
+ParamDir       : defs
+GeoFile        : geo.csv
+ModelParamFile : model_parameters.json # Located in InputDir
+
+# Model description
+Model          : VERSPM
+Region         : planrva
+State          : VA
+
+# Scenario description (using default or runtime Seed parameter)
+Scenario         : Base
+Description         : Custom-Marea-fed RegionBuilder prototype for planrva
+BaseYear         : 2024
+Years         : [ 2024, 2045 ]
+
+
+
+VELandUse:
+  HighDensityThreshold: 125

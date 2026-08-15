@@ -13,25 +13,27 @@ VisionEval is powerful, but a complete workflow normally involves many folders, 
 3. **Run** validated scenarios through the appropriate VisionEval runtime.
 4. **Compare** completed datastores with tables, charts, maps, and exports.
 
-## Windows and Mac versions
+## Supported editions
 
-| | Windows | Mac |
-|---|---|---|
-| Supported system | Windows 11 x64 | Apple Silicon Mac with macOS 12 or newer |
-| Installer | `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe` | `VisionEval-Workbench-v1.0.0-macos-arm64.dmg` |
-| VisionEval runtime | Connects to an existing native `VE_Runtime`, `VE_HOME`, and compatible R installation | Uses Docker Desktop and the managed ARM64 Workbench runtime image |
-| Docker required | No | Yes, when running models or reading uncached R data |
+| Edition | Supported system | Installer | VisionEval runtime |
+|---|---|---|---|
+| Windows | Windows 11 x64 | `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe` | Existing native `VE_Runtime`, `VE_HOME`, and compatible R installation |
+| Apple Silicon Mac | macOS 12 or newer | `VisionEval-Workbench-v1.0.0-macos-arm64.dmg` | Docker Desktop with the managed ARM64 Workbench runtime |
+| Intel Mac | macOS 12 or newer | `VisionEval-Workbench-v1.0.0-macos-x64.dmg` | Docker Desktop with the managed AMD64 Workbench runtime |
 
-The two applications are maintained separately because their runtime setup and operating-system integration are different. Their source code is available in the [`windows`](windows) and [`macos`](macos) folders.
+The editions are maintained separately because their runtime setup and operating-system integration differ. Their source code is available in the [`windows`](windows), [`macos`](macos), and [`intel`](intel) folders.
 
 ## Download and install
 
 Go to the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
 
 - **Windows:** download `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`, run the installer, and connect Workbench to an existing native VisionEval runtime.
-- **Mac:** download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install and start Docker Desktop before setting up the runtime in Workbench.
+- **Apple Silicon Mac:** download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Apple silicon before setting up the runtime.
+- **Intel Mac:** download `VisionEval-Workbench-v1.0.0-macos-x64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Mac with an Intel chip before setting up the runtime.
 
-The Mac application is ad-hoc signed but is not Apple-notarized. If macOS blocks the first launch, follow the one-time Gatekeeper instructions in the [Mac installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/wiki/macOS-Installation-and-Runtime).
+The release also provides `VisionEval-Workbench-v1.0.0-intel-source.zip`, an exact buildable snapshot of the Intel source tree.
+
+The Mac applications are ad-hoc signed but are not Apple-notarized. If macOS blocks the first launch, follow the one-time Gatekeeper instructions in the matching [Apple Silicon](https://github.com/nikolasleeb/VisionEval-Workbench/wiki/macOS-Installation-and-Runtime) or [Intel](https://github.com/nikolasleeb/VisionEval-Workbench/wiki/Intel-macOS-Installation-and-Runtime) installation guide.
 
 ## Regional packages
 

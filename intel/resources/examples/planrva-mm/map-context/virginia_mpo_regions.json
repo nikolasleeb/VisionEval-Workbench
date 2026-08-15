@@ -1,0 +1,191 @@
+{
+  "schemaVersion": 2,
+  "source": {
+    "title": "Metropolitan Planning Organization and Transportation Management Areas",
+    "publisher": "Virginia Department of Transportation",
+    "publishedOn": "2023-09-01",
+    "url": "https://www.vdot.virginia.gov/media/vdotvirginiagov/doing-business/for-localities/funding-programs/transportation-alternatives/MPO_Listing_2023-09-01_acc110623_PM.pdf"
+  },
+  "regions": [
+    {
+      "id": "bristol-mpo",
+      "name": "Bristol Metropolitan Planning Organization",
+      "shortName": "Bristol MPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "exact-whole-jurisdiction",
+      "azones": ["Bristol City", "Washington County"],
+      "fips": {"51520": "Bristol City", "51191": "Washington County"},
+      "defaultRegionCode": "bristol_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "The Virginia portion includes Bristol City, Abingdon, and Washington County; Abingdon is represented by its containing Washington County Azone."}
+    },
+    {
+      "id": "central-virginia-tpo",
+      "name": "Central Virginia Transportation Planning Organization",
+      "shortName": "CVTPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Lynchburg City", "Amherst County", "Bedford County", "Campbell County"],
+      "fips": {"51680": "Lynchburg City", "51009": "Amherst County", "51019": "Bedford County", "51031": "Campbell County"},
+      "defaultRegionCode": "central_virginia_tpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Amherst, Bedford, and Campbell membership to their urbanized areas; this locality-based build includes each whole county."}
+    },
+    {
+      "id": "charlottesville-albemarle-mpo",
+      "name": "Charlottesville-Albemarle Metropolitan Planning Organization",
+      "shortName": "CA-MPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Charlottesville City", "Albemarle County"],
+      "fips": {"51540": "Charlottesville City", "51003": "Albemarle County"},
+      "defaultRegionCode": "charlottesville_albemarle_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Albemarle membership to its urbanized area; this locality-based build includes the whole county."}
+    },
+    {
+      "id": "danville-pittsylvania-mpo",
+      "name": "Danville-Pittsylvania Metropolitan Planning Organization",
+      "shortName": "DPMPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Danville City", "Pittsylvania County"],
+      "fips": {"51590": "Danville City", "51143": "Pittsylvania County"},
+      "defaultRegionCode": "danville_pittsylvania_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Pittsylvania membership to its urbanized area; this locality-based build includes the whole county."}
+    },
+    {
+      "id": "fredericksburg-area-mpo",
+      "name": "Fredericksburg Area Metropolitan Planning Organization",
+      "shortName": "FAMPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "exact-whole-jurisdiction",
+      "azones": ["Fredericksburg City", "Spotsylvania County", "Stafford County"],
+      "fips": {"51630": "Fredericksburg City", "51177": "Spotsylvania County", "51179": "Stafford County"},
+      "defaultRegionCode": "fredericksburg_area_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT lists Fredericksburg City, Spotsylvania County, and Stafford County."}
+    },
+    {
+      "id": "hampton-roads-tpo",
+      "name": "Hampton Roads Transportation Planning Organization",
+      "shortName": "HRTPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Chesapeake City", "Hampton City", "Newport News City", "Norfolk City", "Portsmouth City", "Poquoson City", "Suffolk City", "Virginia Beach City", "Williamsburg City", "Isle of Wight County", "James City County", "York County", "Franklin City", "Gloucester County", "Southampton County"],
+      "fips": {"51550": "Chesapeake City", "51650": "Hampton City", "51700": "Newport News City", "51710": "Norfolk City", "51740": "Portsmouth City", "51735": "Poquoson City", "51800": "Suffolk City", "51810": "Virginia Beach City", "51830": "Williamsburg City", "51093": "Isle of Wight County", "51095": "James City County", "51199": "York County", "51620": "Franklin City", "51073": "Gloucester County", "51175": "Southampton County"},
+      "defaultRegionCode": "hampton_roads_tpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Franklin City, Gloucester County, and Southampton County membership to urbanized areas; this locality-based build includes each whole locality."}
+    },
+    {
+      "id": "harrisonburg-rockingham-mpo",
+      "name": "Harrisonburg-Rockingham Metropolitan Planning Organization",
+      "shortName": "HRMPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Harrisonburg City", "Rockingham County"],
+      "fips": {"51660": "Harrisonburg City", "51165": "Rockingham County"},
+      "defaultRegionCode": "harrisonburg_rockingham_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "Bridgewater, Dayton, and Mount Crawford are represented by Rockingham County; VDOT limits county membership to its urbanized area, while this build includes the whole county."}
+    },
+    {
+      "id": "kingsport-mpo",
+      "name": "Kingsport Metropolitan Planning Organization",
+      "shortName": "Kingsport MPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "exact-whole-jurisdiction",
+      "azones": ["Scott County"],
+      "fips": {"51169": "Scott County"},
+      "defaultRegionCode": "kingsport_mpo_va",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "The Virginia portion lists Gate City, Weber City, and Scott County; the towns are represented by their containing Scott County Azone."}
+    },
+    {
+      "id": "national-capital-region-tpb",
+      "name": "National Capital Region Transportation Planning Board",
+      "shortName": "TPB",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Alexandria City", "Fairfax City", "Falls Church City", "Manassas City", "Manassas Park City", "Arlington County", "Fairfax County", "Loudoun County", "Prince William County", "Fauquier County"],
+      "fips": {"51510": "Alexandria City", "51600": "Fairfax City", "51610": "Falls Church City", "51683": "Manassas City", "51685": "Manassas Park City", "51013": "Arlington County", "51059": "Fairfax County", "51107": "Loudoun County", "51153": "Prince William County", "51061": "Fauquier County"},
+      "defaultRegionCode": "national_capital_region_tpb",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Fauquier membership to its urbanized area; this locality-based build includes the whole county."}
+    },
+    {
+      "id": "new-river-valley-mpo",
+      "name": "New River Valley Metropolitan Planning Organization",
+      "shortName": "NRVMPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Radford City", "Montgomery County", "Pulaski County"],
+      "fips": {"51750": "Radford City", "51121": "Montgomery County", "51155": "Pulaski County"},
+      "defaultRegionCode": "new_river_valley_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "Blacksburg and Christiansburg are represented by Montgomery County; VDOT limits Montgomery and Pulaski membership to urbanized areas, while this build includes both whole counties."}
+    },
+    {
+      "id": "richmond-regional-tpo",
+      "name": "Richmond Regional Transportation Planning Organization",
+      "shortName": "PlanRVA TPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Richmond City", "Hanover County", "Henrico County", "Chesterfield County", "Charles City County", "Goochland County", "New Kent County", "Powhatan County"],
+      "fips": {"51760": "Richmond City", "51085": "Hanover County", "51087": "Henrico County", "51041": "Chesterfield County", "51036": "Charles City County", "51075": "Goochland County", "51127": "New Kent County", "51145": "Powhatan County"},
+      "defaultRegionCode": "richmond_regional_tpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "Ashland is represented by Hanover County. VDOT describes partial urbanized-area membership for Chesterfield, Charles City, Goochland, New Kent, and Powhatan; this locality-based build includes each whole county."}
+    },
+    {
+      "id": "roanoke-valley-tpo",
+      "name": "Roanoke Valley Transportation Planning Organization",
+      "shortName": "RVTPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Roanoke City", "Salem City", "Bedford County", "Botetourt County", "Roanoke County", "Montgomery County"],
+      "fips": {"51770": "Roanoke City", "51775": "Salem City", "51019": "Bedford County", "51023": "Botetourt County", "51161": "Roanoke County", "51121": "Montgomery County"},
+      "defaultRegionCode": "roanoke_valley_tpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "Vinton is represented by Roanoke County. VDOT limits all listed counties to urbanized areas; this locality-based build includes each whole county."}
+    },
+    {
+      "id": "staunton-augusta-waynesboro-mpo",
+      "name": "Staunton Augusta Waynesboro Metropolitan Planning Organization",
+      "shortName": "SAWMPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Staunton City", "Waynesboro City", "Augusta County"],
+      "fips": {"51790": "Staunton City", "51820": "Waynesboro City", "51015": "Augusta County"},
+      "defaultRegionCode": "staunton_augusta_waynesboro_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT limits Augusta membership to its urbanized area; this locality-based build includes the whole county."}
+    },
+    {
+      "id": "tri-cities-area-mpo",
+      "name": "Tri-Cities Area Metropolitan Planning Organization",
+      "shortName": "Tri-Cities MPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "whole-jurisdiction-approximation",
+      "azones": ["Colonial Heights City", "Hopewell City", "Petersburg City", "Chesterfield County", "Dinwiddie County", "Prince George County"],
+      "fips": {"51570": "Colonial Heights City", "51670": "Hopewell City", "51730": "Petersburg City", "51041": "Chesterfield County", "51053": "Dinwiddie County", "51149": "Prince George County"},
+      "defaultRegionCode": "tri_cities_area_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "VDOT describes partial or urbanized-area membership for Chesterfield, Dinwiddie, and Prince George; this locality-based build includes each whole county."}
+    },
+    {
+      "id": "winchester-frederick-county-mpo",
+      "name": "Winchester-Frederick County Metropolitan Planning Organization",
+      "shortName": "WinFred MPO",
+      "selectionMethod": "azone_list",
+      "definitionQuality": "exact-whole-jurisdiction",
+      "azones": ["Winchester City", "Frederick County"],
+      "fips": {"51840": "Winchester City", "51069": "Frederick County"},
+      "defaultRegionCode": "winchester_frederick_county_mpo",
+      "state": "VA",
+      "provenance": {"source": "VDOT MPO Listing", "recordedOn": "2026-08-05", "note": "Stephens City is represented by its containing Frederick County Azone."}
+    }
+  ]
+}

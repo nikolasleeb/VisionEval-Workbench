@@ -6,6 +6,8 @@
 - macOS 12 or newer
 - Docker Desktop for Apple Silicon when running models or reading uncached R data
 
+Intel Mac users should follow [Intel macOS Installation and Runtime](Intel-macOS-Installation-and-Runtime) instead.
+
 ## Install Workbench
 
 1. Open the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).

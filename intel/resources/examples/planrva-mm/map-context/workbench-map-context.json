@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "type": "map-context",
+  "id": "planrva-virginia-map-context",
+  "name": "PlanRVA Virginia Map Context",
+  "version": "2026.08.05.1",
+  "coverage": "Virginia",
+  "componentOf": "planrva-mm-v1",
+  "compatibleTemplateIds": [
+    "template-planrva-mm-8f140cd4cb"
+  ],
+  "description": "Statewide Virginia context geometry for PlanRVA comparison maps. Values and data exports remain limited to geography represented by the compared PlanRVA results.",
+  "builder": {
+    "kind": "statewide-map-context",
+    "regionsPath": "virginia_mpo_regions.json",
+    "crosswalkPath": "virginia_mpo_bzone_crosswalk.json",
+    "localitiesPath": "virginia_county_equivalents_2020.txt"
+  },
+  "comparisonMap": {
+    "enabled": true,
+    "jurisdictionLabel": "Virginia",
+    "fullExtentLabel": "Virginia",
+    "modeledScope": "result-geography",
+    "geographies": [
+      {
+        "id": "county",
+        "label": "County / locality",
+        "geometry": "azone",
+        "identifier": "FIPS",
+        "technicalLevel": "Azone"
+      },
+      {
+        "id": "bzone",
+        "label": "Bzone",
+        "geometry": "bzone",
+        "identifier": "GEOID",
+        "technicalLevel": "Bzone"
+      }
+    ]
+  },
+  "sourcesDocument": "SOURCES.md"
+}

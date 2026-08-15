@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict'),path=require('node:path');
+require(path.join(__dirname,'..','public','extrusion-borders.js'));
+const borders=global.WorkbenchExtrusionBorders,maplibregl={MercatorCoordinate:{fromLngLat:([lng,lat],height)=>({x:lng,y:lat,z:height})}};
+const feature=(direction,height,geometry)=>({type:'Feature',properties:{__direction:direction,__height:height},geometry});
+const polygon=feature('increase',40,{type:'Polygon',coordinates:[[[0,0],[2,0],[2,2],[0,2],[0,0]],[[.5,.5],[1,.5],[1,1],[.5,.5]]]});
+const multipart=feature('decrease',20,{type:'MultiPolygon',coordinates:[[[[3,0],[4,0],[4,1],[3,0]]],[[[5,0],[6,0],[6,1],[5,0]]]]});
+const mesh=borders.buildMesh([polygon,multipart],maplibregl,'#243244');
+assert(mesh.indices.length>0,'creates elevated border segments');
+assert([...mesh.vertices].some((value)=>value===43),'places polygon border above its extrusion height');
+assert([...mesh.vertices].some((value)=>value===23),'keeps multipart decrease borders at their own height');
+const solidMultipart=borders.buildMesh([feature('increase',20,multipart.geometry)],maplibregl,'#243244');
+const dashedMultipart=borders.buildMesh([multipart],maplibregl,'#243244');
+assert(dashedMultipart.indices.length<solidMultipart.indices.length,'decrease borders use a dashed segment pattern');
+assert.equal(borders.polygons(multipart.geometry).length,2,'includes every multipart component');
+console.log('extrusion border tests passed');

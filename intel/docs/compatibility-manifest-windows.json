@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "releaseStatus": "public",
+  "applicationVersion": "1.0.0",
+  "releaseDate": "August 14, 2026",
+  "platform": "Windows",
+  "architecture": "x86_64",
+  "runtimeAdapter": "native-ve-runtime",
+  "runtime": {
+    "selection": "user-selected VE_RUNTIME",
+    "requiredPaths": ["VE_RUNTIME", "VE_HOME", "Rscript.exe"],
+    "verification": "functional compatibility checks",
+    "dockerRequired": false,
+    "bundled": false
+  },
+  "comparisonMap3d": {
+    "default": "enabled",
+    "releaseRequirement": "frozen WebView2 smoke test must pass"
+  },
+  "github": "https://github.com/nikolasleeb/VisionEval-Workbench"
+}

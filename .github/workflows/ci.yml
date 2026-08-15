@@ -82,3 +82,43 @@ jobs:
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-macos
           cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  intel-source:
+    runs-on: macos-15-intel
+    defaults:
+      run:
+        working-directory: intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: intel/packaging/requirements-backend.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: intel/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin
+      - run: python3 -m pip install -r packaging/requirements-backend.txt
+      - run: npm ci
+        working-directory: intel/desktop
+      - name: Validate Intel source
+        run: |
+          test "$(uname -m)" = "x86_64"
+          python3 packaging/update_runtime_publication.py --check
+          python3 packaging/build_bundled_assets.py --check
+          python3 packaging/build_user_guide.py --check
+          python3 packaging/check_documentation.py
+          python3 packaging/check_renderer_assets.py
+          python3 -m unittest discover -s tests
+          node --check public/app.js
+          node tests/polygon-labels.test.js
+          node tests/extrusion-borders.test.js
+          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+          python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-intel --target-triple x86_64-apple-darwin
+          file desktop/src-tauri/binaries/visioneval-workbench-backend-x86_64-apple-darwin | grep x86_64
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target x86_64-apple-darwin

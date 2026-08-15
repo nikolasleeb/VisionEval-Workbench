@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "releaseStatus": "pending-runtime-publication",
+  "applicationVersion": "1.0.0",
+  "releaseDate": "August 14, 2026",
+  "developedBy": "Nikolas Lee Bishop",
+  "github": "https://github.com/nikolasleeb/VisionEval-Workbench",
+  "supported": [
+    {"platform": "Windows", "architecture": "x86_64", "runtimeAdapter": "native-ve-runtime", "status": "released"},
+    {"platform": "macOS", "architecture": "x86_64", "runtimeAdapter": "docker", "status": "pending-runtime-publication"}
+  ],
+  "visionEvalVersion": "VE-40-RC6",
+  "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
+  "rVersion": "4.5.1",
+  "runtimeImage": {
+    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
+    "localAlias": "local/visioneval:1.0.0-amd64",
+    "architecture": "linux/amd64",
+    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "immutableTag": "pending",
+    "buildRevision": "pending",
+    "published": false,
+    "distribution": "unofficial-workbench-runtime",
+    "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
+  },
+  "nativeWindowsRuntime": {
+    "selection": "user-selected VE_RUNTIME",
+    "requiredPaths": ["VE_RUNTIME", "VE_HOME", "Rscript.exe"],
+    "verification": "functional compatibility checks",
+    "dockerRequired": false,
+    "bundled": false
+  },
+  "bundledAssets": [{"id": "planrva-mm-v1", "manifest": "resources/examples/planrva-mm/manifest.json", "included": false, "distribution": "separate-package", "package": "planrva-mm.zip"}]
+}

@@ -1,0 +1,17 @@
+{
+  "name": "visioneval-workbench-desktop",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build:backend": "bash ../packaging/build-backend.sh",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.1"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1"
+  }
+}

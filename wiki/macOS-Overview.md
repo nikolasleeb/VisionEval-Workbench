@@ -1,6 +1,6 @@
 # macOS Overview
 
-The Mac edition supports Apple Silicon Macs running macOS 12 or newer. Intel Macs have not been validated.
+This edition supports Apple Silicon Macs running macOS 12 or newer. Intel users should install the separate [Intel macOS edition](Intel-macOS-Overview).
 
 Workbench stores projects, scenarios, packages, logs, and results in a separate workspace. Docker Desktop supplies the isolated ARM64 VisionEval runtime used for model runs and uncached R datastore access. Containers are temporary and are created only when required.
 
