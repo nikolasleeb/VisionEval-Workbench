@@ -6,8 +6,8 @@ This is the first public release of the clean VisionEval Workbench repository. I
 
 - **Windows 11 x64:** `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`
 - **Apple Silicon macOS:** `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`
-- **PlanRVA model package:** `planrva-mm-1.0.0.zip`
-- **Virginia MPO regional package:** `virginia-mpo-regions-2026.08.12.3.zip`
+- **PlanRVA model package:** `planrva-mm.zip`
+- **Virginia MPO regional package:** `virginia-mpo-regions.zip`
 
 Exact platform source snapshots are also attached. GitHub additionally supplies automatic source archives for the full repository.
 

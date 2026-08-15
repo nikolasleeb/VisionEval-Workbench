@@ -30,5 +30,5 @@
     "dockerRequired": false,
     "bundled": false
   },
-  "bundledAssets": [{"id": "planrva-mm-v1", "manifest": "resources/examples/planrva-mm/manifest.json", "included": false, "distribution": "separate-package", "package": "planrva-mm-1.0.0.zip"}]
+  "bundledAssets": [{"id": "planrva-mm-v1", "manifest": "resources/examples/planrva-mm/manifest.json", "included": false, "distribution": "separate-package", "package": "planrva-mm.zip"}]
 }

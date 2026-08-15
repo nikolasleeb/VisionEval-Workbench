@@ -4,11 +4,11 @@ Release 1.0.0 includes two optional ZIP packages. They work with both desktop ed
 
 ## PlanRVA MM
 
-`planrva-mm-1.0.0.zip` contains the PlanRVA multimodal model template, matching InputLibrary, and comparison map context. It is intended as a ready-to-use regional model bundle.
+`planrva-mm.zip` contains the PlanRVA multimodal model template, matching InputLibrary, and comparison map context. It is intended as a ready-to-use regional model bundle.
 
 ## Virginia MPO Regional Data
 
-`virginia-mpo-regions-2026.08.12.3.zip` contains statewide input data, official VDOT MPO boundaries joined to VisionEval Bzones, and the resources used by Region Builder to create MPO or custom regional assets.
+`virginia-mpo-regions.zip` contains statewide input data, official VDOT MPO boundaries joined to VisionEval Bzones, and the resources used by Region Builder to create MPO or custom regional assets.
 
 ## Install a package
 

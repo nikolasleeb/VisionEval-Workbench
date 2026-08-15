@@ -27,7 +27,7 @@ def sha256(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=ROOT / f"dist/packages/planrva-mm-{VERSION}.zip")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist/packages/planrva-mm.zip")
     args = parser.parse_args()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
