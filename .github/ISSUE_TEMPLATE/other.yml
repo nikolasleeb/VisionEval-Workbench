@@ -1,0 +1,24 @@
+name: Other issue
+description: Ask a question or report something that does not fit the other forms
+title: "[Other] "
+labels: []
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Select the platform involved, if applicable.
+      options:
+        - Windows 11 x64
+        - Apple Silicon macOS
+        - Both platforms
+        - Not platform-specific
+    validations:
+      required: false
+  - type: textarea
+    id: subject
+    attributes:
+      label: What would you like help with or report?
+      description: Please provide enough detail for someone to understand and respond.
+    validations:
+      required: true
