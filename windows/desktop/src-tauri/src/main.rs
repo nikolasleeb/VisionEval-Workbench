@@ -830,7 +830,8 @@ fn migrate_runtime_profiles(config: &mut DesktopConfig) -> bool {
     let supported_adapter = "native";
     #[cfg(not(target_os = "windows"))]
     let supported_adapter = "docker";
-    let disabled_message = "Runtime setup changed in Workbench 2.0. Verify the supported runtime before running models.";
+    let disabled_message =
+        "Runtime setup has changed. Verify the supported runtime before running models.";
     for profile in &mut config.runtime_profiles {
         let invalid_windows_native = cfg!(target_os = "windows")
             && profile.adapter == "native"

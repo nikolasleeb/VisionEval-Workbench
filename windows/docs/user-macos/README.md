@@ -1,6 +1,6 @@
 ﻿# VisionEval Workbench User Guide
 
-VisionEval Workbench 2.1 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, and comparing the resulting datastores. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
+VisionEval Workbench 1.0.0 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, and comparing the resulting datastores. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
 
 The normal workflow has four parts:
 

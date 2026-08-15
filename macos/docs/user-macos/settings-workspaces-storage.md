@@ -38,7 +38,7 @@ Choose System, Light, or Dark. System follows macOS appearance.
 
 Runtime shows Docker status, saved image reference/digest, verification, and repair actions. Long image references and digests wrap within the panel; **Copy Digest** copies the complete immutable value. Automatic memory mode applies no additional Workbench cap; Docker Desktop's own allocation controls available memory. An advanced per-container limit affects new jobs only.
 
-The panel verifies the release tag, source commit, unofficial compatibility-patch identity, and immutable image digest. Workbench 2.1 can install the compatible GHCR runtime image for you and then verifies that exact image before Run is enabled.
+The panel verifies the release tag, source commit, unofficial compatibility-patch identity, and immutable image digest. Workbench 1.0.0 can install the compatible GHCR runtime image for you and then verifies that exact image before Run is enabled.
 
 When Docker Desktop is stopped, Workbench can launch the installed application, wait for its engine, and verify the pinned runtime when available. It does not quit Docker Desktop or stop unrelated containers.
 

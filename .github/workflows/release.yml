@@ -21,6 +21,10 @@ jobs:
     if: inputs.approved_publication == true
     runs-on: windows-latest
     timeout-minutes: 90
+    env:
+      PYTHON: python
+      WORKBENCH_DOCUMENTATION_SOURCE: docs/user
+      WORKBENCH_COMPARISON_MAP_3D: enabled
     defaults:
       run:
         working-directory: windows

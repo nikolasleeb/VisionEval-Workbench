@@ -1,11 +1,11 @@
 ﻿# Setup
 
-This page is the setup path for VisionEval Workbench 2.1 on Apple Silicon macOS. Intel Mac is not validated.
+This page is the setup path for VisionEval Workbench 1.0.0 on Apple Silicon macOS. Intel Mac is not validated.
 
 ## What you need
 
 - An Apple Silicon Mac running macOS 12 or newer.
-- VisionEval Workbench 2.1.
+- VisionEval Workbench 1.0.0.
 - Docker Desktop for Apple silicon if you want to run models or read uncached RDA data.
 - The separately distributed PlanRVA package, or another VisionEval InputLibrary and complete runnable model folder for your own project.
 
@@ -56,7 +56,7 @@ Verification automatically runs `doctor`, `verify-upstream-release`, and `verify
 
 ## Advanced: runtime image details
 
-Workbench 2.1 expects this local image name:
+Workbench 1.0.0 expects this local image name:
 
 `local/visioneval:1.0.0-arm64`
 

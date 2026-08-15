@@ -7,7 +7,7 @@ This repository copy is generated from the same Windows guide bundled with Visio
 
 ## Overview
 
-VisionEval Workbench 2.1 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios, running them through an existing `VE_Runtime`, and comparing completed datastores. Project data remains in the workspace you select.
+VisionEval Workbench 1.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios, running them through an existing `VE_Runtime`, and comparing completed datastores. Project data remains in the workspace you select.
 
 The normal workflow has four parts:
 
@@ -57,7 +57,7 @@ Workbench uses an existing native VisionEval installation. It does not install o
 
 ## What you need
 
-- Windows 11 x64 and VisionEval Workbench 2.1.
+- Windows 11 x64 and VisionEval Workbench 1.0.0.
 - A `VE_RUNTIME` working folder, normally containing `.Renviron`, `.Rprofile`, or a `launch_R*.bat` script.
 - A `VE_HOME` package library containing the required VisionEval packages.
 - A compatible `Rscript.exe`.

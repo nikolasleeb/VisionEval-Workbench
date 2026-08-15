@@ -1,6 +1,6 @@
 # VisionEval Workbench User Guide for Windows
 
-VisionEval Workbench 2.1 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios, running them through an existing `VE_Runtime`, and comparing completed datastores. Project data remains in the workspace you select.
+VisionEval Workbench 1.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios, running them through an existing `VE_Runtime`, and comparing completed datastores. Project data remains in the workspace you select.
 
 The normal workflow has four parts:
 
