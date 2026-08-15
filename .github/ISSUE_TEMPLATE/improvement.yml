@@ -1,0 +1,17 @@
+name: Improvement suggestion
+description: Suggest a clearer or more useful Workbench behavior
+title: "[Improvement] "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What would you like to improve?
+    validations:
+      required: true
+  - type: textarea
+    id: value
+    attributes:
+      label: How would this help?
+    validations:
+      required: true

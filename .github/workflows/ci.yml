@@ -1,0 +1,84 @@
+name: Workbench CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-source:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: windows/packaging/requirements-backend.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: windows/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install -r packaging/requirements-backend.txt
+      - run: npm ci
+        working-directory: windows/desktop
+      - name: Validate Windows source
+        shell: pwsh
+        run: |
+          python packaging/build_bundled_assets.py --check
+          python packaging/build_user_guide.py --check
+          python packaging/build_windows_icon.py --check
+          python packaging/check_documentation.py
+          python packaging/check_renderer_assets.py
+          python -m unittest discover -s tests
+          node --check public/app.js
+          node tests/polygon-labels.test.js
+          node tests/extrusion-borders.test.js
+          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+          python packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml
+
+  macos-source:
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: macos/packaging/requirements-backend.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: macos/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: python3 -m pip install -r packaging/requirements-backend.txt
+      - run: npm ci
+        working-directory: macos/desktop
+      - name: Validate Mac source
+        run: |
+          python3 packaging/build_bundled_assets.py --check
+          python3 packaging/build_user_guide.py --check
+          python3 packaging/check_documentation.py
+          python3 packaging/check_renderer_assets.py
+          python3 -m unittest discover -s tests
+          node --check public/app.js
+          node tests/polygon-labels.test.js
+          node tests/extrusion-borders.test.js
+          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+          python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-macos
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml

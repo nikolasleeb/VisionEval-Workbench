@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "status": "regional-package-source",
+  "recordedOn": "2026-08-05",
+  "purpose": [
+    "shared-geography-map",
+    "virginia-mpo-creation-research"
+  ],
+  "source": {
+    "provider": "ArcGIS Online",
+    "owner": "jsm3f_uvalibrary",
+    "organizationId": "8k2PygHqghVevhzy",
+    "webMap": {
+      "id": "bf7d33b13f074ae3b8f5f6e278c6dd62",
+      "title": "AzonesBzonesVa",
+      "url": "https://www.arcgis.com/home/item.html?id=bf7d33b13f074ae3b8f5f6e278c6dd62",
+      "access": "public",
+      "modifiedEpochMs": 1778080414000
+    },
+    "featureService": {
+      "id": "bfdfaabcb59845fbb6bd51ef392ddbc5",
+      "title": "AzonesBzonesVa_WFL1",
+      "url": "https://services2.arcgis.com/8k2PygHqghVevhzy/arcgis/rest/services/AzonesBzonesVa_WFL1/FeatureServer",
+      "access": "public",
+      "sizeBytes": 62439424,
+      "extentWgs84": [
+        [-83.6753993634641, 36.540859044543694],
+        [-75.16643658326217, 39.46601996752522]
+      ],
+      "sourceSpatialReference": {
+        "wkid": 102100,
+        "latestWkid": 3857
+      },
+      "capabilities": ["Query"],
+      "geoJsonSupported": true,
+      "licenseText": "",
+      "attributionText": ""
+    }
+  },
+  "mpoBoundarySource": {
+    "provider": "Virginia Department of Transportation",
+    "owner": "Ian.Turner@vdot.virginia.gov_VDOT",
+    "itemId": "d1bf64ec02114346aea498b51f1d9594",
+    "title": "VDOT MPO Study Areas",
+    "url": "https://services.arcgis.com/p5v98VHDX9Atv3l7/arcgis/rest/services/VDOT_MPO_STUDY_AREA_BOUNDARY/FeatureServer/1",
+    "identifierFields": ["MPO_ID", "MPO_NAME"],
+    "featureCountObserved": 15,
+    "spatialReference": {"wkid": 4326},
+    "authority": "The service metadata describes these as the current official MPO boundaries and states that VDOT updates the layer as boundaries change.",
+    "productionArtifact": "virginia_mpo_bzone_crosswalk.json"
+  },
+  "layers": [
+    {
+      "role": "bzone",
+      "layerId": 0,
+      "name": "Bzones",
+      "geometryType": "polygon",
+      "featureCountObserved": 5963,
+      "identifierField": "GEOID",
+      "identifierType": "string",
+      "maxRecordCount": 2000,
+      "queryUrl": "https://services2.arcgis.com/8k2PygHqghVevhzy/arcgis/rest/services/AzonesBzonesVa_WFL1/FeatureServer/0/query",
+      "geoJsonQuery": {
+        "where": "1=1",
+        "outFields": "GEOID",
+        "returnGeometry": true,
+        "outSR": 4326,
+        "f": "geojson",
+        "resultOffset": "{offset}",
+        "resultRecordCount": 2000
+      }
+    },
+    {
+      "role": "azone",
+      "layerId": 1,
+      "name": "Azones",
+      "geometryType": "polygon",
+      "featureCountObserved": 133,
+      "identifierField": "Azones",
+      "identifierType": "string",
+      "identifierInterpretation": "Virginia locality FIPS-style code; validate against model defs/geo.csv before use",
+      "maxRecordCount": 2000,
+      "queryUrl": "https://services2.arcgis.com/8k2PygHqghVevhzy/arcgis/rest/services/AzonesBzonesVa_WFL1/FeatureServer/1/query",
+      "geoJsonQuery": {
+        "where": "1=1",
+        "outFields": "Azones",
+        "returnGeometry": true,
+        "outSR": 4326,
+        "f": "geojson",
+        "resultOffset": 0,
+        "resultRecordCount": 2000
+      }
+    }
+  ],
+  "futureImportContract": {
+    "outputFormat": "GeoJSON",
+    "outputCrs": "EPSG:4326",
+    "preserveIdentifiersAsStrings": true,
+    "paginateByResultOffset": true,
+    "validateFeatureCounts": true,
+    "recordSourceModifiedTime": true,
+    "requireSnapshotChecksum": true,
+    "recommendedProductionForm": "simplified, versioned local GeoJSON derived from an approved snapshot"
+  },
+  "constraints": [
+    "The live service can change; production use requires a versioned snapshot and checksum.",
+    "The item currently provides no license or attribution text; approval is required before bundling geometry in a distributed app.",
+    "The Azone/Bzone source does not itself provide MPO membership; Workbench joins it to the separately versioned official VDOT MPO boundary source.",
+    "MPO membership is represented at complete-Bzone resolution, so boundary-crossing Bzones require explicit review.",
+    "Rebuild and review the checked-in crosswalk whenever either ArcGIS source changes.",
+    "Join identifiers to the selected model template's defs/geo.csv before display or selection."
+  ]
+}

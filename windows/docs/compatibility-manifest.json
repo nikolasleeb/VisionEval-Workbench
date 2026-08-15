@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "releaseStatus": "public",
+  "applicationVersion": "1.0.0",
+  "releaseDate": "August 14, 2026",
+  "developedBy": "Nikolas Lee Bishop",
+  "github": "https://github.com/nikolasleeb/VisionEval-Workbench",
+  "supported": [
+    {"platform": "Windows", "architecture": "x86_64", "runtimeAdapter": "native-ve-runtime", "status": "released"},
+    {"platform": "macOS", "architecture": "arm64", "runtimeAdapter": "docker", "status": "released"}
+  ],
+  "visionEvalVersion": "VE-40-RC6",
+  "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
+  "rVersion": "4.5.1",
+  "runtimeImage": {
+    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
+    "localAlias": "local/visioneval:ve-40-rc6-planrva-arm64",
+    "digest": "sha256:03b552b7880bf88eccb8f89544f84ef053319e013c963626f35793bc05e9e4ae",
+    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:03b552b7880bf88eccb8f89544f84ef053319e013c963626f35793bc05e9e4ae",
+    "immutableTag": "ve-40-rc6-planrva-arm64-4fd9ff3f2704",
+    "buildRevision": "4fd9ff3f2704fdfb7a03334dc5bee00df1d4bb19",
+    "published": true,
+    "distribution": "unofficial-workbench-runtime",
+    "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
+  },
+  "nativeWindowsRuntime": {
+    "selection": "user-selected VE_RUNTIME",
+    "requiredPaths": ["VE_RUNTIME", "VE_HOME", "Rscript.exe"],
+    "verification": "functional compatibility checks",
+    "dockerRequired": false,
+    "bundled": false
+  },
+  "bundledAssets": [{"id": "planrva-mm-v1", "manifest": "resources/examples/planrva-mm/manifest.json", "included": false, "distribution": "separate-package", "package": "planrva-mm-1.0.0.zip"}]
+}

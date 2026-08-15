@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>VisionEval Workbench Setup</title>
+  <style>
+    :root{--workbench-viewport-height:100dvh;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#edf2f7;background:#0e1116;color-scheme:dark}
+    *{box-sizing:border-box}html,body{min-height:var(--workbench-viewport-height)}body{margin:0;display:grid;place-items:start center;padding:32px 32px 72px;overflow:auto;background:radial-gradient(circle at top,#162130,#0e1116 55%)}
+    main{width:min(780px,100%);max-height:calc(var(--workbench-viewport-height) - 104px);overflow:auto;background:#151a21;border:1px solid #2b3440;border-radius:18px;padding:34px;box-shadow:0 24px 70px #0008}
+    .brand{color:#65aaff;text-transform:uppercase;letter-spacing:.14em;font-size:12px;font-weight:800}h1{margin:8px 0 8px;font-size:31px}h2{font-size:20px;margin:26px 0 8px}p{color:#a9b6c5;line-height:1.55;margin:7px 0}.path{font-family:ui-monospace,SFMono-Regular,monospace;background:#0e141b;border:1px solid #303b48;padding:12px;border-radius:9px;color:#dce8f4;overflow-wrap:anywhere}.notice{border:1px solid #765d27;background:#2a2415;padding:12px 14px;border-radius:9px;color:#f4d78b;margin:16px 0}.error{border-color:#8d3d46;background:#2c171b;color:#ffb3ba}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}button{border:0;background:#2874c6;color:white;font-weight:750;border-radius:9px;padding:12px 17px;cursor:pointer;font-size:14px}button.secondary{background:#1d2631;border:1px solid #364454}button.danger{background:#a43b45}button:disabled{opacity:.5;cursor:default}.disabled-button-tooltip{position:fixed;z-index:1000;max-width:320px;padding:7px 9px;border:1px solid #364454;border-radius:6px;background:#151a21;color:#edf2f7;box-shadow:0 8px 24px #0008;font-size:12px;line-height:1.35;pointer-events:none}.workspace-create{display:grid;gap:10px;margin-top:24px;padding:18px;border:1px solid #2b3440;border-radius:11px;background:#111820}.workspace-create h2{margin:0}.destination-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center}.destination-row .path{min-width:0}.workspace-actions{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.existing-workspace{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:20px;padding-top:18px;border-top:1px solid #2b3440}.existing-workspace h2{margin:0}.existing-workspace p{margin:2px 0 0}.existing-workspace button{flex:none}.recent-workspaces{margin-top:22px;border-top:1px solid #2b3440;padding-top:16px}.recent-workspaces summary{cursor:pointer;font-weight:750;color:#edf2f7}.recent-workspaces[open] summary{margin-bottom:12px}#status{margin-top:16px;color:#cbd5df;min-height:24px}.small{font-size:13px}.recovery-list{display:grid;gap:6px}.recent{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;background:#111820;border:1px solid #2b3440;border-radius:8px;padding:8px 10px}.recent span{min-width:0;overflow-wrap:anywhere}.recent button{padding:8px 13px}
+    @media(max-width:620px){body{padding:14px 14px 48px}main{max-height:calc(var(--workbench-viewport-height) - 62px);padding:24px}.destination-row,.existing-workspace{grid-template-columns:1fr;display:grid}.workspace-actions{align-items:stretch}.workspace-actions button,.existing-workspace button{width:100%}}
+  </style>
+</head>
+<body>
+<main>
+  <div class="brand">VisionEval Workbench</div>
+  <section id="welcome">
+    <h1>Welcome to your Workbench</h1>
+    <p>Your workspace holds model templates, input libraries, projects, run logs, and results. It is separate from the application so upgrades never replace your work.</p>
+    <section class="workspace-create">
+      <h2 id="workspaceTitle">Create a workspace</h2>
+      <p>Use the recommended File Explorer-visible folder or choose another location.</p>
+      <div class="destination-row"><div id="recommendedPath" class="path"></div><button id="another" class="secondary">Change location…</button></div>
+      <div class="workspace-actions"><span class="small">This folder will contain your projects, assets, runs, and results.</span><button id="recommended">Create workspace</button></div>
+    </section>
+    <div id="existingNotice" class="notice" hidden></div>
+    <div id="missingNotice" class="notice error" hidden></div>
+    <div id="recoveryActions" class="actions" hidden>
+      <button id="moveExisting" hidden>Move Existing Workspace Here</button>
+      <button id="openCurrent" hidden class="secondary">Open Existing Workspace</button>
+      <button id="retry" class="secondary" hidden>Retry Saved Workspace</button>
+    </div>
+    <section class="existing-workspace"><div><h2>Already have a workspace?</h2><p>Open it without moving or replacing its projects, assets, runs, or results.</p></div><button id="existing" class="secondary">Open existing workspace…</button></section>
+    <details id="recentSection" class="recent-workspaces" hidden><summary id="recentSummary">Other workspaces</summary><p class="small">Use separate workspaces only when you need isolated projects and assets.</p><div id="recent" class="recovery-list"></div></details>
+    <div id="status" role="status"></div>
+  </section>
+</main>
+<script>
+function syncWorkbenchViewport(){const height=Math.max(320,Math.round(window.visualViewport?.height||window.innerHeight||document.documentElement.clientHeight));document.documentElement.style.setProperty('--workbench-viewport-height',`${height}px`)}
+syncWorkbenchViewport();window.visualViewport?.addEventListener('resize',syncWorkbenchViewport);window.visualViewport?.addEventListener('scroll',syncWorkbenchViewport);window.addEventListener('resize',syncWorkbenchViewport);
+const invoke=(command,args={})=>window.__TAURI_INTERNALS__.invoke(command,args);
+const $=(id)=>document.getElementById(id); let desktop=null,destination="";
+function escapeHtml(value){return String(value??"").replace(/[&<>'"]/g,(char)=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[char]))}
+function displayPath(path){const recommended=desktop?.recommendedWorkspaceRoot||"",suffix="/VisionEval Workbench Workspace",home=recommended.endsWith(suffix)?recommended.slice(0,-suffix.length):"";return home&&path.startsWith(home+"/")?`~${path.slice(home.length)}`:path}
+function renderDestination(path){destination=path;$('recommendedPath').textContent=displayPath(path);$('recommendedPath').title=path}
+function setStatus(message,error=false){$("status").textContent=message;$("status").style.color=error?"#ff9ca6":"#cbd5df"}
+function setButtonAvailability(button,enabled,reason=""){if(!button)return;button.disabled=!enabled;if(enabled){delete button.dataset.disabledReason;button.removeAttribute("aria-description");if(button.dataset.disabledTitle==="true")button.removeAttribute("title");delete button.dataset.disabledTitle;return}const message=reason||"This action is unavailable until setup requirements are met.";button.dataset.disabledReason=message;button.setAttribute("aria-description",message);if(!button.title||button.dataset.disabledTitle==="true"){button.title=message;button.dataset.disabledTitle="true"}}
+function busy(value,reason="Workbench is starting. Please wait."){document.querySelectorAll("button").forEach(button=>{if(value){button.dataset.preBusyDisabled=button.disabled?"true":"false";button.dataset.preBusyReason=button.dataset.disabledReason||"";setButtonAvailability(button,false,reason)}else{const disabled=button.dataset.preBusyDisabled==="true";setButtonAvailability(button,!disabled,button.dataset.preBusyReason||"This action is currently unavailable.");delete button.dataset.preBusyDisabled;delete button.dataset.preBusyReason}})}
+function installDisabledGuidance(){const tooltip=document.createElement("div");tooltip.className="disabled-button-tooltip";tooltip.hidden=true;tooltip.setAttribute("role","tooltip");document.body.appendChild(tooltip);const hide=()=>tooltip.hidden=true;document.addEventListener("pointermove",event=>{const button=event.target instanceof Element?event.target.closest("button:disabled"):null;if(!button){hide();return}if(!button.dataset.disabledReason)setButtonAvailability(button,false,button.title||"This action is currently unavailable.");tooltip.textContent=button.dataset.disabledReason;tooltip.hidden=false;const rect=button.getBoundingClientRect(),tip=tooltip.getBoundingClientRect();tooltip.style.left=`${Math.max(10,Math.min(innerWidth-tip.width-10,rect.left+rect.width/2-tip.width/2))}px`;tooltip.style.top=`${Math.max(10,rect.top-tip.height-8)}px`},true);document.addEventListener("keydown",event=>{if(event.key==="Escape")hide()})}
+installDisabledGuidance();
+async function boot(){busy(true);setStatus("Starting local Workbench services…");try{if(desktop?.autoStartDocker!==false){setStatus("Starting Docker Desktop…");try{await invoke("start_docker_desktop")}catch(error){console.warn("Docker Desktop startup was skipped:",error)}setStatus("Starting local Workbench services…")}const url=await invoke("start_backend");window.location.replace(url)}catch(error){busy(false);setStatus(`Could not start Workbench: ${error}`,true)}}
+function render(value){
+  desktop=value;renderDestination(destination||value.recommendedWorkspaceRoot);
+  const legacy=value.configured&&value.workspaceValid&&value.onboardingVersion<1;
+  $("existingNotice").hidden=!legacy;
+  if(legacy){const blocked=value.blockingJobCount||0;$("existingNotice").innerHTML=`An existing Workbench workspace was found at:<div class="path" style="margin-top:8px">${value.workspaceRoot}</div>${blocked?`It contains <strong>${blocked} active or waiting jobs</strong>. Open it to finish or remove those jobs before moving. They will not start until the runtime is explicitly verified.`:"Your projects and results can be moved together to the recommended location."}`;$("moveExisting").hidden=value.workspaceRoot===value.recommendedWorkspaceRoot;setButtonAvailability($("moveExisting"),blocked===0,`${blocked} active or waiting job${blocked===1?"":"s"} must finish or be removed before moving this workspace.`);$("openCurrent").hidden=false;$("recoveryActions").hidden=false;$("recommended").textContent="Create new workspace"}
+  $("missingNotice").hidden=!(value.configured&&!value.workspaceValid);
+  if(value.configured&&!value.workspaceValid){$("workspaceTitle").textContent="Workspace recovery required";$("missingNotice").textContent=value.workspaceStatus;$("retry").hidden=false;$("recoveryActions").hidden=false;$("recommended").textContent="Create workspace"}
+  const recents=(value.recentWorkspaces||[]).filter(item=>!item.current);$("recentSection").hidden=!recents.length;$("recentSummary").textContent=`Other workspaces (${recents.length})`;
+  $("recent").innerHTML=recents.map((item,i)=>`<div class="recent"><span><strong>${escapeHtml(item.name)}</strong><br><span class="small" title="${escapeHtml(item.path)}">${escapeHtml(item.displayPath||item.path)}</span></span><button class="secondary" data-recent="${i}" ${item.valid?'':`disabled data-disabled-reason="${escapeHtml(item.exists?"This folder is not a valid Workbench workspace.":"This workspace folder no longer exists.")}"`}>Open</button></div>`).join("");
+  document.querySelectorAll("[data-recent]").forEach(button=>button.onclick=async()=>selectRecent(recents[Number(button.dataset.recent)].path));
+}
+async function refresh(){try{if(await invoke("renderer_smoke_mode")){busy(true);setStatus("Starting frozen renderer smoke test…");const url=await invoke("start_backend");window.location.replace(`${url}/map3d-smoke.html`);return}const value=await invoke("desktop_state");render(value);if(value.configured&&value.workspaceValid&&value.onboardingVersion>=1)await boot()}catch(error){setStatus(String(error),true)}}
+async function action(callback,message){busy(true);setStatus(message);try{await callback();await boot()}catch(error){busy(false);setStatus(String(error),true)}}
+$("recommended").onclick=()=>action(()=>invoke("create_workspace",{path:destination}),"Creating workspace…");
+$("moveExisting").onclick=()=>action(()=>invoke("move_workspace",{destination:desktop.recommendedWorkspaceRoot}),"Moving and verifying your existing workspace. This may take a moment…");
+$("openCurrent").onclick=()=>boot();
+$("existing").onclick=()=>action(()=>invoke("choose_workspace"),"Validating the selected workspace…");
+$("another").onclick=async()=>{try{const path=await invoke("choose_workspace_destination");if(path)renderDestination(path)}catch(error){setStatus(String(error),true)}};
+$("retry").onclick=async()=>{const value=await invoke("desktop_state");if(value.workspaceValid)boot();else setStatus(value.workspaceStatus,true)};
+async function selectRecent(path){await action(()=>invoke("switch_workspace",{path}),"Opening workspace…")}
+window.addEventListener("visioneval-menu-action",event=>{if(event.detail==="settings")setStatus("Complete workspace setup first. Settings will then be available from the app menu.")});
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,230 @@
+name: Build draft release 1.0.0
+
+on:
+  workflow_dispatch:
+    inputs:
+      approved_publication:
+        description: Build the validated 1.0.0 applications and create a draft release
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: workbench-release-1.0.0
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    if: inputs.approved_publication == true
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Windows release identity
+        shell: pwsh
+        run: |
+          $version = (Get-Content desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne "1.0.0") { throw "Expected Windows version 1.0.0, found $version" }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: windows/packaging/requirements-backend.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: windows/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - run: python -m pip install -r packaging/requirements-backend.txt
+      - run: npm ci
+        working-directory: windows/desktop
+      - name: Validate Windows source
+        shell: pwsh
+        run: |
+          python packaging/build_bundled_assets.py --check
+          python packaging/build_user_guide.py --check
+          python packaging/build_windows_icon.py --check
+          python packaging/check_documentation.py
+          python packaging/check_renderer_assets.py
+          python -m unittest discover -s tests
+          node --check public/app.js
+          node tests/polygon-labels.test.js
+          node tests/extrusion-borders.test.js
+      - name: Build enabled sidecar
+        run: python packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user
+      - name: Test Rust host
+        shell: pwsh
+        run: |
+          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Build frozen renderer candidate
+        run: npm run tauri:build -- --no-bundle
+        working-directory: windows/desktop
+      - name: Run frozen WebView2 smoke gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $smokeRoot = Join-Path $PWD "build/renderer-smoke"
+          $workspace = Join-Path $smokeRoot "workspace"
+          $report = Join-Path $smokeRoot "report.json"
+          New-Item -ItemType Directory -Force $workspace | Out-Null
+          $env:WORKBENCH_RENDERER_SMOKE = "1"
+          $env:WORKBENCH_RENDERER_SMOKE_REPORT = $report
+          $env:WORKBENCH_SMOKE_WORKSPACE = $workspace
+          $candidate = Join-Path $PWD "desktop/src-tauri/target/release/visioneval-workbench.exe"
+          $process = Start-Process -FilePath $candidate -PassThru -WindowStyle Hidden
+          $timedOut = $false
+          try { Wait-Process -Id $process.Id -Timeout 120 -ErrorAction Stop } catch { $timedOut = $true; Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue }
+          if ($timedOut -or -not (Test-Path $report) -or -not ((Get-Content $report -Raw | ConvertFrom-Json).success)) {
+            throw "The frozen WebView2 smoke gate did not pass"
+          }
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          python packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user
+          Push-Location desktop
+          try { npm run tauri:build -- --bundles nsis } finally { Pop-Location }
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          $source = Get-ChildItem desktop/src-tauri/target/release/bundle/nsis -Filter *.exe | Select-Object -First 1
+          if (-not $source) { throw "NSIS installer was not produced" }
+          Copy-Item $source.FullName release-assets/VisionEval-Workbench-v1.0.0-windows-x64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: windows/release-assets/VisionEval-Workbench-v1.0.0-windows-x64-setup.exe
+          if-no-files-found: error
+
+  macos:
+    if: inputs.approved_publication == true
+    runs-on: macos-14
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: macos
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify Mac release identity
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          assert json.loads(Path("desktop/src-tauri/tauri.conf.json").read_text())["version"] == "1.0.0"
+          assert json.loads(Path("docs/user-macos/documentation.json").read_text())["documentationVersion"] == "1.0.0-macos"
+          PY
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: macos/packaging/requirements-backend.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: macos/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - run: python3 -m pip install -r packaging/requirements-backend.txt
+      - run: npm ci
+        working-directory: macos/desktop
+      - name: Validate Mac source
+        run: |
+          python3 packaging/build_bundled_assets.py --check
+          python3 packaging/build_user_guide.py --check
+          python3 packaging/check_documentation.py
+          python3 packaging/check_renderer_assets.py
+          python3 -m unittest discover -s tests
+          node --check public/app.js
+          node tests/polygon-labels.test.js
+          node tests/extrusion-borders.test.js
+          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
+          python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-macos
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml
+      - name: Build ARM64 application
+        env:
+          WORKBENCH_DOCUMENTATION_SOURCE: docs/user-macos
+          WORKBENCH_COMPARISON_MAP_3D: enabled
+        run: npm run tauri:build -- --target aarch64-apple-darwin --bundles app
+        working-directory: macos/desktop
+      - name: Sign and package DMG
+        run: |
+          mkdir -p release-assets
+          SOURCE_APP="$(find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name 'VisionEval Workbench.app' -type d -print -quit)"
+          test -n "$SOURCE_APP"
+          codesign --force --deep --sign - "$SOURCE_APP"
+          codesign --verify --deep --strict --verbose=2 "$SOURCE_APP"
+          DMG_ROOT="$(mktemp -d)"
+          ditto "$SOURCE_APP" "$DMG_ROOT/VisionEval Workbench.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+          hdiutil create -volname "VisionEval Workbench 1.0.0" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-release
+          path: macos/release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
+          if-no-files-found: error
+
+  sources:
+    if: inputs.approved_publication == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package exact platform source snapshots
+        run: |
+          mkdir -p staging/VisionEval-Workbench-v1.0.0-windows-source
+          mkdir -p staging/VisionEval-Workbench-v1.0.0-macos-source
+          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist windows/ staging/VisionEval-Workbench-v1.0.0-windows-source/
+          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist macos/ staging/VisionEval-Workbench-v1.0.0-macos-source/
+          cd staging
+          zip -qr ../VisionEval-Workbench-v1.0.0-windows-source.zip VisionEval-Workbench-v1.0.0-windows-source
+          zip -qr ../VisionEval-Workbench-v1.0.0-macos-source.zip VisionEval-Workbench-v1.0.0-macos-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-releases
+          path: |
+            VisionEval-Workbench-v1.0.0-windows-source.zip
+            VisionEval-Workbench-v1.0.0-macos-source.zip
+          if-no-files-found: error
+
+  draft-release:
+    if: inputs.approved_publication == true
+    needs: [windows, macos, sources]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Verify release files
+        run: |
+          test -f release-assets/VisionEval-Workbench-v1.0.0-windows-x64-setup.exe
+          test -f release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
+          test -f release-assets/VisionEval-Workbench-v1.0.0-windows-source.zip
+          test -f release-assets/VisionEval-Workbench-v1.0.0-macos-source.zip
+          if git ls-remote --exit-code --tags origin refs/tags/v1.0.0 >/dev/null 2>&1; then
+            echo "v1.0.0 already exists; refusing to replace it" >&2
+            exit 1
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          target_commitish: ${{ github.sha }}
+          name: VisionEval Workbench 1.0.0
+          body_path: RELEASE_NOTES.md
+          draft: true
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: release-assets/*

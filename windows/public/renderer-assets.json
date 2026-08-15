@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "assets": [
+    {"path": "vendor/maplibre/maplibre-gl.js", "mime": ["text/javascript", "application/javascript"]},
+    {"path": "vendor/maplibre/maplibre-gl.css", "mime": ["text/css"]},
+    {"path": "vendor/maplibre/LICENSE.txt", "mime": ["text/plain"]},
+    {"path": "vendor/maplibre/README.md", "mime": ["text/markdown", "text/plain"]},
+    {"path": "build-capabilities.js", "mime": ["text/javascript", "application/javascript"]},
+    {"path": "renderer-assets.json", "mime": ["application/json"]},
+    {"path": "map3d-smoke.html", "mime": ["text/html"]},
+    {"path": "map3d-smoke.js", "mime": ["text/javascript", "application/javascript"]},
+    {"path": "extrusion-borders.js", "mime": ["text/javascript", "application/javascript"]}
+  ]
+}

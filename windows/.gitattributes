@@ -1,0 +1,3 @@
+# The bundled asset manifest hashes exact release bytes. Never rewrite these
+# files during checkout, including on Windows-hosted GitHub runners.
+resources/examples/planrva-mm/** -text

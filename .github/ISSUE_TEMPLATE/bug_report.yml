@@ -1,0 +1,31 @@
+name: Bug report
+description: Report unexpected Workbench behavior
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options: [Windows 11 x64, Apple Silicon macOS]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Workbench version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Include what you expected, what happened instead, and the steps to reproduce it.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Runtime, packages, and diagnostics
+      description: Include runtime status, installed packages, and a diagnostic ZIP when possible.

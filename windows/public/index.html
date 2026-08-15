@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VisionEval Workbench</title>
+  <link rel="stylesheet" href="vendor/maplibre/maplibre-gl.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <p class="eyebrow">VisionEval Workbench</p>
+      <h1>Build, run, and understand scenarios</h1>
+    </div>
+    <div class="header-tools">
+      <div class="header-actions">
+        <button id="themeToggle" class="theme-toggle" type="button" aria-label="Switch to light mode" title="Switch to light mode"><span id="themeIcon" aria-hidden="true">☀︎</span><span id="themeLabel">Light mode</span></button>
+        <button id="settingsGear" class="header-icon-button secondary" type="button" aria-label="Open settings" title="Open settings">⚙</button>
+      </div>
+      <div class="header-status"><span id="runtimeDot" class="dot"></span><span id="runtimeSummary">Checking runtime…</span></div>
+    </div>
+  </header>
+
+  <nav class="primary-tabs" aria-label="Workbench">
+    <button class="primary-tab active" data-page="explorePage">1 <span>Explore</span></button>
+    <button class="primary-tab" data-page="createPage">2 <span>Create</span></button>
+    <button class="primary-tab" data-page="runPage">3 <span>Run</span></button>
+    <button class="primary-tab" data-page="comparePage">4 <span>Compare</span></button>
+  </nav>
+
+  <main>
+    <div id="notice" class="notice" hidden></div>
+    <div id="documentationWarning" class="notice error persistent-notice" hidden></div>
+
+    <section id="explorePage" class="page active">
+      <div class="page-heading">
+        <div><p class="eyebrow">Input library</p><h2>Explore</h2><p>Learn what scenario input files and fields mean before deciding what to change.</p></div>
+      </div>
+      <nav class="subtabs explore-subtabs" aria-label="Explore">
+        <button class="subtab active" data-explore-subpage="exploreLibraryPage">Input File Library</button>
+        <button class="subtab" data-explore-subpage="exploreDependencyPage">Dependencies</button>
+      </nav>
+      <section id="exploreLibraryPage" class="explore-subpage active">
+      <div class="notice guidance-notice">Input explanations were developed for a Virginia dataset. They can still help interpret other VisionEval input files, but locally customized inputs may differ.</div>
+      <section class="panel explore-toolbar">
+        <label>Input explanations<select id="exploreExplanations"></select></label>
+        <label>Search files or fields<input id="exploreSearch" type="search" placeholder="Transit, parking, household income…"></label>
+        <span id="exploreCount" class="pill">0 files</span>
+      </section>
+      <section class="explore-layout">
+        <aside class="panel explore-browser">
+          <div class="section-title"><div><p class="step">Inputs</p><h3>Files</h3></div></div>
+          <div id="exploreFiles" class="explore-file-list empty-state">Import an InputLibrary in Settings → Assets to begin.</div>
+        </aside>
+        <section id="exploreDetail" class="explore-detail">
+          <section class="panel empty-state">Select an input file to see its purpose, fields, and explanation.</section>
+        </section>
+      </section>
+      </section>
+      <section id="exploreDependencyPage" class="explore-subpage">
+        <div class="notice guidance-notice">Declared possible effects show a path through the selected model. They do not guarantee that changing an input will numerically change every reachable output.</div>
+        <div id="dependencyMetrics" class="metric-grid dependency-metrics"></div>
+        <section class="panel dependency-toolbar">
+          <label id="dependencyTemplateControl">Model template<select id="dependencyTemplate"></select></label>
+          <label>Focus<select id="dependencyFocusKind"><option value="all">Full model</option><option value="file">Input file</option><option value="input">Input field</option><option value="module">Executed module</option><option value="intermediary">Intermediary</option><option value="output">Stored output</option></select></label>
+          <label>Item<select id="dependencyFocusItem" disabled><option>Full execution path</option></select></label>
+          <button id="dependencyReset" class="secondary" type="button">Show Full Model</button>
+        </section>
+        <section class="panel dependency-panel">
+          <div class="section-title dependency-view-header"><div><p class="step">Execution network</p><h3 id="dependencyTitle">Choose a model template</h3><p id="dependencySummary" class="muted">Inputs → executed modules → datastore intermediaries → stored outputs</p><p class="dependency-instructions">Select a node to focus the chart. Breadcrumbs keep your path as you click through the chain; How produced traces upstream and Where used traces downstream.</p></div><div class="dependency-view-actions"><div class="dependency-search-row"><label class="dependency-search-label">Find node<input id="dependencySearch" type="search" placeholder="Name, table, or package"></label></div><div class="dependency-zoom-row"><button id="dependencyZoomOut" class="secondary" type="button" aria-label="Zoom out">−</button><button id="dependencyZoomIn" class="secondary" type="button" aria-label="Zoom in">+</button><button id="dependencyZoomActual" class="secondary" type="button">100%</button><button id="dependencyZoomFit" class="secondary" type="button">Fit</button></div><div class="dependency-export-row"><button id="dependencyExportSvg" class="secondary" type="button" title="Export an editable SVG vector diagram for documentation or design tools" aria-label="Export an editable SVG vector diagram for documentation or design tools">Export SVG</button><button id="dependencyExportPdf" class="secondary" type="button" title="Export a paginated PDF for printing or sharing" aria-label="Export a paginated PDF for printing or sharing">Export PDF</button><button id="dependencyExportHtml" class="secondary" type="button" title="Export a standalone HTML page that opens in a browser" aria-label="Export a standalone HTML page that opens in a browser">Export HTML</button></div></div></div>
+          <div id="dependencyFocusContext" class="dependency-focus-context" hidden>
+            <nav id="dependencyBreadcrumb" class="dependency-breadcrumb" aria-label="Dependency path"></nav>
+            <div id="dependencyScopeToggle" class="dependency-scope-toggle" role="group" aria-label="Module dependency scope" hidden>
+              <button class="secondary" type="button" data-dependency-scope="path" aria-pressed="false">Selected path</button>
+              <button class="secondary" type="button" data-dependency-scope="context" aria-pressed="false">Full module context</button>
+            </div>
+            <div id="dependencyValueToggle" class="dependency-scope-toggle" role="group" aria-label="Value dependency view" hidden>
+              <button class="secondary" type="button" data-dependency-view="production" aria-pressed="false">How produced</button>
+              <button class="secondary" type="button" data-dependency-view="consumers" aria-pressed="false">Where used</button>
+            </div>
+          </div>
+          <div id="dependencyGraph" class="dependency-graph empty-state">Create region assets in Develop to build a model dependency graph.</div>
+          <div id="dependencyWarnings"></div>
+        </section>
+      </section>
+    </section>
+
+    <section id="createPage" class="page">
+      <div class="page-heading">
+        <div><p class="eyebrow">Scenario design</p><h2>Create</h2><p>Set up a project, edit scenarios, and review every saved change before running.</p></div>
+        <button id="refreshCreate" class="secondary">Refresh</button>
+      </div>
+      <nav class="subtabs create-subtabs" aria-label="Create workflow">
+        <button class="subtab" data-create-subpage="createDevelop">Develop</button>
+        <button class="subtab active" data-create-subpage="createSetup">Setup</button>
+        <button class="subtab" data-create-subpage="createEditor">Editor</button>
+        <button class="subtab" data-create-subpage="createReview">Review</button>
+      </nav>
+
+      <section id="createDevelop" class="create-subpage">
+        <section class="panel stack region-builder-shell">
+          <div class="section-title region-builder-heading"><div><p class="step">Region Builder</p><h3>Develop a region</h3><p id="regionBuilderDescription" class="muted">Install a regional data package to create a runnable VisionEval region.</p></div><div id="regionGeographyModeSwitch" class="segmented region-geography-mode-switch" role="group" aria-label="Region geography view" hidden><button id="useOfficialRegionGeography" type="button" class="active" aria-pressed="true">Official MPO</button><button id="customizeRegionGeography" type="button" aria-pressed="false">Build your own region</button></div></div>
+          <div id="regionBuilderEmpty" class="region-package-empty">
+            <div><strong>No regional data package installed</strong><p class="muted">Regional packages provide region definitions, geography crosswalks, model inputs, and source documentation.</p></div>
+            <div class="button-row package-install-actions"><button id="installRegionPackage" type="button">Choose ZIP…</button><button id="installRegionPackageFolder" type="button" class="secondary">Choose extracted folder…</button></div>
+          </div>
+          <div id="regionBuilderForm" class="stack" hidden>
+            <label id="regionPackageField">Regional package<select id="regionPackage"></select></label>
+            <section id="officialRegionGeographyView" class="region-geography-mode-panel">
+              <label><span id="regionSelectorLabel">Region</span><select id="regionDefinition"></select></label>
+              <p class="muted">Use the regional package's official MPO boundary rule.</p>
+            </section>
+            <section id="customRegionGeographyView" class="region-geography-mode-panel" hidden>
+              <div><span class="field-label">Custom geography</span><strong id="regionGeographySummary">No custom geography selected</strong><p id="regionGeographyDetail" class="muted">Choose Azones and Bzones, then apply and preview the exact selection.</p></div>
+              <button id="editCustomRegionGeography" type="button" class="secondary">Choose geography…</button>
+            </section>
+            <details id="regionOutputOptions" class="region-builder-options">
+              <summary>Output options</summary>
+              <div class="region-builder-grid">
+                <label>Source InputLibrary<select id="regionSourceLibrary"></select></label>
+                <label>Region name<input id="regionName"></label>
+                <label>Region code<input id="regionCode"></label>
+                <label>State<input id="regionState" maxlength="8"></label>
+              </div>
+            </details>
+            <div id="regionBuilderReference" class="notice guidance-notice"></div>
+            <div id="regionBuilderPreviewError" class="notice error region-preview-error" role="alert" aria-live="assertive" hidden></div>
+            <div class="region-builder-actions"><div class="actions"><button id="previewRegionBuild" type="button">Preview region</button><button id="viewRegionMap" type="button" class="secondary">View map</button><button id="buildRegionAssets" type="button" disabled>Build region assets</button></div><span id="regionMapStatus" class="muted" aria-live="polite"></span></div>
+          </div>
+        </section>
+        <section id="regionBuilderPreview" class="panel region-builder-preview empty-state" hidden></section>
+      </section>
+
+      <section id="createSetup" class="create-subpage active">
+      <div class="two-column">
+        <form id="projectForm" class="panel stack">
+          <div><p class="step">Project setup</p><h3>New comparison project</h3></div>
+          <div id="projectAssetIdentity" class="notice guidance-notice" hidden></div>
+          <label>Project name<input id="projectName" required placeholder="2045 Transit Scenarios"></label>
+          <label>Model template<select id="templateSelect" required></select></label>
+          <label>Input library<select id="librarySelect" required></select></label>
+          <fieldset>
+            <legend>Baseline</legend>
+            <label class="radio"><input type="radio" name="baselineStrategy" value="fresh" checked> Create a fresh untouched baseline</label>
+            <label class="radio"><input type="radio" name="baselineStrategy" value="existing"> Use an existing completed baseline</label>
+            <select id="existingBaseline" disabled></select>
+          </fieldset>
+          <p class="muted">The untouched baseline is created with the project. Add scenarios from the Editor sidebar.</p>
+          <button id="createProjectButton">Create project</button>
+        </form>
+
+        <section class="panel">
+          <div class="section-title"><div><p class="step">Projects</p><h3>Saved work</h3></div><span id="projectCount" class="pill">0</span></div>
+          <div id="projectList" class="card-list empty-state">No projects yet.</div>
+        </section>
+      </div>
+      <details id="archivePanel" class="panel archive-panel">
+        <summary>Archived Projects <span id="archiveCount" class="pill">0</span></summary>
+        <p class="muted">Archived projects can be restored for 30 days. They are hidden from Run and Compare until restored.</p>
+        <div id="archiveList" class="card-list empty-state">No archived projects.</div>
+      </details>
+      </section>
+
+      <section id="createEditor" class="create-subpage">
+      <section class="editor-project-bar panel">
+        <label>Active project<select id="editorProjectSelect"></select></label>
+        <div id="editorProjectFacts" class="muted">Choose or create a project in Setup.</div>
+        <button id="openCreateSetup" class="secondary" type="button">Project Setup</button>
+      </section>
+      <section id="inputEditor" class="scenario-workspace" hidden>
+        <aside class="scenario-sidebar">
+          <div class="scenario-sidebar-header"><strong>Scenarios</strong></div>
+          <div class="scenario-sidebar-actions"><button id="addEditorScenario" type="button">+ New Scenario</button><button id="duplicateEditorScenario" class="secondary" type="button">Duplicate Scenario</button></div>
+          <div id="baselineCard" class="baseline-card"></div>
+          <div id="editorScenarioTree" class="scenario-tree"></div>
+        </aside>
+        <div id="scenarioSidebarResizer" class="scenario-sidebar-resizer" role="separator" aria-label="Resize scenarios sidebar" aria-orientation="vertical" tabindex="0"></div>
+        <section class="scenario-editor-main">
+          <section id="editorEmpty" class="editor-card editor-welcome"><h3>Build a scenario from input-file changes</h3><ol><li>Select <strong>+ New Scenario</strong>.</li><li>Use <strong>+ New File</strong> to edit one input CSV.</li><li>Repeat to edit additional files, or open <strong>Batch Change</strong> to update several files together.</li></ol><p class="muted">The baseline remains untouched. Changes are saved only to the selected scenario.</p></section>
+          <section id="scenarioTools" class="editor-card" hidden>
+            <div class="section-title"><div><p class="step">Scenario tools</p><h3 id="scenarioToolsTitle">Batch change scenario</h3><p class="muted">Create or update several file edits with one operation.</p></div></div>
+            <section class="scenario-note-card">
+              <label>Scenario note<textarea id="scenarioNote" rows="3" placeholder="Describe the purpose, assumptions, and expected effects of this scenario."></textarea></label>
+              <div><p class="muted">This note applies to the whole scenario. File-specific notes remain available in the individual file editor.</p><button id="saveScenarioNote" class="secondary" type="button">Save Scenario Note</button></div>
+            </section>
+            <div class="batch-editor-grid">
+              <div class="field-block batch-files"><div class="checklist-heading"><span>Files</span></div><div id="batchFileChecklist" class="checklist"></div></div>
+              <div class="field-block batch-columns"><div class="checklist-heading"><span>Columns</span><label class="inline-check"><input id="batchSelectAllColumns" type="checkbox" disabled> Select all columns</label></div><div id="batchColumnChecklist" class="checklist"><p class="muted">Select files first.</p></div></div>
+              <label class="batch-location-type">Location type<select id="batchLocationType"></select></label>
+              <label class="batch-location-search">Location search<input id="batchLocationSearch" type="search" placeholder="Search locations"></label>
+              <label class="batch-year">Target year<select id="batchYear"><option value="">Choose year</option></select></label>
+              <label class="batch-operation">Operation<select id="batchOperation"><option value="">Choose operation</option><option value="set">Set to</option><option value="add">Increase by</option><option value="subtract">Decrease by</option><option value="multiply">Multiply by</option><option value="percent">Increase by %</option><option value="decrease_percent">Decrease by %</option></select></label>
+              <label class="batch-value">Value<input id="batchValue" type="number" step="any"></label>
+              <div class="field-block batch-locations"><div class="checklist-heading"><span>Locations</span><label class="inline-check"><input id="batchSelectAllLocations" type="checkbox" disabled> Select all locations</label></div><div id="batchLocations" class="location-checklist"><p class="muted">Choose a location type.</p></div></div>
+              <div id="batchCompatibility" class="batch-compatibility muted"></div>
+              <button id="applyBatchChanges" type="button">Apply and Save Batch Changes</button>
+            </div>
+          </section>
+
+          <section id="fileEditorPage">
+            <section class="editor-card">
+              <div class="section-title"><div><p class="step">Edit one input file</p><h3 id="editorProjectName">Edit scenario inputs</h3><p class="muted">Apply Preview changes the temporary working copy. Save File Changes persists this file and its note to the scenario.</p><span id="editorDirtyState" class="dirty-state">Saved</span></div><button id="saveOverlay" data-shortcut-action="save" disabled>Save File Changes <kbd data-shortcut="save"></kbd></button></div>
+              <label>Input file<select id="editorFile"></select></label>
+            </section>
+            <section class="editor-card">
+              <div class="section-title"><div><h3>Filters and change function</h3><p class="muted">Filter locations, choose a year and columns, then preview a repeatable change.</p></div></div>
+              <div class="change-editor-grid">
+                <label class="editor-location-type">Location type<select id="editorLocationField"></select></label>
+                <label class="editor-location-search">Location search<input id="editorLocationSearch" type="search" placeholder="Type to filter locations"></label>
+                <label class="editor-year">Target year<select id="editorYear"></select></label>
+                <label class="editor-operation">Operation<select id="editorOperation"><option value="set">Set to</option><option value="add">Increase by</option><option value="subtract">Decrease by</option><option value="multiply">Multiply by</option><option value="percent">Increase by %</option><option value="decrease_percent">Decrease by %</option></select></label>
+                <label class="editor-value">Value<input id="editorValue" type="number" step="any"></label>
+                <div class="field-block editor-locations"><div class="checklist-heading"><span>Locations</span><label class="inline-check"><input id="editorSelectAllLocations" type="checkbox" disabled> Select all locations</label></div><div id="editorLocations" class="location-checklist"><p class="muted">Choose a location type.</p></div></div>
+                <div class="field-block editor-columns"><div class="checklist-heading"><span>Columns</span><div class="column-actions"><label class="inline-check"><input id="editorSelectAllColumns" type="checkbox" disabled> Select all columns</label><button id="clearEditorColumns" class="text-button" type="button">Clear</button></div></div><div id="editorColumns" class="location-checklist" aria-label="Columns"><p class="muted">Choose an input file.</p></div></div>
+                <div class="edit-actions"><button id="applyEditorChange" type="button">Apply Preview</button><button id="resetEditorFile" class="secondary" type="button">Revert Preview</button><button id="undoEditorChange" class="secondary" type="button" disabled>Undo</button><button id="redoEditorChange" class="secondary" type="button" disabled>Redo</button></div>
+                <div class="preview-help"><p><strong>Apply Preview</strong> changes only this temporary working copy. <strong>Save File Changes</strong> makes the preview and file note part of Review and the next run.</p><div class="change-legend" aria-label="Cell change colors"><span><i class="saved-change-swatch"></i>Saved change from baseline</span><span><i class="preview-change-swatch"></i>Unsaved preview</span></div></div>
+              </div>
+              <div id="csvTableWrap" class="table-wrap editor-table"><p class="empty-state">Choose an input file to preview rows.</p></div>
+            </section>
+            <section class="editor-card"><div class="section-title"><div><h3>Notes</h3><p class="muted">Track assumptions and why this file changes.</p></div></div><textarea id="editorNotes" rows="4" placeholder="Notes for this scenario file"></textarea></section>
+          </section>
+        </section>
+      </section>
+      </section>
+
+      <section id="createReview" class="create-subpage">
+        <section class="panel review-toolbar">
+          <div><p class="step">Saved-change audit</p><h3 id="reviewProjectTitle">Review project</h3><p class="muted">Compare saved scenario files with their original Input Library values.</p></div>
+          <label>Search changes<input id="reviewSearch" type="search" placeholder="File, location, column, or value"></label>
+          <button id="continueToRun" type="button" disabled>Continue to Run</button>
+        </section>
+        <div id="reviewValidation"></div>
+        <div id="reviewContent" class="review-content empty-state">Choose a project in Editor or Setup.</div>
+      </section>
+    </section>
+
+    <section id="runPage" class="page">
+      <div class="page-heading">
+        <div><p class="eyebrow">VisionEval runtime</p><h2>Run</h2><p>Execute project scenarios through the configured runtime and follow R output live.</p></div>
+        <div class="actions"><button id="startDockerDesktop" class="secondary" hidden>Start Docker Desktop</button><button id="pullRuntime" class="secondary">Runtime setup</button><button id="verifyRuntime" class="secondary">Verify runtime</button></div>
+      </div>
+      <section id="runtimeCard" class="panel runtime-card run-runtime-card"></section>
+      <p id="runtimeHelp" class="runtime-help"></p>
+      <section class="panel run-setup-panel">
+        <div class="run-setup-header"><div><p class="step">Batch setup</p><h3>Select runs</h3><p id="runSelectionSummary" class="muted">Nothing selected</p></div><label>Project<select id="runProject"></select></label><button id="openRunDialog" disabled>Run selected</button></div>
+        <div id="runSelections" class="selection-grid empty-state">Choose a project to select baseline and scenarios.</div>
+      </section>
+      <div id="runLayout" class="run-layout">
+        <section id="runHistoryPanel" class="panel"><div class="section-title"><div><p class="step">Run history</p><h3>Jobs</h3></div><div class="actions"><button id="hideRunHistory" class="secondary" type="button">Hide run history</button><button id="refreshJobs" class="secondary">Refresh</button></div></div><div id="jobList" class="card-list empty-state">No jobs yet.</div></section>
+        <section class="panel console-panel"><div class="section-title"><div><p class="step">Live output</p><h3 id="logTitle">R console</h3></div><div class="actions"><button id="showRunHistory" class="secondary" type="button" hidden>Show run history</button><div id="jobActions" class="actions"></div></div></div><div id="activeJobTabs" class="job-tabs" hidden></div><pre id="runLog">Select a job to view its output.</pre></section>
+      </div>
+    </section>
+
+    <section id="comparePage" class="page">
+      <div class="page-heading"><div><p class="eyebrow">Observed changes</p><h2>Compare</h2><p>Inspect actual datastore differences from completed or previously registered results.</p></div></div>
+      <nav class="subtabs"><button class="subtab active" data-subpage="loadData">Load Data</button><button class="subtab" data-subpage="compareData">Compare</button><button class="subtab" data-subpage="mapData">Map Visualization</button><button class="subtab" data-subpage="dashboardData">Percent-Change Chart</button></nav>
+      <section id="compareActivity" class="compare-activity" hidden aria-live="polite" aria-atomic="true">
+        <div class="compare-activity-summary">
+          <span id="compareActivitySpinner" class="activity-spinner" aria-hidden="true"></span>
+          <div><strong id="compareActivityTitle">Compare activity</strong><small id="compareActivityElapsed">Starting…</small></div>
+          <button id="stopCompareActivity" class="danger" type="button" title="Stop the active Compare operation" hidden>Stop</button>
+          <button id="toggleCompareActivity" class="secondary text-button" type="button" aria-expanded="true">Collapse</button>
+          <button id="dismissCompareActivity" class="secondary text-button" type="button" hidden>Dismiss</button>
+        </div>
+        <div id="compareActivityDetails" class="compare-activity-details">Preparing comparison data…</div>
+      </section>
+      <section id="loadData" class="subpage active">
+        <section class="panel load-selection-panel">
+          <div><h3>Select datastore results</h3><p class="muted">Choose completed Workbench runs or previously registered results.</p></div>
+          <label>Reference<select id="referenceDatastore"></select></label>
+          <label>Comparison 1 (optional)<select id="comparisonOne"></select></label>
+          <label>Comparison 2 (optional)<select id="comparisonTwo"></select></label>
+          <button id="loadComparison">Load selected results</button>
+        </section>
+        <section class="panel"><div class="section-title"><h3>Registered results</h3><span id="datastoreCount" class="pill">0</span></div><div id="datastoreList" class="card-list empty-state">No completed datastores registered.</div></section>
+      </section>
+      <section id="compareData" class="subpage">
+        <section class="panel">
+          <div class="comparison-controls">
+            <label>Table<select id="compareTable"></select></label>
+            <label>Variable<select id="compareVariable"></select></label>
+            <label>Year<select id="compareYear"></select></label>
+            <label>Rows<select id="comparePageSize"><option>50</option><option selected>100</option><option>250</option><option>500</option></select></label>
+            <label id="compareModeField" hidden>View<select id="compareMode"><option value="aggregate">Aggregate summary</option><option value="records">Advanced individual records</option></select></label>
+            <button id="runComparison">Update Comparison</button>
+          </div>
+          <div id="compareViewGeoControls" class="compare-geo-controls"></div>
+        </section>
+        <section id="compareExplanation" class="panel compare-explanation"><p class="muted">Choose an output variable to see its definition and units.</p></section>
+        <section class="panel change-discovery">
+          <div><h3>Discover changed outputs</h3><p class="muted">Scan every comparable output across the selected results. This is independent of the Table and Variable selected above.</p></div>
+          <div class="change-discovery-actions">
+            <div class="segmented" role="group" aria-label="Changed output location scope"><button id="scanScopeAll" type="button" data-scan-scope="all" aria-pressed="true">All locations</button><button id="scanScopeSelected" type="button" data-scan-scope="selected" aria-pressed="false">Selected locations (0)</button></div>
+            <button id="findChangedOutputs" class="secondary">Find changed outputs</button>
+            <button id="openCompareExports" class="secondary">Export data</button>
+          </div>
+          <p id="changeDiscoveryScopeHelp" class="muted change-discovery-help">All locations will be scanned.</p>
+          <div id="compareGeoControls" class="compare-geo-controls" hidden></div>
+        </section>
+        <section id="compareResultsPanel" class="panel compare-results-panel">
+          <div id="changedVariablesPanel" hidden><div class="section-title compare-results-heading"><div><h3 id="changedVariablesTitle">Changed variables</h3><p id="changedVariablesMeta" class="muted"></p></div><label class="changed-variable-search">Search outputs<input id="changedVariableSearch" type="search" placeholder="Table or variable"></label></div><div class="changed-variable-table-wrap"><table id="changedVariablesList" class="changed-variable-table"><thead></thead><tbody></tbody></table></div></div>
+          <div id="comparisonResults"><div id="recordComparisonWarning" class="notice warning-notice" hidden><strong>Advanced individual records</strong><p>Household, Vehicle, and Worker IDs are generated independently in each run and may not identify the same entity.</p></div><div id="comparisonOptionBar" class="option-bar"><label class="checkbox"><input id="showCompareStats" type="checkbox"> Stats</label><label class="checkbox"><input id="directionalDeltas" type="checkbox"> Red/green deltas</label><label class="checkbox"><input id="changedOnly" type="checkbox"> Show changed rows only</label></div><div id="comparisonStats" class="comparison-stats" hidden></div><div id="comparisonTableWrap" class="table-wrap"><table id="comparisonTable"><thead></thead><tbody><tr><td class="empty-state">Load results and choose a variable.</td></tr></tbody></table></div><nav id="comparisonPager" class="pager"><button id="comparePrevious" class="secondary" disabled>Previous</button><span id="comparePageLabel">Page 1</span><button id="compareNext" class="secondary" disabled>Next</button></nav></div>
+        </section>
+      </section>
+      <section id="mapData" class="subpage">
+        <section class="panel comparison-map-setup">
+          <div class="comparison-map-generation-controls">
+            <label>Reference<select id="mapReference"></select></label>
+            <label>Comparison<select id="mapComparison"></select></label>
+            <label>Year<select id="mapYear"></select></label>
+            <label>Table<select id="mapTable"></select></label>
+            <label>Variable<select id="mapVariable"></select></label>
+            <label>Geography<select id="mapGeography"><option value="county">County / locality</option><option value="bzone">Bzone</option></select></label>
+            <label id="mapAggregationField" hidden>Aggregation<select id="mapAggregation"><option value="mean">Mean</option><option value="sum">Sum</option><option value="count">Record count</option></select></label>
+          </div>
+          <div class="comparison-map-generate-bar"><p id="mapStaleMessage" class="muted" hidden>Generation inputs changed. Generate map to update the visualization.</p><button id="generateMap">Generate map</button></div>
+        </section>
+        <section class="panel comparison-map-panel">
+          <div class="comparison-map-header">
+            <div><h3 id="comparisonMapTitle">Virginia Scenario Change Map</h3><p id="comparisonMapSubtitle" class="muted">Choose a map-compatible output and generate the map.</p></div>
+            <div class="comparison-map-presentation">
+              <div class="comparison-map-mode" role="radiogroup" aria-label="Map dimension"><span class="comparison-map-mode-slider" aria-hidden="true"></span><button id="comparisonMap2d" class="active" type="button" role="radio" aria-checked="true" tabindex="0">2D map</button><button id="comparisonMap3d" type="button" role="radio" aria-checked="false" tabindex="-1" disabled aria-disabled="true">3D map</button></div>
+              <label>Display<select id="mapMetric"><option value="percentChange">Change %</option><option value="absoluteChange">Absolute change</option><option value="referenceValue">Reference value</option><option value="comparisonValue">Comparison value</option></select></label>
+              <label id="comparisonMap3dHeightField" hidden>3D height<select id="comparisonMap3dHeight"><option value="value">Selected value</option><option value="change-density">Changed variable count</option></select></label>
+              <div class="map-export-menu"><button id="toggleMapExport" class="secondary" type="button" aria-haspopup="menu" aria-expanded="false">Export <span aria-hidden="true">▾</span></button><div id="mapExportMenu" role="menu" hidden><button id="exportMapPdf" type="button" role="menuitem">PDF</button><button id="exportMapPng" type="button" role="menuitem">PNG</button><button id="exportMapSvg" type="button" role="menuitem">SVG</button><button id="exportMapCsv" type="button" role="menuitem">CSV</button><button id="exportMapWorkbook" type="button" role="menuitem">Excel</button></div></div>
+            </div>
+          </div>
+          <div class="comparison-map-toolbar">
+            <label class="checkbox"><input type="checkbox" data-comparison-map-layer="mpos" checked> Virginia MPO context</label>
+            <label class="checkbox"><input type="checkbox" data-comparison-map-layer="azones" checked> Azone context</label>
+            <label class="checkbox"><input type="checkbox" data-comparison-map-layer="bzones" checked> Bzone context</label>
+            <label class="checkbox"><input id="comparisonMapIdLabels" type="checkbox" checked> Map labels</label>
+            <label class="checkbox"><input id="comparisonMapValueLabels" type="checkbox"> Map value labels</label>
+            <label id="comparisonMapProjectOnlyField" class="checkbox" hidden><input id="comparisonMapProjectOnly" type="checkbox"> Project geography only</label>
+            <div class="region-map-navigation"><button id="zoomOutComparisonMap" class="secondary icon-button" type="button" title="Zoom out" aria-label="Zoom out">−</button><button id="zoomInComparisonMap" class="secondary icon-button" type="button" title="Zoom in" aria-label="Zoom in">+</button><button id="fitComparisonMap" class="secondary" type="button">Fit project</button><button id="resetComparisonMap" class="secondary" type="button">Virginia</button><button id="resetComparisonMapBearing" class="secondary" type="button" hidden>Reset view</button></div>
+          </div>
+          <details id="comparisonMap3dAdvanced" class="comparison-map-3d-advanced" hidden>
+            <summary>Advanced 3D</summary>
+            <div class="comparison-map-3d-advanced-grid">
+              <fieldset class="comparison-map-elevation-direction"><legend>Elevation direction</legend><div id="comparisonMap3dElevationDirection" class="comparison-map-direction-options" role="radiogroup" aria-label="Elevation direction"><button type="button" class="active" data-elevation-direction="all" role="radio" aria-checked="true">All</button><button type="button" data-elevation-direction="increase" role="radio" aria-checked="false">Increase</button><button type="button" data-elevation-direction="decrease" role="radio" aria-checked="false">Decrease</button></div></fieldset>
+            </div>
+            <p class="muted">All raises both signed directions. Increase or Decrease keeps the other direction flat. Drag to pan, right-drag or Ctrl+drag to swivel, and use the compass to reset north.</p>
+          </details>
+          <div class="comparison-map-workspace">
+            <div id="comparisonMapCanvas" class="region-map-canvas empty-state" tabindex="0">Load a reference and comparison result to create a map.</div>
+            <div id="comparisonMap3dCanvas" class="comparison-map-3d-canvas" hidden></div>
+            <div id="comparisonMap3dFallback" class="notice" hidden>Interactive 3D geography is unavailable. The complete 2D comparison map remains available.</div>
+            <div id="comparisonMap3dTooltip" class="comparison-map-3d-tooltip" hidden></div>
+            <aside id="comparisonMapInspector" class="region-map-inspector" hidden><div class="region-map-inspector-title"><div><p class="step">Map value</p><h3 id="comparisonMapInspectorTitle">Geography</h3></div><button id="closeComparisonMapInspector" class="secondary icon-button" type="button" aria-label="Close map details">×</button></div><div id="comparisonMapInspectorBody"></div></aside>
+          </div>
+          <div id="comparisonMapLegend" class="comparison-map-legend" hidden></div>
+          <p class="region-map-footnote muted">County/locality and Bzone geometry comes from the installed regional package. Household, Vehicle, and Worker values are simple means of all numeric rows in each result.</p>
+        </section>
+      </section>
+      <section id="dashboardData" class="subpage">
+        <section class="panel dashboard-setup">
+          <div class="dashboard-generation-controls"><label>Reference<select id="dashboardReference"></select></label><label>Comparison<select id="dashboardComparison"></select></label><label>Year<select id="dashboardYear"></select></label></div>
+          <div id="dashboardGeoControls" class="compare-geo-controls dashboard-geo-controls"></div>
+        </section>
+        <section class="panel dashboard-variables"><button id="toggleDashboardVariables" class="dashboard-variables-toggle" type="button" aria-expanded="true" aria-controls="dashboardVariablesBody"><span><strong>Variables</strong><small id="dashboardVariableSummary">All numeric outputs</small></span><span class="disclosure-chevron" aria-hidden="true"></span></button><div id="dashboardVariablesBody"><div class="dashboard-variable-toolbar"><label>Search variables<input id="dashboardVariableSearch" type="search" placeholder="Table or variable"></label><div><button id="selectDashboardVariables" class="text-button">Select visible</button><button id="clearDashboardVariables" class="text-button">Clear</button></div></div><p class="muted dashboard-variable-help">Choose outputs to chart. With none selected, all comparable numeric outputs are generated.</p><div id="dashboardVariableList" class="dashboard-variable-list"></div></div></section>
+        <div class="dashboard-generate-bar"><p id="dashboardStaleMessage" class="muted" hidden>Generation inputs changed. Generate chart to update the visualization.</p><button id="generateDashboard">Generate chart</button></div>
+        <div id="dashboardMetrics" class="metric-grid"></div>
+        <section class="panel dashboard-chart-panel"><div class="dashboard-chart-header"><div><h3>Diverging Horizontal Percent-Change Chart</h3><p class="muted">Bars left of zero are decreases from the reference; bars right of zero are increases.</p></div><div class="dashboard-view-controls"><label>Sort<select id="dashboardSort"><option value="name">Variable name</option><option value="value_desc">Largest increase</option><option value="value_asc">Largest decrease</option><option value="magnitude">Largest absolute change</option></select></label><label>Display<select id="dashboardDisplayMode" title="Choose whether to show every bar, bars meeting a change-magnitude threshold, or the largest increases and decreases."><option value="all">All bars</option><option value="threshold">At least ± threshold</option><option value="extremes">Top and bottom N</option></select></label><label id="dashboardDisplayValueLabel" hidden><span id="dashboardDisplayValueText">Minimum magnitude (%)</span><input id="dashboardDisplayValue" type="number" min="0" step="1" value="5" title="Show changes at or above this percentage in either direction."></label><label class="checkbox dashboard-zero-toggle" title="Hide outputs whose calculated percent change is exactly zero."><input id="dashboardHideZero" type="checkbox"> Hide 0% changes</label><div class="dashboard-export-actions"><button id="exportDashboardPdf" class="secondary" disabled>PDF</button><button id="exportDashboardCsv" class="secondary" disabled>CSV</button><button id="exportDashboardWorkbook" class="secondary" disabled>Excel</button></div></div></div><div id="dashboardDetails" class="empty-state">Choose variables and generate the chart to visualize percent changes.</div></section>
+      </section>
+    </section>
+  </main>
+
+  <dialog id="unsavedDialog">
+    <form method="dialog" class="stack">
+      <p class="eyebrow">Unsaved file changes</p><h2>Save before leaving?</h2>
+      <p>Your preview and direct table edits have not been saved to this scenario.</p>
+      <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button value="discard" class="danger">Discard</button><button value="save">Save Changes</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="confirmationDialog">
+    <form method="dialog" class="stack">
+      <p class="eyebrow">Please confirm</p><h2 id="confirmationDialogTitle">Confirm action</h2>
+      <p id="confirmationDialogMessage" class="confirmation-dialog-message"></p>
+      <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmationDialogAccept" value="confirm" class="danger">Continue</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="scenarioDialog">
+    <form id="scenarioDialogForm" class="stack">
+      <p class="eyebrow">Scenario</p><h2 id="scenarioDialogTitle">New scenario</h2>
+      <label>Scenario name<input id="scenarioDialogName" required autocomplete="off"></label>
+      <p id="scenarioDialogHelp" class="muted">The new scenario starts with untouched project inputs.</p>
+      <div class="dialog-actions"><button id="cancelScenarioDialog" type="button" class="secondary">Cancel</button><button id="confirmScenarioDialog">Create Scenario</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="projectEditDialog">
+    <form id="projectEditForm" class="stack">
+      <p class="eyebrow">Saved work</p><h2>Edit project</h2>
+      <label>Project name<input id="projectEditName" required autocomplete="off"></label>
+      <div class="dialog-actions"><button id="cancelProjectEdit" type="button" class="secondary">Cancel</button><button>Save Project</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="baselineRenameDialog">
+    <form id="baselineRenameForm" class="stack">
+      <p class="eyebrow">Project baseline</p><h2>Rename baseline</h2>
+      <label>Baseline name<input id="baselineDisplayName" required autocomplete="off"></label>
+      <p class="muted">This is a project-specific display name. It does not rename registered comparison results or change model provenance.</p>
+      <div class="dialog-actions"><button id="cancelBaselineRename" type="button" class="secondary">Cancel</button><button>Save Baseline Name</button></div>
+    </form>
+  </dialog>
+  <dialog id="compareExportDialog" class="wide-dialog taskbar-safe-dialog"><form method="dialog" class="settings-dialog-form"><div class="section-title dialog-fixed-header"><div><p class="eyebrow">Compare</p><h2>Export data</h2></div><button class="secondary" value="cancel">Close</button></div><div class="compare-export-options settings-dialog-body">
+    <section id="exportAllChangedSection" data-export-group="all-changed"><div><h3>All Locations Changed Outputs</h3><p class="muted">One row per changed output, with a Change % column for each comparison. Uses or creates an all-location changed-output scan.</p></div><div class="actions"><button id="exportAllChangedCsv" class="secondary" type="button">CSV</button><button id="exportAllChangedWorkbook" type="button">Excel</button></div></section>
+    <section id="exportSelectedChangedSection" class="compare-export-configurable" data-export-group="selected-changed"><div class="compare-export-copy"><h3>Selected Locations Changed Outputs</h3><p class="muted">Choose an independent location scope for a changed-output summary. This does not change Compare, discovery, or chart filters.</p><div id="exportGeoControls" class="compare-geo-controls"></div></div><div class="actions"><button id="exportSelectedChangedCsv" class="secondary" type="button">CSV</button><button id="exportSelectedChangedWorkbook" type="button">Excel</button></div></section>
+    <section id="exportCurrentSection" data-export-group="current"><div><h3>Current View</h3><p class="muted">Every matching row for the active output, comparison location scope, and sort order, not only the displayed page.</p></div><div class="actions"><button id="exportCurrentComparison" class="secondary" type="button">CSV</button><button id="exportCurrentWorkbook" type="button">Excel</button></div></section>
+    <section id="exportFullVariablesSection" class="compare-export-configurable" data-export-group="full-variables"><div class="compare-export-copy"><h3>Full Variable Data</h3><p class="muted">Export every row for selected comparison-compatible outputs. CSV creates a ZIP with one file per output; Excel creates one workbook with separate sheets.</p><div class="full-variable-toolbar"><label>Year<select id="fullExportYear"></select></label><label>Search outputs<input id="fullExportVariableSearch" type="search" placeholder="Table or variable"></label><div><button id="selectFullExportVariables" class="text-button" type="button">Select visible</button><button id="clearFullExportVariables" class="text-button" type="button">Clear</button></div></div><p id="fullExportVariableSummary" class="muted">No outputs selected.</p><div id="fullExportVariableList" class="full-variable-list"></div></div><div class="actions"><button id="exportFullVariablesZip" class="secondary" type="button">CSV ZIP</button><button id="exportFullVariablesWorkbook" type="button">Excel</button></div></section>
+  </div></form></dialog>
+
+  <dialog id="projectRemoveDialog">
+    <form id="projectRemoveForm" class="stack">
+      <p class="eyebrow">Remove project</p><h2 id="projectRemoveTitle">Remove this project?</h2>
+      <p>It will disappear from Create, Run, and Compare and remain recoverable for 30 days.</p>
+      <div class="dialog-actions"><button id="cancelProjectRemove" type="button" class="secondary">Cancel</button><button class="danger">Remove Project</button></div>
+    </form>
+  </dialog>
+  <dialog id="projectPurgeDialog">
+    <form id="projectPurgeForm" class="stack">
+      <p class="eyebrow">Permanent deletion</p><h2 id="projectPurgeTitle">Delete this archived project now?</h2>
+      <p>This permanently removes its project files, runs, logs, prepared models, and unreferenced results. This cannot be undone.</p>
+      <div class="dialog-actions"><button id="cancelProjectPurge" type="button" class="secondary">Cancel</button><button class="danger">Delete Permanently</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="runDialog">
+    <form method="dialog" class="stack">
+      <p class="eyebrow">Execution mode</p><h2>How should this batch run?</h2>
+      <p id="runDialogSelectionSummary" class="notice guidance-notice"></p>
+      <label class="mode-option"><input type="radio" name="runMode" value="queued" checked><span><strong>Queued</strong><small id="queuedRunModeHelp">One VisionEval run at a time.</small></span></label>
+      <label id="parallelRunMode" class="mode-option" hidden><input type="radio" name="runMode" value="parallel"><span><strong>Parallel</strong><small>Up to two runtime jobs at once.</small></span></label>
+      <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="confirmRun" value="default">Start batch</button></div>
+    </form>
+  </dialog>
+  <dialog id="onboardingDialog" class="wide-dialog taskbar-safe-dialog">
+    <form id="onboardingForm" class="settings-dialog-form">
+      <header class="dialog-fixed-header"><p class="eyebrow">First-launch setup</p><h2>Finish setting up this workspace</h2></header>
+      <div class="settings-dialog-body stack">
+      <section id="onboardingRuntime" class="settings-card"><h3>VisionEval runtime</h3><p id="onboardingRuntimeHelp">Choose the VE_RUNTIME folder used to launch VisionEval. Workbench will detect VE_HOME and the matching Rscript when possible.</p><div id="onboardingNativePaths" class="stack"><label>VE_RUNTIME working folder<input id="onboardingVeRuntime" autocomplete="off"><button id="onboardingChooseVeRuntime" type="button" class="secondary">Choose VE_RUNTIME…</button></label><details class="settings-disclosure"><summary>Detected paths and advanced overrides</summary><label>VE_HOME package folder<input id="onboardingVeHome" autocomplete="off"><button id="onboardingChooseVeHome" type="button" class="secondary">Choose VE_HOME…</button></label><label>Rscript.exe<input id="onboardingRscript" autocomplete="off"><button id="onboardingChooseRscript" type="button" class="secondary">Choose Rscript…</button></label></details></div><div id="onboardingRuntimeStatus" class="muted">Checking the local runtime…</div><div class="dialog-actions"><button id="onboardingStartDocker" type="button" class="secondary" hidden>Start Docker Desktop</button><button id="onboardingVerify" type="button">Verify runtime</button><button id="onboardingSkip" type="button" class="secondary">Skip for Now</button></div></section>
+      <section class="settings-card"><h3>Assets</h3><p>New workspaces start empty. Install a regional package, build model assets in Develop, and import InputLibraries from Settings → Assets.</p><p class="muted">Downloadable asset packs will appear here only after approved packages are published.</p></section>
+      <section class="settings-card"><h3>Ready</h3><p>Explore, Create, and existing comparisons work without a runtime. Run becomes available after a runtime profile is verified.</p></section>
+      </div>
+      <div class="dialog-actions dialog-fixed-footer"><button id="finishOnboarding" type="button">Finish Setup</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="wide-dialog taskbar-safe-dialog">
+    <form id="settingsForm" class="settings-dialog-form">
+      <div class="section-title dialog-fixed-header"><div><p class="eyebrow">VisionEval Workbench</p><h2>Settings</h2></div><button id="closeSettings" type="button" class="secondary">Close</button></div>
+      <div class="settings-dialog-body">
+      <nav class="settings-nav" aria-label="Settings sections"><button type="button" data-settings-page="settingsWorkspace" class="active">Workspace</button><button type="button" data-settings-page="settingsAssets">Assets</button><button type="button" data-settings-page="settingsAppearance">Appearance</button><button type="button" data-settings-page="settingsNumbers">Numbers</button><button type="button" data-settings-page="settingsNotifications">Notifications</button><button type="button" data-settings-page="settingsRuntime">Runtime</button><button type="button" data-settings-page="settingsResources">Resources</button><button type="button" data-settings-page="settingsDiagnostics">Diagnostics</button><button type="button" data-settings-page="settingsDocumentation">Documentation</button><button type="button" data-settings-page="settingsStorage">Storage</button></nav>
+      <section id="settingsWorkspace" class="settings-page active settings-card"><div class="settings-page-heading"><div><h3>Workspace</h3><p>Projects, assets, runs, and results are stored outside the application.</p></div></div><section class="workspace-current"><div><small>Current workspace</small><div id="settingsWorkspacePath" class="code-block"></div></div><div class="workspace-primary-actions"><button id="switchWorkspace" type="button" class="secondary">Open another workspace…</button><button id="moveWorkspace" type="button" class="secondary">Move workspace…</button></div></section><section class="settings-section"><h4>Show in File Explorer</h4><div class="workspace-reveal-actions"><button type="button" class="secondary" data-reveal-workspace-location="projects">Projects</button><button type="button" class="secondary" data-reveal-workspace-location="assets">Assets</button><button type="button" class="secondary" data-reveal-workspace-location="results">Results</button><button type="button" class="secondary" data-reveal-workspace-location="documentation">Documentation</button></div></section><details id="settingsOtherWorkspaces" class="settings-disclosure workspace-recents"><summary><span>Other workspaces</span><span id="settingsRecentCount" class="pill">0</span></summary><p class="muted">Separate workspaces are optional. Use them to isolate organizations, production work, or testing.</p><div id="settingsRecent" class="workspace-recent-list"></div></details></section>
+      <section id="settingsAssets" class="settings-page settings-card"><div class="settings-page-heading"><div><h3>Assets</h3><p>Defaults affect new projects only. Existing projects remain pinned to their recorded assets.</p></div><div class="button-row package-install-actions"><button id="settingsInstallPackage" type="button">Choose ZIP…</button><button id="settingsInstallPackageFolder" type="button" class="secondary">Choose extracted folder…</button></div></div><section class="settings-section"><h4>Defaults</h4><div class="settings-default-grid"><label>Model template<select id="defaultTemplate"></select></label><label>InputLibrary<select id="defaultLibrary"></select></label><label>Input explanations<select id="defaultInputExplanations"></select></label></div></section><section class="settings-section"><h4>Installed assets</h4><div id="installedAssetGroups" class="asset-groups"></div></section><details class="settings-disclosure"><summary>Import an InputLibrary</summary><p class="muted">Choose a CSV library folder or a V1 InputLibrary folder. Runnable model templates are created through Develop and Region Builder.</p><button id="settingsImportLibrary" type="button" class="secondary">Choose and import…</button></details></section>
+      <section id="settingsAppearance" class="settings-page settings-card"><h3>Appearance</h3><label>Color theme<select id="appearanceSetting"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label><div class="palette-settings"><p class="muted palette-intro">Choose independent decrease, neutral, and increase colors. Select any color swatch to open the system color picker. Accessible defaults keep labels and outlines readable.</p><div id="comparisonPaletteSettings" class="palette-grid"></div></div></section>
+      <section id="settingsNumbers" class="settings-page settings-card"><h3>Numbers</h3><p>Choose how calculated scenario changes and on-screen values are rounded. Exports retain their underlying precision.</p><label>Default decimal places<input id="precisionDefault" type="number" min="0" max="8" step="1" value="2"></label><details class="settings-disclosure"><summary>Advanced overrides</summary><div class="precision-grid"><label>Single-file calculations<select id="precisionSingleFile"></select></label><label>Batch calculations<select id="precisionBatch"></select></label><label>Displayed output values<select id="precisionOutput"></select></label><label>Displayed percentages<select id="precisionPercentage"></select></label></div><p class="muted">Use default inherits the workspace setting above. Identifiers, years, and geography codes are never rounded.</p></details></section>
+      <section id="settingsNotifications" class="settings-page settings-card"><h3>Notifications</h3><label class="checkbox"><input id="notificationsEnabled" type="checkbox"> <span id="notificationsPlatformLabel">Show desktop notifications for background work</span></label><label>Notify after successful work runs for<select id="notificationSuccessThreshold"><option value="30">30 seconds</option><option value="60">1 minute</option><option value="300">5 minutes</option></select></label><p id="notificationsPlatformHelp" class="muted">Successful work notifies only after the selected delay. Failures notify immediately. Desktop notifications stay silent while Workbench is focused because the status is already visible here.</p><button id="testNotification" type="button" class="secondary">Send Test Notification</button></section>
+      <section id="settingsRuntime" class="settings-page settings-card"><h3>Runtime</h3><div id="settingsRuntimeSummary" class="runtime-card settings-runtime-card"></div><input id="checkVisionEvalUpdates" type="checkbox" hidden><div id="settingsNativePaths" class="stack"><label>VE_RUNTIME working folder<input id="settingsVeRuntime" autocomplete="off"><button id="settingsChooseVeRuntime" type="button" class="secondary">Choose VE_RUNTIME…</button></label><details class="settings-disclosure"><summary>Detected paths and advanced overrides</summary><label>VE_HOME package folder<input id="settingsVeHome" autocomplete="off"><button id="settingsChooseVeHome" type="button" class="secondary">Choose VE_HOME…</button></label><label>Rscript.exe<input id="settingsRscript" autocomplete="off"><button id="settingsChooseRscript" type="button" class="secondary">Choose Rscript…</button></label></details></div><p id="runtimeVerificationHelp" class="muted">Verify runtime starts the selected VisionEval installation and checks registered modules. It does not compare hashes or contact GitHub.</p><div class="actions"><button id="settingsStartDocker" type="button" class="secondary" hidden>Start Docker Desktop</button><button id="settingsVerifyRuntime" type="button">Verify runtime</button><button id="openRuntimeGuide" type="button" class="secondary">Setup guide</button></div></section>
+      <section id="settingsResources" class="settings-page settings-card"><h3>Resources</h3><label>Default batch mode<select id="defaultRunMode"><option value="queued">Queued</option><option value="parallel">Parallel</option></select></label><label id="autoStartRuntimeLabel" class="inline-check"><input id="autoStartDocker" type="checkbox"> Start runtime service when Workbench opens</label><label id="maximumConcurrentRunsLabel">Maximum concurrent VisionEval runs<input id="maxConcurrentRuns" value="2" disabled></label><label id="memoryLimitLabel">Optional per-process memory cap (GB)<input id="memoryLimit" type="number" min="1" step="0.5" placeholder="Automatic — no Workbench cap"></label><div id="dockerMemory" class="muted"></div><p id="resourceRuntimeHelp" class="muted"></p></section>
+      <section id="settingsDiagnostics" class="settings-page settings-card"><div class="settings-page-heading"><div><h3>Diagnostics</h3><p>Export failed-run bundles for GitHub issues or technical review. Bundles exclude unrelated workspace data by default.</p></div><button id="refreshDiagnostics" type="button" class="secondary">Refresh</button></div><section class="settings-section"><h4>Bundle contents</h4><div class="diagnostic-option"><label class="checkbox"><input id="diagnosticsIncludeResults" type="checkbox"> Include result datastore when available</label><p class="muted">Adds the authoritative VisionEval datastore from the selected run.</p></div><div class="diagnostic-option"><label class="checkbox"><input id="diagnosticsIncludeCache" type="checkbox"> Include comparison/cache artifacts</label><p class="muted">Adds rebuildable cache files that help diagnose Compare, chart, map, or export behavior.</p></div></section><section class="settings-section"><h4>Failed runs</h4><div id="diagnosticsRuns" class="card-list empty-state">Open this page to load failed runs.</div></section><section class="settings-section"><h4>Recent app errors</h4><div id="diagnosticsErrors" class="card-list empty-state">No app errors loaded.</div></section></section>
+      <section id="settingsDocumentation" class="settings-page settings-card"><div class="settings-page-heading"><div><h3>Documentation</h3><p>Read the bundled Workbench User Guide without leaving the app.</p></div><button id="refreshDocumentation" type="button" class="secondary">Reload</button></div><article id="settingsDocumentationBody" class="documentation-viewer empty-state">Open this page to load the user guide.</article></section>
+      <section id="settingsStorage" class="settings-page settings-card"><h3>Storage</h3><label class="checkbox"><input id="retainExports" type="checkbox" checked> Retain full VisionEval CSV exports after successful runs</label><p class="notice guidance-notice">Storage use varies by model, geography, retained exports, and comparison caches. Datastore, full-export, and disposable comparison-cache storage are reported separately below.</p><div id="storageReport" class="metric-grid"><p class="muted">Open this page to calculate storage usage.</p></div><div class="button-row"><button id="clearComparisonCache" type="button" class="secondary">Clear Comparison Cache</button><button id="rebuildComparisonCache" type="button" class="secondary">Rebuild on Next Use</button></div><p class="muted">The comparison cache is derived from authoritative RDA files, limited to 5 GB, and safe to rebuild.</p><details class="settings-disclosure"><summary>Advanced workspace access</summary><p class="muted">The workspace root includes hidden application state. Manage assets and projects through Workbench.</p><button id="revealWorkspaceRoot" type="button" class="secondary">Reveal workspace root</button></details></section>
+      </div>
+      <div class="dialog-actions dialog-fixed-footer"><div id="settingsNotice" class="settings-notice" role="status" aria-live="polite" aria-atomic="true" hidden><span id="settingsNoticeText"></span><button id="settingsRefreshWorkbench" type="button" class="secondary" hidden>Refresh Workbench</button></div><button id="saveSettings" type="submit">Save Settings</button></div>
+    </form>
+    <div id="settingsDialogResizer" class="settings-dialog-resizer" role="button" tabindex="0" aria-label="Resize Settings window" title="Drag to resize. Use arrow keys to resize or Home to restore the default size."></div>
+  </dialog>
+
+  <dialog id="shortcutDialog" class="wide-dialog taskbar-safe-dialog"><form method="dialog" class="settings-dialog-form"><div class="section-title dialog-fixed-header"><div><p class="eyebrow">Help</p><h2>Keyboard Shortcuts</h2></div><button value="close" class="secondary">Close</button></div><div class="shortcut-grid settings-dialog-body"><kbd data-shortcut="new-scenario"></kbd><span>New Scenario</span><kbd data-shortcut="new-file"></kbd><span>New File</span><kbd data-shortcut="batch-change"></kbd><span>Batch Change</span><kbd data-shortcut="save"></kbd><span>Save File Changes</span><kbd data-shortcut="run-selected"></kbd><span>Review / Run Selected</span><kbd data-shortcut="stop-selected"></kbd><span>Stop Selected Run</span><kbd data-shortcut="primary-tabs"></kbd><span>Open primary tabs</span><kbd data-shortcut="refresh"></kbd><span>Refresh</span><kbd data-shortcut="settings"></kbd><span>Settings</span></div></form></dialog>
+  <dialog id="runtimeGuideDialog" class="wide-dialog taskbar-safe-dialog"><form method="dialog" class="settings-dialog-form">
+    <div class="section-title dialog-fixed-header"><div><p class="eyebrow">Help</p><h2>Runtime Setup Guide</h2></div><button value="close" class="secondary">Close</button></div>
+    <div class="settings-dialog-body stack">
+    <details class="settings-disclosure" open><summary>Windows native VisionEval</summary><ol class="runtime-steps">
+      <li><strong>Choose VE_RUNTIME</strong><span>Select the working folder used to launch VisionEval, usually the folder containing .Renviron, .Rprofile, and models.</span></li>
+      <li><strong>Review detected paths</strong><span>Workbench reads VE_HOME from .Renviron and finds the matching Rscript from the launch script, r.version, or standard R installations. Advanced overrides remain available.</span></li>
+      <li><strong>Verify the connection</strong><span>Select <strong>Verify runtime</strong>. Workbench starts the installed VisionEval version and checks its registered modules. It does not compare hashes or contact GitHub.</span></li>
+    </ol><p>Windows runs are queued one at a time. Prepared models, logs, and results remain in the Workbench workspace.</p></details>
+    </div>
+  </form></dialog>
+  <dialog id="regionMapDialog" class="region-map-dialog">
+    <form method="dialog" class="region-map-shell">
+      <div class="section-title"><div><p class="eyebrow">Boundary review</p><h2 id="regionMapTitle">Virginia MPO geography</h2><p id="regionMapSubtitle" class="muted">Loading official map geometry…</p></div><button value="close" class="secondary">Close</button></div>
+      <div class="region-map-focus">
+        <label>Explore MPO<select id="regionMapRegion"><option value="">All MPOs</option></select></label>
+        <p class="muted">Azones are whole Virginia localities used by model inputs and may extend well beyond an official MPO study area.</p>
+      </div>
+      <div class="region-map-toolbar" aria-label="Map layers">
+        <label class="checkbox"><input type="checkbox" data-region-map-layer="mpos" checked> All MPO boundaries</label>
+        <label class="checkbox"><input type="checkbox" data-region-map-layer="azones" checked> All Azones</label>
+        <label class="checkbox"><input type="checkbox" data-region-map-layer="all-bzones" checked> All Bzones</label>
+        <label class="checkbox"><input type="checkbox" data-region-map-layer="selected-bzones" checked> Selected MPO Bzones</label>
+        <label class="checkbox" title="Bzones with at least 1% but less than 99% of their area inside the MPO"><input type="checkbox" data-region-map-layer="included-boundary" checked> Selected MPO boundary overlaps</label>
+        <label id="regionMapNameLabelsWrapper" class="checkbox" title="Choose an MPO to enable selected-MPO locality names"><input id="regionMapNameLabels" type="checkbox" checked> Selected MPO locality names</label>
+        <label class="checkbox" title="Show Azone IDs at regional zoom and Bzone IDs only when zoomed in closely"><input id="regionMapIdLabels" type="checkbox"> Zone ID labels</label>
+        <div class="region-map-navigation" aria-label="Map navigation">
+          <button id="zoomOutRegionMap" type="button" class="secondary icon-button" title="Zoom out" aria-label="Zoom out">−</button>
+          <button id="zoomInRegionMap" type="button" class="secondary icon-button" title="Zoom in" aria-label="Zoom in">+</button>
+          <button id="fitRegionMap" type="button" class="secondary">Fit MPO</button>
+          <button id="resetRegionMap" type="button" class="secondary">Virginia</button>
+        </div>
+      </div>
+      <div class="region-map-workspace">
+        <div id="regionMapCanvas" class="region-map-canvas empty-state" tabindex="0" aria-label="Interactive Virginia geography map">Loading map…</div>
+        <aside id="regionMapInspector" class="region-map-inspector" aria-live="polite" hidden>
+          <div class="region-map-inspector-title"><div><p class="eyebrow">Selected feature</p><h3 id="regionMapInspectorTitle">Zone details</h3></div><button id="closeRegionMapInspector" type="button" class="secondary icon-button" title="Close feature details" aria-label="Close feature details">×</button></div>
+          <div id="regionMapInspectorBody"></div>
+        </aside>
+      </div>
+      <div id="regionMapLegend" class="region-map-legend" hidden>
+        <span><i class="mpo"></i>All MPO boundaries</span><span><i class="azone"></i>All Azones</span><span><i class="bzone"></i>All Bzones</span><span><i class="selected"></i>Selected MPO Bzones</span><span><i class="boundary"></i>Selected MPO boundary overlaps</span>
+      </div>
+      <p class="muted region-map-footnote">Official geometry is downloaded on first use and cached locally. Region preview and build do not require the map or an internet connection.</p>
+    </form>
+  </dialog>
+  <dialog id="regionGeographyDialog" class="wide-dialog region-geography-dialog">
+    <form method="dialog" class="region-geography-form">
+      <header class="section-title region-geography-header"><div><p class="eyebrow">Build your own region</p><h2>Choose custom geography</h2><p class="muted">Select whole Azones or fine-tune individual Bzones.</p></div><button value="cancel" class="secondary">Close</button></header>
+      <div class="region-geography-scroll">
+        <section class="region-geography-section region-geography-fine-tune" aria-labelledby="customGeographyHeading">
+          <div><p class="step">Custom geography</p><h3 id="customGeographyHeading">Find and select Azones and Bzones</h3><p class="muted">Search, import, map, and lists remain synchronized.</p></div>
+          <div class="region-geography-toolbar"><label class="region-geography-search">Search<input id="regionGeographySearch" type="search" placeholder="Azone name, FIPS, or Bzone ID"></label><label class="region-geography-import">Import CSV <small>Azone and/or Bzone columns</small><input id="regionGeographyCsv" type="file" accept=".csv,text/csv"></label></div>
+          <p id="regionGeographyStatus" class="muted" aria-live="polite"></p>
+          <div class="region-geography-control-cards">
+            <section class="region-geography-control-card" aria-labelledby="regionSelectionControls"><h4 id="regionSelectionControls">Selection</h4><div class="actions"><button id="selectVisibleAzones" type="button" class="secondary">Select listed Azones</button><button id="clearRegionGeography" type="button" class="secondary">Clear selection</button></div></section>
+            <section class="region-geography-control-card region-geography-display" aria-labelledby="regionDisplayControls"><h4 id="regionDisplayControls">Map display</h4><div class="region-geography-layers"><label><input id="customRegionMpoLayer" type="checkbox" checked> MPO boundaries</label><label><input id="customRegionAzoneLayer" type="checkbox" checked> Azones</label><label><input id="customRegionBzoneLayer" type="checkbox" checked> Bzones</label><label><input id="customRegionAzoneLabels" type="checkbox" checked> Azone names</label><label><input id="customRegionAzoneIdLabels" type="checkbox"> Azone IDs</label><label><input id="customRegionBzoneLabels" type="checkbox"> Bzone IDs</label></div></section>
+          </div>
+          <p class="muted region-geography-map-help">Click Azones or Bzones on the map to add or remove them.</p>
+          <div class="region-geography-map-shell"><div class="region-geography-map-overlay" role="group" aria-label="Map navigation"><button id="zoomOutRegionGeography" type="button" class="secondary icon-button" aria-label="Zoom out">−</button><button id="zoomInRegionGeography" type="button" class="secondary icon-button" aria-label="Zoom in">+</button><button id="fitRegionGeography" type="button" class="secondary">Fit selection</button><button id="virginiaRegionGeography" type="button" class="secondary">Virginia</button></div><div id="regionGeographyMap" class="region-geography-map empty-state" aria-label="Interactive custom region selection map">Loading geography map…</div></div>
+          <div class="region-geography-columns"><section><div class="region-geography-heading"><div><h3>Azones</h3><p class="muted">Checking an Azone includes all of its Bzones.</p></div></div><div id="regionGeographyAzones" class="region-geography-list"></div></section><section><div class="region-geography-heading"><div><h3>Bzones</h3><p class="muted">Fine-tune individual Bzones.</p></div></div><div id="regionGeographyBzones" class="region-geography-list"></div></section></div>
+        </section>
+      </div>
+      <footer class="region-geography-footer"><strong id="regionGeographyFooterCount">0 Bzones selected</strong><div class="actions"><button value="cancel" class="secondary">Cancel</button><button id="applyRegionGeography" type="button">Apply and preview</button></div></footer>
+    </form>
+  </dialog>
+  <section id="appRecovery" class="app-recovery" hidden role="alert">
+    <div class="panel stack"><p class="eyebrow">VisionEval Workbench recovered an error</p><h2>The current screen could not finish loading</h2><p id="appRecoveryMessage">Your workspace data is safe. Reload Workbench to continue.</p><button id="reloadWorkbench" type="button">Reload Workbench</button></div>
+  </section>
+  <script src="build-capabilities.js"></script>
+  <script src="polygon-labels.js"></script>
+  <script src="extrusion-borders.js"></script>
+  <script src="vendor/maplibre/maplibre-gl.js" onerror="window.__WORKBENCH_MAPLIBRE_ASSET_ERROR__=true"></script>
+  <script src="app.js"></script>
+</body>
+</html>

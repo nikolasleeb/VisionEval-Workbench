@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "releaseStatus": "pending",
+  "applicationVersion": "1.0.0",
+  "platform": "macOS",
+  "architecture": "arm64",
+  "runtimeAdapter": "docker",
+  "visionEvalVersion": "VE-40-RC6",
+  "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
+  "runtimeImage": {
+    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
+    "digest": "sha256:03b552b7880bf88eccb8f89544f84ef053319e013c963626f35793bc05e9e4ae",
+    "published": true,
+    "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
+  },
+  "github": "https://github.com/nikolasleeb/VisionEval-Workbench"
+}

@@ -1,0 +1,12 @@
+# VisionEval Workbench Wiki
+
+VisionEval Workbench is an unofficial desktop application for exploring VisionEval inputs, creating repeatable scenarios, running models, and comparing completed results.
+
+Start with the guide for your computer:
+
+- [Windows Overview](Windows-Overview)
+- [macOS Overview](macOS-Overview)
+
+Both applications follow the same basic workflow—**Explore → Create → Run → Compare**—but their runtime setup is intentionally different. Windows connects to an existing native VisionEval installation. Apple Silicon macOS uses Docker Desktop and the Workbench ARM64 runtime.
+
+For download links, see the repository's [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
