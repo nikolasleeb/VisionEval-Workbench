@@ -59,6 +59,7 @@ jobs:
           node --check public/app.js
           node tests/polygon-labels.test.js
           node tests/extrusion-borders.test.js
+          python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-intel
           cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
           cargo test --manifest-path desktop/src-tauri/Cargo.toml --target x86_64-apple-darwin
       - name: Build x86_64 application
