@@ -1,4 +1,5 @@
 name: Add Intel macOS assets to release 1.0.0
+    continue-on-error: true
 
 on:
   workflow_dispatch:
