@@ -22,7 +22,7 @@ from .workspace import RUN_VERSION, Workspace, WorkspaceError, make_id, now_iso,
 ARM64_LOCAL_IMAGE = "local/visioneval:1.0.0-arm64"
 AMD64_LOCAL_IMAGE = "local/visioneval:2.0.0-amd64"
 RUNTIME_REPOSITORY = "ghcr.io/nikolasleeb/visioneval-workbench-runtime"
-PINNED_ARM64_RUNTIME_DIGEST = "sha256:bc24ee85547e19ab13024f1aae50940d38654852192c84f0e28df5dbd5d78fa8"
+PINNED_ARM64_RUNTIME_DIGEST = "sha256:b19208b5788e3c9fbb38b7d81dcdb9f052c349453695b69966cad95e827629b0"
 PINNED_ARM64_RUNTIME_REFERENCE = f"{RUNTIME_REPOSITORY}@{PINNED_ARM64_RUNTIME_DIGEST}"
 
 

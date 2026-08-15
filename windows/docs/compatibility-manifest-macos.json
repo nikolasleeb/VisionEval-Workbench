@@ -9,7 +9,7 @@
   "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
   "runtimeImage": {
     "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-    "digest": "sha256:bc24ee85547e19ab13024f1aae50940d38654852192c84f0e28df5dbd5d78fa8",
+    "digest": "sha256:b19208b5788e3c9fbb38b7d81dcdb9f052c349453695b69966cad95e827629b0",
     "published": true,
     "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
   },
