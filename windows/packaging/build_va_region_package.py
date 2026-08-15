@@ -225,7 +225,7 @@ def build(input_library: Path, output: Path) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-library", type=Path, default=ROOT.parent / "VisionEvalEditorTool" / "InputLibrary" / "VA")
-    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "packages" / f"{PACKAGE_ID}-{PACKAGE_VERSION}.zip")
+    parser.add_argument("--output", type=Path, default=ROOT / "dist" / "packages" / f"{PACKAGE_ID}.zip")
     args = parser.parse_args()
     print(build(args.input_library.resolve(), args.output.resolve()))
 

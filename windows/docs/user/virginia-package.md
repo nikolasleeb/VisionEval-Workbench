@@ -1,6 +1,6 @@
 # Virginia MPO Package
 
-The Virginia MPO package is optional. It appears in Create → Develop only after `virginia-mpo-regions-1.0.zip` is installed with **Settings → Assets → Choose ZIP…**. An already extracted package can instead be selected with **Choose extracted folder…**.
+The Virginia MPO package is optional. It appears in Create → Develop only after `virginia-mpo-regions.zip` is installed with **Settings → Assets → Choose ZIP…**. An already extracted package can instead be selected with **Choose extracted folder…**.
 
 ## What it enables
 

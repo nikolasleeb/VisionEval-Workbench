@@ -118,10 +118,10 @@ Do not rename an unknown image to the expected tag merely to bypass verification
 
 ## 5. Install PlanRVA or another model package
 
-The standard application starts without model assets. The optional `planrva-mm-1.0.0.zip` package contains the public **PlanRVA MM** InputLibrary, complete runnable model, and Virginia map context. It contains 52 input files: 51 CSVs plus `model_parameters.json`.
+The standard application starts without model assets. The optional `planrva-mm.zip` package contains the public **PlanRVA MM** InputLibrary, complete runnable model, and Virginia map context. It contains 52 input files: 51 CSVs plus `model_parameters.json`.
 
 1. Open **Settings → Assets**.
-2. Select **Add package** and choose `planrva-mm-1.0.0.zip`.
+2. Select **Add package** and choose `planrva-mm.zip`.
 3. Confirm that **PlanRVA MM** appears under both InputLibraries and model templates.
 4. To use an unpackaged model, expand **Advanced imports → Unpackaged assets** and import an InputLibrary and a complete runnable VisionEval folder containing at least:
    - `visioneval.cnf`
@@ -132,7 +132,7 @@ The standard application starts without model assets. The optional `planrva-mm-1
 
 Workbench copies imported assets into its workspace and never edits the external source folders.
 
-Install `virginia-mpo-regions-1.0.zip` separately to enable Virginia MPO region building. MPO regions are the supported execution scope. Statewide geometry may appear as map context, but a runnable statewide Virginia region is not offered in this release. See [Virginia MPO package](virginia-package.md).
+Install `virginia-mpo-regions.zip` separately to enable Virginia MPO region building. MPO regions are the supported execution scope. Statewide geometry may appear as map context, but a runnable statewide Virginia region is not offered in this release. See [Virginia MPO package](virginia-package.md).
 
 ## 6. Confirm the installation
 

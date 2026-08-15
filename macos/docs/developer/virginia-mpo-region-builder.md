@@ -10,7 +10,7 @@ Build the current package with:
 python packaging/build_va_region_package.py
 ```
 
-The output is versioned under `dist/packages/virginia-mpo-regions-<version>.zip`. Its `workbench-package.json` inventories every payload file with its size and SHA-256 checksum. Its `SOURCES.md` records all authority links, licensing constraints, methodology, transit compatibility assumptions, and the August 5, 2026 source-check date. The package contains the derived Bzone crosswalk, not copies of the source polygon geometry.
+The output is written to `dist/packages/virginia-mpo-regions.zip`; its internal manifest retains the package version. Its `workbench-package.json` inventories every payload file with its size and SHA-256 checksum. Its `SOURCES.md` records all authority links, licensing constraints, methodology, transit compatibility assumptions, and the August 5, 2026 source-check date. The package contains the derived Bzone crosswalk, not copies of the source polygon geometry.
 
 Regional packages use generic metadata for coverage, terminology, region definitions, crosswalk paths, source documents, and package-specific default inputs. This prevents Virginia assumptions from being applied to a future package for another state.
 

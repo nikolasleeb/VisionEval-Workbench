@@ -37,8 +37,8 @@ The Mac application is ad-hoc signed but is not Apple-notarized. If macOS blocks
 
 The release also includes two optional platform-neutral packages:
 
-- `planrva-mm-1.0.0.zip` provides the PlanRVA multimodal model template and matching InputLibrary.
-- `virginia-mpo-regions-2026.08.12.3.zip` provides Virginia MPO regional data and Region Builder support.
+- `planrva-mm.zip` provides the PlanRVA multimodal model template and matching InputLibrary.
+- `virginia-mpo-regions.zip` provides Virginia MPO regional data and Region Builder support.
 
 Do not unzip these packages. In Workbench, open **Settings → Assets**, choose the downloaded ZIP, review its information, and install it into your workspace.
 
