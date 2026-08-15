@@ -67,14 +67,12 @@ The Virginia generator includes a Bzone in every MPO covering at least 1% of its
 
 The local working folder used while developing the Virginia package contained these source examples:
 
-| Working file | Contents found | How it was used |
-| --- | ---: | --- |
-| `VDOT_MPO_STUDY_AREA_BOUNDARY_….geojson` | 15 polygon features | Supplied the official MPO identifiers, names, and study-area boundaries. |
-| `Azones.geojson` | 133 polygon features | Connected five-digit Virginia locality identifiers to VisionEval Azones. |
-| `Bzones.geojson` | 5,963 polygon features | Supplied the `GEOID` polygons compared with each MPO boundary. |
-| `AzonesBzonesVa_geojson.zip` | The Azone and Bzone GeoJSON files | Preserved the downloaded working copies together. |
-| `MPO_Listing_2023-09-01_acc110623_PM.pdf` | A four-page VDOT MPO/locality listing | Provided a human-readable check of MPO names and member localities. |
-| `Notes and Links.docx` | Links to the ArcGIS and Virginia Roads sources | Recorded where the GIS files had been obtained. |
+- **`VDOT_MPO_STUDY_AREA_BOUNDARY_….geojson` — 15 polygon features.** Supplied the official MPO identifiers, names, and study-area boundaries.
+- **`Azones.geojson` — 133 polygon features.** Connected five-digit Virginia locality identifiers to VisionEval Azones.
+- **`Bzones.geojson` — 5,963 polygon features.** Supplied the `GEOID` polygons compared with each MPO boundary.
+- **`AzonesBzonesVa_geojson.zip` — Azone and Bzone GeoJSON.** Preserved the downloaded working copies together.
+- **`MPO_Listing_2023-09-01_acc110623_PM.pdf` — four-page VDOT listing.** Provided a human-readable check of MPO names and member localities.
+- **`Notes and Links.docx` — source links.** Recorded where the ArcGIS and Virginia Roads GIS files had been obtained.
 
 The full GeoJSON working files are not part of the released ZIP or this repository. They are large, and their publishers' terms do not authorize Workbench to redistribute the raw polygons. The builder instead stores source URLs and a small, reproducible Bzone membership crosswalk.
 
