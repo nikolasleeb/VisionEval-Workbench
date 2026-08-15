@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://visioneval.org/workbench/asset-manifest.schema.json",
+  "title": "VisionEval Workbench Asset Pack",
+  "type": "object",
+  "required": ["id", "version", "assetType", "visionEvalVersion", "url", "size", "sha256"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]+$"},
+    "version": {"type": "string"},
+    "assetType": {"enum": ["model-template", "input-library"]},
+    "visionEvalVersion": {"type": "string"},
+    "runtimeAdapters": {"type": "array", "items": {"enum": ["docker-arm64", "docker-amd64", "windows-native"]}},
+    "architectures": {"type": "array", "items": {"enum": ["arm64", "amd64", "platform-independent"]}},
+    "url": {"type": "string", "format": "uri"},
+    "size": {"type": "integer", "minimum": 1},
+    "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "additionalProperties": false
+}

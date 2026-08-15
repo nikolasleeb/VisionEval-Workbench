@@ -1,0 +1,627 @@
+{
+  "schemaVersion": 1,
+  "id": "planrva-mm-v1",
+  "version": "1.0.0",
+  "name": "PlanRVA MM Example",
+  "assetType": "bundled-example",
+  "inputLibrary": {
+    "id": "PlanRVA MM",
+    "csvCount": 51,
+    "inputFileCount": 52
+  },
+  "modelTemplate": {
+    "id": "template-planrva-mm-8f140cd4cb",
+    "name": "PlanRVA MM",
+    "fingerprint": "20d581d194edb965960506ca61dcb320f7314ff1c80b79fe07ca2a25ffd274b8"
+  },
+  "comparisonMap": {
+    "id": "planrva-virginia-map-context",
+    "path": "map-context"
+  },
+  "compatibility": {
+    "workbenchVersion": "1.0.0",
+    "visionEvalVersion": "VE-40-RC6",
+    "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
+    "runtimeDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "patch": "2026-08-03-composite-household-id-alignment",
+    "architecture": "amd64"
+  },
+  "provenance": {
+    "owner": "PlanRVA",
+    "source": "Public PlanRVA VisionEval multimodal planning model and input data",
+    "notice": "Public planning example provided without warranty; not owned or published by VisionEval."
+  },
+  "treeSha256": "43f4f61b1e39234ccdf825d24112bcdf3805e54ebd786aa56d38b5e30d5e4c16",
+  "files": [
+    {
+      "path": "NOTICE.md",
+      "size": 805,
+      "sha256": "674feb1d816a794500434f86324df41cfd9d2b5ecd20e75d42252a7876193b96"
+    },
+    {
+      "path": "input-library/azone_carsvc_characteristics.csv",
+      "size": 820,
+      "sha256": "6c5e52022e43b89513f328aa1b2ad8609a5d231dc8aafde237ffea887a12826f"
+    },
+    {
+      "path": "input-library/azone_charging_availability.csv",
+      "size": 655,
+      "sha256": "59e9320f96986c09e42a8fe138482a35e2f37b2575bf27a992c1fc6dc54ab7f5"
+    },
+    {
+      "path": "input-library/azone_electricity_carbon_intensity.csv",
+      "size": 449,
+      "sha256": "745f138ece00fa8e777b78a9e015bacfe4754e4ac6350065791a58ff13c51493"
+    },
+    {
+      "path": "input-library/azone_fuel_power_cost.csv",
+      "size": 592,
+      "sha256": "43d2e5a78f5f4f77bced7fd1f4d751a29499e9393cf029421fd91350b5063265"
+    },
+    {
+      "path": "input-library/azone_gq_pop_by_age.csv",
+      "size": 678,
+      "sha256": "072bb3b009300f8312bdccfcefb1f3132cd3afa012860c8a32c76397c6f26a21"
+    },
+    {
+      "path": "input-library/azone_hh_av_veh_per_driver.csv",
+      "size": 562,
+      "sha256": "d13a778759568780f91f2d3aa5ec7f0894ef91163394beece826ab4498a1aa63"
+    },
+    {
+      "path": "input-library/azone_hh_lttrk_prop.csv",
+      "size": 457,
+      "sha256": "b3f6d1d341fe783f9ba2c0b02b5be4c84ba7dc0bcf415014175fb7544c9ed021"
+    },
+    {
+      "path": "input-library/azone_hh_pop_by_age.csv",
+      "size": 942,
+      "sha256": "a3c1316106f2f8402ff5f712cdc175be1570e6e0c614da5b3ff7f54721ba8278"
+    },
+    {
+      "path": "input-library/azone_hh_veh_mean_age.csv",
+      "size": 562,
+      "sha256": "8d1d8317e47df394aa349678746ae63588cd7c4cd3234c20e9303c5c296f0021"
+    },
+    {
+      "path": "input-library/azone_hh_veh_own_taxes.csv",
+      "size": 587,
+      "sha256": "ae0674058ca73de30475617ce0a1b949a8619308a7996249fc2a24cec77e2708"
+    },
+    {
+      "path": "input-library/azone_hhsize_targets.csv",
+      "size": 561,
+      "sha256": "aee9376684b8ee181972ecf83607567afe1392fcf7594b86fbd42313a185e75c"
+    },
+    {
+      "path": "input-library/azone_lttrk_prop.csv",
+      "size": 460,
+      "sha256": "52f96ada007f8a3d85ebb17c7cd55553d70ebe4e64912d9f534911fbc72bb22e"
+    },
+    {
+      "path": "input-library/azone_payd_insurance_prop.csv",
+      "size": 446,
+      "sha256": "6cbd8e18e8248330e3456c1adcde5909e1d01575d9e4060e3707f4bbb43a039d"
+    },
+    {
+      "path": "input-library/azone_per_cap_inc.csv",
+      "size": 579,
+      "sha256": "608b198f5f71f389262dc5a916ae68c70defbdd21d3ae3c39a82a722da16b4c6"
+    },
+    {
+      "path": "input-library/azone_prop_sov_dvmt_diverted.csv",
+      "size": 455,
+      "sha256": "2e8c7270987473b939918190aa4176f11ca2e02a98fd4607befae0359a4faf08"
+    },
+    {
+      "path": "input-library/azone_relative_employment.csv",
+      "size": 580,
+      "sha256": "64b2830cfeb33db2be87ed6470d806dcdb659e5ad159edaed24938767d973194"
+    },
+    {
+      "path": "input-library/azone_veh_use_taxes.csv",
+      "size": 621,
+      "sha256": "d54dbad94677e6b7d6c5dc59332399c5865a39633e0dee8d4774f586e6b3ce01"
+    },
+    {
+      "path": "input-library/azone_vehicle_access_times.csv",
+      "size": 533,
+      "sha256": "dc8c811f989fa2ddeb90c53df4dfa58c32c965051db2775c04fb9ac03fa0fa84"
+    },
+    {
+      "path": "input-library/bzone_carsvc_availability.csv",
+      "size": 33551,
+      "sha256": "1168f8e5aa9a2f44fd7bf940db480c2cc418a459cb75d6f98549711619c236cb"
+    },
+    {
+      "path": "input-library/bzone_dwelling_units.csv",
+      "size": 40898,
+      "sha256": "ade3df3acf85d92cbf346ea366da6833151688a8e281abf2323e087b0db514ef"
+    },
+    {
+      "path": "input-library/bzone_employment.csv",
+      "size": 42177,
+      "sha256": "2d498e65be5446fd3b2c3fe3fa2701d9f17714d074ea814fe8f239867f414bc7"
+    },
+    {
+      "path": "input-library/bzone_hh_inc_qrtl_prop.csv",
+      "size": 61637,
+      "sha256": "84eda6a770ba6499c1666ab1b4310f7b027a41a5d425d50425eab7674f5dc7c4"
+    },
+    {
+      "path": "input-library/bzone_lat_lon.csv",
+      "size": 64092,
+      "sha256": "d3372f4f8e9526d5ecac1e57b477de313a5a31c973d31c33e6d05a48c19aad01"
+    },
+    {
+      "path": "input-library/bzone_network_design.csv",
+      "size": 40364,
+      "sha256": "7b706777cf896c5f2a5cabaa127a1e926d5c4fa9146bfcda2eb8c4ad53baa0b2"
+    },
+    {
+      "path": "input-library/bzone_parking.csv",
+      "size": 54614,
+      "sha256": "c79522030bbb35710aca838b8b05740336a6d1b00092621527baeb7b4b89831e"
+    },
+    {
+      "path": "input-library/bzone_transit_service.csv",
+      "size": 30871,
+      "sha256": "7adab9b65e86210c89723cef0dcfa4609fec33f0fadb8e11f2515ecf0a9b208a"
+    },
+    {
+      "path": "input-library/bzone_travel_demand_mgt.csv",
+      "size": 35205,
+      "sha256": "3fbab9cdb4e6df445be6a711456e9c5f4d3fcba508b86a74dbebdd0854db390d"
+    },
+    {
+      "path": "input-library/bzone_unprotected_area.csv",
+      "size": 52994,
+      "sha256": "c3d0db7bd4f004cee4c048f69bda2a90bf67b35997b85390590438d2133b4fa8"
+    },
+    {
+      "path": "input-library/bzone_urban-mixed-use_prop.csv",
+      "size": 41736,
+      "sha256": "d1b55df3d52248f6382b8b30edeeef022254afaaf0080560256bd8e7049f6757"
+    },
+    {
+      "path": "input-library/bzone_urban-town_du_proportions.csv",
+      "size": 71994,
+      "sha256": "35d889aa88a62826d74e9fbd74e6c15efcaaff002fc4f1efdb9a0fbdc85a1686"
+    },
+    {
+      "path": "input-library/marea_base_year_dvmt.csv",
+      "size": 160,
+      "sha256": "44402cd7f33ecfc88ef767d69a5b9f7243bf581ec90a2193121cb7f2afdbe413"
+    },
+    {
+      "path": "input-library/marea_census_r.csv",
+      "size": 149,
+      "sha256": "634465c530c6abd3696551419ad6127c4b880019971792bde81aa11b35d8389c"
+    },
+    {
+      "path": "input-library/marea_congestion_charges.csv",
+      "size": 414,
+      "sha256": "e65c2f9aec4f159839f938046306ed1d43733b5e20349335e6a0d88641a1d637"
+    },
+    {
+      "path": "input-library/marea_dvmt_split_by_road_class.csv",
+      "size": 482,
+      "sha256": "e94f49df4c38ad20e6071c0ab11a38f6be1e9be3a2971b9c8f77b3a10368093d"
+    },
+    {
+      "path": "input-library/marea_lane_miles.csv",
+      "size": 204,
+      "sha256": "86cd772ec84cd7cd8a34674e86dc165c2f984583df304b5a77b653e487f59fc4"
+    },
+    {
+      "path": "input-library/marea_operations_deployment.csv",
+      "size": 334,
+      "sha256": "582b571b1cd66a022bcfd8b4124853248db4a55df7aeb76e05d5a490c29b2748"
+    },
+    {
+      "path": "input-library/marea_speed_smooth_ecodrive.csv",
+      "size": 209,
+      "sha256": "cf51c880791e6359433cc0c8da3010088e1f5e8cf970b582ad96a52228620f0f"
+    },
+    {
+      "path": "input-library/marea_transit_biofuel_mix.csv",
+      "size": 234,
+      "sha256": "527f30b39a17115537c2e452cf06de4b9a92199c277dc04799b62c76595e1bd2"
+    },
+    {
+      "path": "input-library/marea_transit_fuel.csv",
+      "size": 436,
+      "sha256": "57846d3c5e60f4ef90626cc54826dc55eb93183ba95a3038ad74b0221790f7d7"
+    },
+    {
+      "path": "input-library/marea_transit_powertrain_prop.csv",
+      "size": 304,
+      "sha256": "79e3c1fa957deef46e31a3807470f5526e31e8aa9aa4ea87dc5c5da815183985"
+    },
+    {
+      "path": "input-library/marea_transit_service.csv",
+      "size": 312,
+      "sha256": "c87d2b33370315d14e68cb88339621448647233b6acd40dd826891a71a1f34e7"
+    },
+    {
+      "path": "input-library/model_parameters.json",
+      "size": 129,
+      "sha256": "97d0b2abe630f181694736b67e651d54fc1bf92d75afe0f9a0c100255bdd6736"
+    },
+    {
+      "path": "input-library/other_ops_effectiveness.csv",
+      "size": 105,
+      "sha256": "fe30a6b19f56f41ece89a7c9dd347ab3dcce0c3b9234acf99cb8e480aaa3c71c"
+    },
+    {
+      "path": "input-library/region_base_year_dvmt.csv",
+      "size": 95,
+      "sha256": "e73a4b1442c14f47bf5ad26ce62e86cc156cb948cc8d784025263143b1c46474"
+    },
+    {
+      "path": "input-library/region_carsvc_powertrain_prop.csv",
+      "size": 272,
+      "sha256": "d0407bf9d80700c12a09029c600554a838baf8999c7a289aa99bbeec6fd7e45d"
+    },
+    {
+      "path": "input-library/region_comsvc_lttrk_prop.csv",
+      "size": 55,
+      "sha256": "2821cf4877fc72dda46a229808ec0397692e25c9b57988e3f044a409059c52fd"
+    },
+    {
+      "path": "input-library/region_comsvc_powertrain_prop.csv",
+      "size": 224,
+      "sha256": "1ea84fc90f38cc22b8a4951eef03198794170bb297473a82de8d38945027070f"
+    },
+    {
+      "path": "input-library/region_comsvc_veh_mean_age.csv",
+      "size": 44,
+      "sha256": "91ec7c727eeceb2a4689fb164379621064fcbc7283fcf683b1549c5e8e91368d"
+    },
+    {
+      "path": "input-library/region_hh_ave_driver_per_capita.csv",
+      "size": 160,
+      "sha256": "d26a1a2674a997d50ef126a9313851d9f44f274693ae306d1872bc744a5e1cec"
+    },
+    {
+      "path": "input-library/region_hvytrk_powertrain_prop.csv",
+      "size": 107,
+      "sha256": "36dc516578e4d02c0834581bc99ea90b2ffb871cb3f28ed80d7b8303dfcb1bd7"
+    },
+    {
+      "path": "input-library/region_prop_externalities_paid.csv",
+      "size": 70,
+      "sha256": "9b7ff58c56af4d82f1341d9024198cd3cf6052706532be081e4900f755fbcae8"
+    },
+    {
+      "path": "input-library/region_road_cost.csv",
+      "size": 220,
+      "sha256": "ad4d704f95044ea2e8e0e9bf13428387391d3ff36b36c59305bf106ed43d99be"
+    },
+    {
+      "path": "map-context/SOURCES.md",
+      "size": 1101,
+      "sha256": "f9d441cdc217096c562c92d349b17fe5e6bff658da2ec3c3246159b08b88de25"
+    },
+    {
+      "path": "map-context/virginia_county_equivalents_2020.txt",
+      "size": 5384,
+      "sha256": "c4f44a0414a9d9b37b737387011fac92b55ae287853cef5f0baa05507e28baf0"
+    },
+    {
+      "path": "map-context/virginia_mpo_bzone_crosswalk.json",
+      "size": 153160,
+      "sha256": "d9b6933419e3066062fe4cb03a18df03a970d1c5deab2af91a96c8b07938f870"
+    },
+    {
+      "path": "map-context/virginia_mpo_regions.json",
+      "size": 12506,
+      "sha256": "7aeae942f5828c19ab86552b9200c8ec1eb4533384ebb8a06a936dcfd0277845"
+    },
+    {
+      "path": "map-context/workbench-map-context.json",
+      "size": 1250,
+      "sha256": "a79c91b454e7a815de057221d5d49ae082ec6619c8aec3bc69acfea30840d5de"
+    },
+    {
+      "path": "model-template/defs/deflators.csv",
+      "size": 329,
+      "sha256": "5b08b7a6dd00f15b81d11b3542951fc78e731e958672d3843132fa94a5aeaa3a"
+    },
+    {
+      "path": "model-template/defs/geo.csv",
+      "size": 37651,
+      "sha256": "fba928f1316f3590528ab4a127dbc5ba5566b61693c27d83fdf597e8bb06aa8a"
+    },
+    {
+      "path": "model-template/defs/geo.csv.original-rounded",
+      "size": 37445,
+      "sha256": "d1759ee744bd8ef0fdac59775e66b24f19c55adcb3a0605cc93c704d16455160"
+    },
+    {
+      "path": "model-template/defs/units.csv",
+      "size": 179,
+      "sha256": "e7560b5422454e3a04d348466fb996a3260fc8f64e5bfccdf5aaa022c0c09272"
+    },
+    {
+      "path": "model-template/inputs/azone_carsvc_characteristics.csv",
+      "size": 820,
+      "sha256": "6c5e52022e43b89513f328aa1b2ad8609a5d231dc8aafde237ffea887a12826f"
+    },
+    {
+      "path": "model-template/inputs/azone_charging_availability.csv",
+      "size": 655,
+      "sha256": "59e9320f96986c09e42a8fe138482a35e2f37b2575bf27a992c1fc6dc54ab7f5"
+    },
+    {
+      "path": "model-template/inputs/azone_electricity_carbon_intensity.csv",
+      "size": 449,
+      "sha256": "745f138ece00fa8e777b78a9e015bacfe4754e4ac6350065791a58ff13c51493"
+    },
+    {
+      "path": "model-template/inputs/azone_fuel_power_cost.csv",
+      "size": 592,
+      "sha256": "43d2e5a78f5f4f77bced7fd1f4d751a29499e9393cf029421fd91350b5063265"
+    },
+    {
+      "path": "model-template/inputs/azone_gq_pop_by_age.csv",
+      "size": 678,
+      "sha256": "072bb3b009300f8312bdccfcefb1f3132cd3afa012860c8a32c76397c6f26a21"
+    },
+    {
+      "path": "model-template/inputs/azone_hh_av_veh_per_driver.csv",
+      "size": 562,
+      "sha256": "d13a778759568780f91f2d3aa5ec7f0894ef91163394beece826ab4498a1aa63"
+    },
+    {
+      "path": "model-template/inputs/azone_hh_lttrk_prop.csv",
+      "size": 457,
+      "sha256": "b3f6d1d341fe783f9ba2c0b02b5be4c84ba7dc0bcf415014175fb7544c9ed021"
+    },
+    {
+      "path": "model-template/inputs/azone_hh_pop_by_age.csv",
+      "size": 942,
+      "sha256": "a3c1316106f2f8402ff5f712cdc175be1570e6e0c614da5b3ff7f54721ba8278"
+    },
+    {
+      "path": "model-template/inputs/azone_hh_veh_mean_age.csv",
+      "size": 562,
+      "sha256": "8d1d8317e47df394aa349678746ae63588cd7c4cd3234c20e9303c5c296f0021"
+    },
+    {
+      "path": "model-template/inputs/azone_hh_veh_own_taxes.csv",
+      "size": 587,
+      "sha256": "ae0674058ca73de30475617ce0a1b949a8619308a7996249fc2a24cec77e2708"
+    },
+    {
+      "path": "model-template/inputs/azone_hhsize_targets.csv",
+      "size": 561,
+      "sha256": "aee9376684b8ee181972ecf83607567afe1392fcf7594b86fbd42313a185e75c"
+    },
+    {
+      "path": "model-template/inputs/azone_lttrk_prop.csv",
+      "size": 460,
+      "sha256": "52f96ada007f8a3d85ebb17c7cd55553d70ebe4e64912d9f534911fbc72bb22e"
+    },
+    {
+      "path": "model-template/inputs/azone_payd_insurance_prop.csv",
+      "size": 446,
+      "sha256": "6cbd8e18e8248330e3456c1adcde5909e1d01575d9e4060e3707f4bbb43a039d"
+    },
+    {
+      "path": "model-template/inputs/azone_per_cap_inc.csv",
+      "size": 579,
+      "sha256": "608b198f5f71f389262dc5a916ae68c70defbdd21d3ae3c39a82a722da16b4c6"
+    },
+    {
+      "path": "model-template/inputs/azone_prop_sov_dvmt_diverted.csv",
+      "size": 455,
+      "sha256": "2e8c7270987473b939918190aa4176f11ca2e02a98fd4607befae0359a4faf08"
+    },
+    {
+      "path": "model-template/inputs/azone_relative_employment.csv",
+      "size": 580,
+      "sha256": "64b2830cfeb33db2be87ed6470d806dcdb659e5ad159edaed24938767d973194"
+    },
+    {
+      "path": "model-template/inputs/azone_veh_use_taxes.csv",
+      "size": 621,
+      "sha256": "d54dbad94677e6b7d6c5dc59332399c5865a39633e0dee8d4774f586e6b3ce01"
+    },
+    {
+      "path": "model-template/inputs/azone_vehicle_access_times.csv",
+      "size": 533,
+      "sha256": "dc8c811f989fa2ddeb90c53df4dfa58c32c965051db2775c04fb9ac03fa0fa84"
+    },
+    {
+      "path": "model-template/inputs/bzone_carsvc_availability.csv",
+      "size": 33551,
+      "sha256": "1168f8e5aa9a2f44fd7bf940db480c2cc418a459cb75d6f98549711619c236cb"
+    },
+    {
+      "path": "model-template/inputs/bzone_dwelling_units.csv",
+      "size": 40898,
+      "sha256": "ade3df3acf85d92cbf346ea366da6833151688a8e281abf2323e087b0db514ef"
+    },
+    {
+      "path": "model-template/inputs/bzone_employment.csv",
+      "size": 42177,
+      "sha256": "2d498e65be5446fd3b2c3fe3fa2701d9f17714d074ea814fe8f239867f414bc7"
+    },
+    {
+      "path": "model-template/inputs/bzone_hh_inc_qrtl_prop.csv",
+      "size": 61637,
+      "sha256": "84eda6a770ba6499c1666ab1b4310f7b027a41a5d425d50425eab7674f5dc7c4"
+    },
+    {
+      "path": "model-template/inputs/bzone_lat_lon.csv",
+      "size": 64092,
+      "sha256": "d3372f4f8e9526d5ecac1e57b477de313a5a31c973d31c33e6d05a48c19aad01"
+    },
+    {
+      "path": "model-template/inputs/bzone_network_design.csv",
+      "size": 40364,
+      "sha256": "7b706777cf896c5f2a5cabaa127a1e926d5c4fa9146bfcda2eb8c4ad53baa0b2"
+    },
+    {
+      "path": "model-template/inputs/bzone_parking.csv",
+      "size": 54614,
+      "sha256": "c79522030bbb35710aca838b8b05740336a6d1b00092621527baeb7b4b89831e"
+    },
+    {
+      "path": "model-template/inputs/bzone_transit_service.csv",
+      "size": 30871,
+      "sha256": "7adab9b65e86210c89723cef0dcfa4609fec33f0fadb8e11f2515ecf0a9b208a"
+    },
+    {
+      "path": "model-template/inputs/bzone_travel_demand_mgt.csv",
+      "size": 35205,
+      "sha256": "3fbab9cdb4e6df445be6a711456e9c5f4d3fcba508b86a74dbebdd0854db390d"
+    },
+    {
+      "path": "model-template/inputs/bzone_unprotected_area.csv",
+      "size": 52994,
+      "sha256": "c3d0db7bd4f004cee4c048f69bda2a90bf67b35997b85390590438d2133b4fa8"
+    },
+    {
+      "path": "model-template/inputs/bzone_urban-mixed-use_prop.csv",
+      "size": 41736,
+      "sha256": "d1b55df3d52248f6382b8b30edeeef022254afaaf0080560256bd8e7049f6757"
+    },
+    {
+      "path": "model-template/inputs/bzone_urban-town_du_proportions.csv",
+      "size": 71994,
+      "sha256": "35d889aa88a62826d74e9fbd74e6c15efcaaff002fc4f1efdb9a0fbdc85a1686"
+    },
+    {
+      "path": "model-template/inputs/marea_base_year_dvmt.csv",
+      "size": 160,
+      "sha256": "44402cd7f33ecfc88ef767d69a5b9f7243bf581ec90a2193121cb7f2afdbe413"
+    },
+    {
+      "path": "model-template/inputs/marea_census_r.csv",
+      "size": 149,
+      "sha256": "634465c530c6abd3696551419ad6127c4b880019971792bde81aa11b35d8389c"
+    },
+    {
+      "path": "model-template/inputs/marea_congestion_charges.csv",
+      "size": 414,
+      "sha256": "e65c2f9aec4f159839f938046306ed1d43733b5e20349335e6a0d88641a1d637"
+    },
+    {
+      "path": "model-template/inputs/marea_dvmt_split_by_road_class.csv",
+      "size": 482,
+      "sha256": "e94f49df4c38ad20e6071c0ab11a38f6be1e9be3a2971b9c8f77b3a10368093d"
+    },
+    {
+      "path": "model-template/inputs/marea_lane_miles.csv",
+      "size": 204,
+      "sha256": "86cd772ec84cd7cd8a34674e86dc165c2f984583df304b5a77b653e487f59fc4"
+    },
+    {
+      "path": "model-template/inputs/marea_operations_deployment.csv",
+      "size": 334,
+      "sha256": "582b571b1cd66a022bcfd8b4124853248db4a55df7aeb76e05d5a490c29b2748"
+    },
+    {
+      "path": "model-template/inputs/marea_speed_smooth_ecodrive.csv",
+      "size": 209,
+      "sha256": "cf51c880791e6359433cc0c8da3010088e1f5e8cf970b582ad96a52228620f0f"
+    },
+    {
+      "path": "model-template/inputs/marea_transit_biofuel_mix.csv",
+      "size": 234,
+      "sha256": "527f30b39a17115537c2e452cf06de4b9a92199c277dc04799b62c76595e1bd2"
+    },
+    {
+      "path": "model-template/inputs/marea_transit_fuel.csv",
+      "size": 436,
+      "sha256": "57846d3c5e60f4ef90626cc54826dc55eb93183ba95a3038ad74b0221790f7d7"
+    },
+    {
+      "path": "model-template/inputs/marea_transit_powertrain_prop.csv",
+      "size": 304,
+      "sha256": "79e3c1fa957deef46e31a3807470f5526e31e8aa9aa4ea87dc5c5da815183985"
+    },
+    {
+      "path": "model-template/inputs/marea_transit_service.csv",
+      "size": 312,
+      "sha256": "c87d2b33370315d14e68cb88339621448647233b6acd40dd826891a71a1f34e7"
+    },
+    {
+      "path": "model-template/inputs/model_parameters.json",
+      "size": 129,
+      "sha256": "97d0b2abe630f181694736b67e651d54fc1bf92d75afe0f9a0c100255bdd6736"
+    },
+    {
+      "path": "model-template/inputs/other_ops_effectiveness.csv",
+      "size": 105,
+      "sha256": "fe30a6b19f56f41ece89a7c9dd347ab3dcce0c3b9234acf99cb8e480aaa3c71c"
+    },
+    {
+      "path": "model-template/inputs/region_base_year_dvmt.csv",
+      "size": 95,
+      "sha256": "e73a4b1442c14f47bf5ad26ce62e86cc156cb948cc8d784025263143b1c46474"
+    },
+    {
+      "path": "model-template/inputs/region_carsvc_powertrain_prop.csv",
+      "size": 272,
+      "sha256": "d0407bf9d80700c12a09029c600554a838baf8999c7a289aa99bbeec6fd7e45d"
+    },
+    {
+      "path": "model-template/inputs/region_comsvc_lttrk_prop.csv",
+      "size": 55,
+      "sha256": "2821cf4877fc72dda46a229808ec0397692e25c9b57988e3f044a409059c52fd"
+    },
+    {
+      "path": "model-template/inputs/region_comsvc_powertrain_prop.csv",
+      "size": 224,
+      "sha256": "1ea84fc90f38cc22b8a4951eef03198794170bb297473a82de8d38945027070f"
+    },
+    {
+      "path": "model-template/inputs/region_comsvc_veh_mean_age.csv",
+      "size": 44,
+      "sha256": "91ec7c727eeceb2a4689fb164379621064fcbc7283fcf683b1549c5e8e91368d"
+    },
+    {
+      "path": "model-template/inputs/region_hh_ave_driver_per_capita.csv",
+      "size": 160,
+      "sha256": "d26a1a2674a997d50ef126a9313851d9f44f274693ae306d1872bc744a5e1cec"
+    },
+    {
+      "path": "model-template/inputs/region_hvytrk_powertrain_prop.csv",
+      "size": 107,
+      "sha256": "36dc516578e4d02c0834581bc99ea90b2ffb871cb3f28ed80d7b8303dfcb1bd7"
+    },
+    {
+      "path": "model-template/inputs/region_prop_externalities_paid.csv",
+      "size": 70,
+      "sha256": "9b7ff58c56af4d82f1341d9024198cd3cf6052706532be081e4900f755fbcae8"
+    },
+    {
+      "path": "model-template/inputs/region_road_cost.csv",
+      "size": 220,
+      "sha256": "ad4d704f95044ea2e8e0e9bf13428387391d3ff36b36c59305bf106ed43d99be"
+    },
+    {
+      "path": "model-template/queries/Full-Query.VEqry",
+      "size": 38830,
+      "sha256": "7bca15fb1b8a33fa29393f6f31f6ca7212e34c4e4a018caf044caf80c6a97550"
+    },
+    {
+      "path": "model-template/scripts/run_model.R",
+      "size": 4447,
+      "sha256": "526e58fcf2a3fea4e0869bdf579712e0aa0bebe8929305da3763ed1c29c8610c"
+    },
+    {
+      "path": "model-template/visioneval.cnf",
+      "size": 825,
+      "sha256": "d771bb391f68dc41eff68b91662e7ce46c90bf7ed99c1b81083d571c7bf328dd"
+    },
+    {
+      "path": "model-template/workbench_template.json",
+      "size": 2055,
+      "sha256": "581129064bc6181e42bc911617c3c7333d1a89db9c662c080450176db0f0bc67"
+    }
+  ]
+}

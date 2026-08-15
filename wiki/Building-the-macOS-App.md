@@ -12,3 +12,5 @@ Development requires Node.js 20, Python 3.11, Rust with the `aarch64-apple-darwi
 The release workflow validates generated assets and documentation, runs Python and JavaScript tests, runs Rust formatting/tests, builds the sidecar and ARM64 application, ad-hoc signs the bundle, verifies the signature, and packages the app in a DMG.
 
 The Mac source is intentionally maintained separately from the Windows source. Its guided Docker setup and runtime behavior should remain Mac-specific.
+
+The Intel build has its own source and release process in `intel/`; see [Building the Intel macOS App](Building-the-Intel-macOS-App).

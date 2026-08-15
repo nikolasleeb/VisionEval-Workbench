@@ -16,6 +16,13 @@
 - [Using Workbench](Using-Workbench-on-macOS)
 - [Building the App](Building-the-macOS-App)
 
+**Intel macOS**
+
+- [Overview](Intel-macOS-Overview)
+- [Installation and Runtime](Intel-macOS-Installation-and-Runtime)
+- [Using Workbench](Using-Workbench-on-Intel-macOS)
+- [Building the App](Building-the-Intel-macOS-App)
+
 **Shared**
 
 - [Regional Packages](Regional-Packages)

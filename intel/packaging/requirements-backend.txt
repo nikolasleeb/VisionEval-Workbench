@@ -1,0 +1,2 @@
+PyInstaller==6.21.0
+XlsxWriter==3.2.5

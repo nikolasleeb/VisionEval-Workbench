@@ -1,11 +1,13 @@
 # VisionEval Workbench 1.0.0
 
-This is the first public release of the clean VisionEval Workbench repository. It provides separate, validated desktop applications for Windows 11 x64 and Apple Silicon macOS.
+This is the first public release of the clean VisionEval Workbench repository. It provides separate desktop applications for Windows 11 x64, Apple Silicon macOS, and Intel macOS.
 
 ## Downloads
 
 - **Windows 11 x64:** `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`
 - **Apple Silicon macOS:** `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`
+- **Intel macOS:** `VisionEval-Workbench-v1.0.0-macos-x64.dmg`
+- **Intel source snapshot:** `VisionEval-Workbench-v1.0.0-intel-source.zip`
 - **PlanRVA model package:** `planrva-mm.zip`
 - **Virginia MPO regional package:** `virginia-mpo-regions.zip`
 
@@ -15,13 +17,13 @@ Exact platform source snapshots are also attached. GitHub additionally supplies 
 
 The Windows application connects to an existing native `VE_Runtime`, its `VE_HOME` package library, and a compatible `Rscript.exe`. It does not use Docker.
 
-The Mac application supports Apple Silicon and uses Docker Desktop with the pinned ARM64 Workbench runtime published through GitHub Packages. It can guide users through runtime installation and verification.
+The Mac applications use Docker Desktop with architecture-specific, digest-pinned Workbench runtimes published through GitHub Packages: ARM64 for Apple Silicon and AMD64 for Intel. Both guide users through runtime installation and verification.
 
-Both applications provide the Explore, Create, Run, and Compare workflow, while retaining the platform-specific behavior for which each was built and validated.
+All three applications provide the Explore, Create, Run, and Compare workflow while retaining their platform-specific runtime and operating-system behavior.
 
 ## Important notes
 
 - The Mac application is ad-hoc signed for bundle integrity but is not Apple-notarized.
-- Intel Macs and Windows systems other than Windows 11 x64 have not been validated.
+- Each Mac DMG is architecture-specific; use the ARM64 build on Apple Silicon and the x64 build on Intel.
 - The runtime is an unofficial distribution built from VisionEval VE-40-RC6 and includes the documented Workbench compatibility patch.
 - Regional planning data are provided as-is and are installed separately through **Settings → Assets**.

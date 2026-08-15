@@ -2,7 +2,7 @@
 
 This guide explains how to create a regional data package like `virginia-mpo-regions.zip`. It is intended for data maintainers and developers, but the overall process does not require knowledge of the Workbench desktop code.
 
-Regional data packages are platform-neutral. A correctly built ZIP can be installed in both the Windows and macOS editions of VisionEval Workbench 1.0.0.
+Regional data packages are platform-neutral. A correctly built ZIP can be installed in the Windows, Apple Silicon macOS, and Intel macOS editions of VisionEval Workbench 1.0.0.
 
 > [!IMPORTANT]
 > This page covers `region-builder` packages, which provide the data needed to create regional VisionEval models. PlanRVA is a different `model-bundle` package type and is not a template for this process.
@@ -31,7 +31,7 @@ You need:
 - A text editor and the ability to review JSON and CSV files.
 - A GIS analyst or equivalent spatial-review process when official boundaries must be converted to Bzone membership.
 - Shapely when running the Virginia spatial-crosswalk generator. Shapely is not required merely to assemble an already reviewed crosswalk into a ZIP.
-- VisionEval Workbench on Windows and Apple Silicon macOS for final cross-platform testing.
+- VisionEval Workbench on Windows, Apple Silicon macOS, and Intel macOS for final cross-platform testing.
 
 You do not need Node.js, Rust, Tauri, Docker, or R just to assemble the ZIP. A VisionEval runtime is needed for the final model-run smoke test.
 
@@ -350,7 +350,7 @@ The regional-package tests cover partial-library rejection, package installation
 
 ### 3. Smoke-test the finished ZIP
 
-Use the untouched ZIP produced by the builder on both platforms:
+Use the untouched ZIP produced by the builder on all supported platforms:
 
 1. Open **Settings → Assets** and add the ZIP. Do not unzip it first.
 2. Confirm Workbench shows the correct name, version, coverage, description, and source information.
@@ -361,7 +361,7 @@ Use the untouched ZIP produced by the builder on both platforms:
 7. Run a small scenario with the platform's VisionEval runtime and inspect its completed datastore.
 8. Remove the installed package, reinstall the original ZIP, and repeat the critical preview/build path.
 
-Run the same smoke test in Windows and macOS. The package contents should be identical; only the application and runtime differ.
+Run the same smoke test in Windows, Apple Silicon macOS, and Intel macOS. The package contents should be identical; only the application and runtime differ.
 
 ## Publication checklist
 
@@ -375,6 +375,6 @@ Before attaching the ZIP to a release, verify:
 - No personal paths, secrets, macOS metadata, generated outputs, or handoff documents are present.
 - Source attribution and redistribution restrictions are understandable.
 - Official and custom region builds work with the packaged data.
-- The same ZIP installs and builds successfully on Windows and macOS.
+- The same ZIP installs and builds successfully on Windows, Apple Silicon macOS, and Intel macOS.
 
 After publication, download the release asset rather than reusing the local build and repeat the install and preview checks. This confirms that the file users receive is the file that was tested.

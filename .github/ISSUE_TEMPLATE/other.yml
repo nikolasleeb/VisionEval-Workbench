@@ -11,7 +11,8 @@ body:
       options:
         - Windows 11 x64
         - Apple Silicon macOS
-        - Both platforms
+        - Intel macOS
+        - Multiple platforms
         - Not platform-specific
     validations:
       required: false
