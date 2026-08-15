@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "releaseStatus": "pending-runtime-publication",
+  "releaseStatus": "public",
   "applicationVersion": "1.0.0",
   "platform": "macOS",
   "architecture": "x86_64",
@@ -12,8 +12,8 @@
     "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
     "localAlias": "local/visioneval:1.0.0-amd64",
     "architecture": "linux/amd64",
-    "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-    "published": false,
+    "digest": "sha256:8440e9c490ba12333b94ce1aef561c9b30a30a428e98be87aec7ba17be23c2da",
+    "published": true,
     "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
   },
   "github": "https://github.com/nikolasleeb/VisionEval-Workbench"

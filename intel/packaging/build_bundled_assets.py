@@ -84,7 +84,7 @@ def build_payload() -> dict[str, object]:
             "workbenchVersion": "1.0.0",
             "visionEvalVersion": "VE-40-RC6",
             "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
-            "runtimeDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+            "runtimeDigest": "sha256:8440e9c490ba12333b94ce1aef561c9b30a30a428e98be87aec7ba17be23c2da",
             "patch": "2026-08-03-composite-household-id-alignment",
             "architecture": "amd64",
         },
