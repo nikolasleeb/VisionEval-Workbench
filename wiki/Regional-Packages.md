@@ -18,3 +18,7 @@ Release 1.0.0 includes two optional ZIP packages. They work with both desktop ed
 4. Select the ZIP, review the package information, and install it.
 
 Workbench copies validated package contents into the current workspace. It does not change the downloaded ZIP.
+
+## Build a regional package
+
+Data maintainers can follow [Building a Regional Package](Building-a-Regional-Package) to prepare, validate, test, and publish a platform-neutral `region-builder` package. The guide uses the Virginia MPO package as its worked example and explains the Workbench 1.0.0 compatibility limits.

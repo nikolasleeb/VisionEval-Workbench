@@ -19,5 +19,6 @@
 **Shared**
 
 - [Regional Packages](Regional-Packages)
+- [Building a Regional Package](Building-a-Regional-Package)
 - [Architecture and Developer Overview](Architecture-and-Developer-Overview)
 - [Troubleshooting](Troubleshooting)
