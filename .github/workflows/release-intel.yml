@@ -1,5 +1,4 @@
-name: Add Intel macOS assets to release 1.0.0 --clobber
-    continue-on-error: true
+name: Add Intel macOS assets to release 1.0.0
 
 on:
   workflow_dispatch:
@@ -110,8 +109,9 @@ jobs:
     if: inputs.approved_publication == true
     needs: intel
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: intel-release
@@ -120,25 +120,5 @@ jobs:
         run: |
           test -f release-assets/VisionEval-Workbench-v1.0.0-macos-x64.dmg
           test -f release-assets/VisionEval-Workbench-v1.0.0-intel-source.zip
-          git ls-remote --exit-code --tags origin refs/tags/v1.0.0
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.0
-          body_path: RELEASE_NOTES.md
-          fail_on_unmatched_files: true
-          files: release-assets/*
-
-
-  upload-assets:
-    if: inputs.approved_publication == true
-    needs: intel
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: intel-release
-          path: release-assets
-      - name: Upload Intel assets without replacing existing release files
-        run: gh release upload v1.0.0 release-assets/* --repo ${{ github.repository }}
+      - name: Replace Intel assets without changing other release files
+        run: gh release upload v1.0.0 release-assets/* --repo "${{ github.repository }}" --clobber
