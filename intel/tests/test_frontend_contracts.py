@@ -61,6 +61,13 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn(".runtime-setup-status.error", styles)
         self.assertIn(".runtime-setup-status.progress", styles)
 
+    def test_runtime_summary_does_not_confuse_image_identity_with_profile_verification(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        self.assertIn('profile?.verified', source)
+        self.assertIn('"Runtime verified"', source)
+        self.assertIn('"Compatible image detected; verification required"', source)
+        self.assertNotIn('runtime.imageCompatibilityPatch?"Workbench compatibility verified"', source)
+
     def test_packaged_app_uses_in_app_confirmation_dialogs(self):
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
