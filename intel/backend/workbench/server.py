@@ -128,7 +128,14 @@ def send_json(handler: SimpleHTTPRequestHandler, payload, status: int = 200) -> 
     handler.send_header("Cache-Control", "no-store")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
-    handler.wfile.write(body)
+    try:
+        handler.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+        # The WebView can discard an in-flight response when a dialog closes,
+        # the workspace reloads, or the backend reconnects. The operation may
+        # already have completed successfully, so this is not an application
+        # or runtime failure and must not be added to Diagnostics.
+        return
 
 
 def first(query: dict[str, list[str]], name: str, default: str = "") -> str:
