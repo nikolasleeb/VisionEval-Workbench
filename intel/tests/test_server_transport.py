@@ -1,6 +1,6 @@
 import unittest
 
-from workbench.server import send_json
+from backend.workbench.server import send_json
 
 
 class _Headers:
