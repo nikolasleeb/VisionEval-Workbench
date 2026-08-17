@@ -313,6 +313,28 @@ function post(path, payload) {
   return request(path, { method: "POST", body: JSON.stringify(payload) });
 }
 
+async function waitForRuntimeInstallation(operationId) {
+  const deadline = Date.now() + (20 * 60 * 1000);
+  let transientFailures = 0;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let operation;
+    try {
+      operation = await request(`/api/runtime/install/status?id=${encodeURIComponent(operationId)}`);
+      transientFailures = 0;
+    } catch (error) {
+      transientFailures += 1;
+      if (transientFailures < 5) continue;
+      throw error;
+    }
+    state.runtimeSetupMessage = operation.message || "Downloading and verifying the pinned runtime…";
+    renderRuntimeSetupControls();
+    if (operation.state === "succeeded") return operation.result;
+    if (operation.state === "failed") throw new Error(operation.message || "Runtime installation failed");
+  }
+  throw new Error("Runtime installation did not finish within 20 minutes.");
+}
+
 async function chooseFolder(targetId) {
   const invoke = window.__TAURI_INTERNALS__?.invoke;
   if (!invoke) return notify("Folder selection is available in the VisionEval Workbench desktop app. You can also enter the path manually.", "error");
@@ -1986,7 +2008,8 @@ async function installAndSaveRuntime(button, statusElement = null) {
     }
     state.runtimeSetupMessage = "Downloading and verifying the pinned runtime… This can take several minutes the first time.";
     renderRuntimeSetupControls();
-    const result = await post("/api/runtime/install", {});
+    const operation = await post("/api/runtime/install/start", {});
+    const result = await waitForRuntimeInstallation(operation.id);
     const prior = (state.desktop?.runtimeProfiles || []).find((item) => item.id === state.desktop?.activeRuntimeProfileId);
     await window.__TAURI_INTERNALS__.invoke("save_runtime_profile", {profile:{
       id:prior?.adapter==="docker"?prior.id:"", name:"Intel Mac Docker", adapter:"docker", platform:result.platform || "darwin", architecture:result.architecture || "x86_64",
