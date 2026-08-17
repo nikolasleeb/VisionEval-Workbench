@@ -16,7 +16,6 @@ use tauri_plugin_notification::NotificationExt;
 const CONFIG_VERSION: u32 = 7;
 const LEGACY_RUNTIME_IMAGE: &str = "local/visioneval:3.1.1-arm64";
 const UNPATCHED_RC6_RUNTIME_IMAGE: &str = "local/visioneval:ve-40-rc6-arm64";
-const V1_RUNTIME_IMAGE: &str = "local/visioneval:1.0.0-arm64";
 const ARM64_RUNTIME_IMAGE: &str = "local/visioneval:1.0.0-arm64";
 #[cfg(target_os = "windows")]
 const AMD64_RUNTIME_IMAGE: &str = "local/visioneval:2.0.0-amd64";
@@ -882,10 +881,7 @@ fn read_config(app: &AppHandle) -> DesktopConfig {
         if profile.adapter != "docker" {
             continue;
         }
-        if matches!(
-            profile.image_reference.as_str(),
-            LEGACY_RUNTIME_IMAGE | UNPATCHED_RC6_RUNTIME_IMAGE | V1_RUNTIME_IMAGE
-        ) {
+        if runtime_image_needs_migration(&profile.image_reference) {
             profile.image_reference = default_runtime_image().into();
             profile.image_digest.clear();
             profile.runtime_version = "Compatible VisionEval runtime / R 4.5.1".into();
@@ -923,6 +919,13 @@ fn write_config(app: &AppHandle, config: &DesktopConfig) -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     fs::rename(&temporary, &path).map_err(|error| error.to_string())
+}
+
+fn runtime_image_needs_migration(image_reference: &str) -> bool {
+    matches!(
+        image_reference,
+        LEGACY_RUNTIME_IMAGE | UNPATCHED_RC6_RUNTIME_IMAGE
+    )
 }
 
 fn is_legacy_workspace(path: &Path) -> bool {
@@ -2525,6 +2528,12 @@ mod tests {
         config.configuration_version = CONFIG_VERSION;
         config.runtime_profiles[0].adapter = supported_adapter.into();
         assert!(!migrate_runtime_profiles(&mut config));
+    }
+    #[test]
+    fn current_apple_silicon_runtime_profile_is_not_treated_as_legacy() {
+        assert!(!runtime_image_needs_migration(ARM64_RUNTIME_IMAGE));
+        assert!(runtime_image_needs_migration(LEGACY_RUNTIME_IMAGE));
+        assert!(runtime_image_needs_migration(UNPATCHED_RC6_RUNTIME_IMAGE));
     }
     #[test]
     fn comparison_export_ids_are_restricted_to_generated_identifiers() {

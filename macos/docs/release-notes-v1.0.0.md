@@ -8,4 +8,4 @@ The application is ad-hoc signed for bundle integrity but is not Apple-notarized
 
 Optional PlanRVA and Virginia MPO packages are installed from their ZIP files through **Settings → Assets**.
 
-The refreshed 1.0.0 Apple Silicon build completes long first-launch runtime downloads in the background and uses the macOS trust store for official HTTPS map services.
+The refreshed 1.0.0 Apple Silicon build completes long first-launch runtime downloads in the background, preserves the verified ARM64 runtime profile, and uses the macOS trust store for official HTTPS map services.

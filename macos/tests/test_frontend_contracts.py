@@ -57,6 +57,12 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn(".runtime-setup-status.error", styles)
         self.assertIn(".runtime-setup-status.progress", styles)
 
+    def test_current_arm64_runtime_alias_is_not_migrated_as_legacy(self):
+        host = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        migration = host.split("fn runtime_image_needs_migration", 1)[1].split("fn is_legacy_workspace", 1)[0]
+        self.assertIn("LEGACY_RUNTIME_IMAGE | UNPATCHED_RC6_RUNTIME_IMAGE", migration)
+        self.assertNotIn("ARM64_RUNTIME_IMAGE", migration)
+
     def test_packaged_app_uses_in_app_confirmation_dialogs(self):
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
