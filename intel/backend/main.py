@@ -10,6 +10,23 @@ from pathlib import Path
 from workbench.server import serve
 
 
+def configure_macos_certificates() -> None:
+    """Point frozen macOS builds at the operating system CA bundle.
+
+    PyInstaller's embedded Python does not inherit the certificate path used by
+    the system Python installation.  Without this, HTTPS requests made by the
+    packaged backend (including the official ArcGIS region-map downloads) fail
+    certificate verification even though the same URLs work in the browser.
+    Respect an explicitly configured path and leave non-macOS/development
+    environments unchanged.
+    """
+    if sys.platform != "darwin" or not getattr(sys, "frozen", False):
+        return
+    certificate_bundle = Path("/etc/ssl/cert.pem")
+    if certificate_bundle.is_file():
+        os.environ.setdefault("SSL_CERT_FILE", str(certificate_bundle))
+
+
 def watch_parent(parent_pid: int) -> None:
     """Exit the sidecar after a Force Quit, which bypasses Tauri close events."""
     if sys.platform == "win32":
@@ -55,6 +72,7 @@ def watch_parent(parent_pid: int) -> None:
 
 
 def main() -> None:
+    configure_macos_certificates()
     frozen = getattr(sys, "frozen", False)
     app_root = Path(sys.executable).resolve().parent if frozen else Path(__file__).resolve().parent.parent
     resource_root = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent)).resolve()
