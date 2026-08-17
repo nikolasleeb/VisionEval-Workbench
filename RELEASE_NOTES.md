@@ -21,6 +21,8 @@ The Mac applications use Docker Desktop with architecture-specific, digest-pinne
 
 All three applications provide the Explore, Create, Run, and Compare workflow while retaining their platform-specific runtime and operating-system behavior.
 
+The refreshed Mac builds keep first-launch runtime downloads in background operations so long image pulls can finish and persist their verified profiles. They also use the macOS trust store for official HTTPS map services.
+
 ## Important notes
 
 - The Mac application is ad-hoc signed for bundle integrity but is not Apple-notarized.

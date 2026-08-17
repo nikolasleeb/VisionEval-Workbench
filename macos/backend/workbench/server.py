@@ -25,7 +25,7 @@ from .model_packages import ModelPackageService
 from .region_packages import RegionPackageService, package_manifest_type
 from .runtime import RuntimeManager
 from .region_builder import RegionBuilderService
-from .workspace import Workspace, WorkspaceError, read_json
+from .workspace import Workspace, WorkspaceError, make_id, now_iso, read_json
 
 # Windows' MIME registry does not consistently know modern JavaScript module
 # extensions. Chromium refuses to execute an ES module served as text/plain.
@@ -33,6 +33,72 @@ mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("application/json", ".json")
 mimetypes.add_type("text/markdown", ".md")
+
+
+class RuntimeInstallOperationManager:
+    """Run the managed image installation without a long-lived HTTP request."""
+
+    def __init__(self, runtime: RuntimeManager):
+        self.runtime = runtime
+        self.lock = threading.RLock()
+        self.operations: dict[str, dict] = {}
+        self.active_id = ""
+
+    def start(self) -> dict:
+        with self.lock:
+            active = self.operations.get(self.active_id, {})
+            if active.get("state") in {"waiting", "running"}:
+                return dict(active)
+            operation_id = make_id("runtime-install", "managed")
+            operation = {
+                "id": operation_id,
+                "state": "waiting",
+                "phase": "starting",
+                "createdAt": now_iso(),
+                "startedAt": "",
+                "finishedAt": "",
+                "message": "Preparing the pinned runtime installation.",
+                "result": None,
+            }
+            self.operations[operation_id] = operation
+            self.active_id = operation_id
+        threading.Thread(target=self._run, args=(operation_id,), daemon=True).start()
+        return self.status(operation_id)
+
+    def _run(self, operation_id: str) -> None:
+        with self.lock:
+            operation = self.operations[operation_id]
+            operation.update({
+                "state": "running",
+                "phase": "installing",
+                "startedAt": now_iso(),
+                "message": "Downloading and verifying the pinned runtime… This can take several minutes the first time.",
+            })
+        try:
+            result = self.runtime.install_or_update_runtime()
+            with self.lock:
+                operation.update({
+                    "state": "succeeded",
+                    "phase": "complete",
+                    "finishedAt": now_iso(),
+                    "message": "Runtime downloaded and verified.",
+                    "result": result,
+                })
+        except Exception as exc:
+            with self.lock:
+                operation.update({
+                    "state": "failed",
+                    "phase": "failed",
+                    "finishedAt": now_iso(),
+                    "message": str(exc),
+                })
+
+    def status(self, operation_id: str) -> dict:
+        with self.lock:
+            operation = self.operations.get(operation_id)
+            if not operation:
+                raise WorkspaceError("Unknown runtime installation operation")
+            return dict(operation)
 
 
 class WorkbenchApplication:
@@ -67,6 +133,7 @@ class WorkbenchApplication:
         if not runtime_cli.is_file():
             runtime_cli = self.resource_root.parent / "runtime" / "scripts" / "ve-cli-native.R"
         self.runtime = RuntimeManager(self.workspace, cli_path=runtime_cli)
+        self.runtime_installations = RuntimeInstallOperationManager(self.runtime)
         self.diagnostics = DiagnosticsService(self.workspace, self.runtime, __version__)
         self.comparison = ComparisonService(self.workspace, self.runtime, helper_target, scan_target, conflicts_target, cache_extractor_target)
         self.comparison_operations = ComparisonOperationManager(self.comparison)
@@ -189,6 +256,8 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.state())
                 elif parsed.path == "/api/runtime/status":
                     send_json(self, application.runtime.docker_status())
+                elif parsed.path == "/api/runtime/install/status":
+                    send_json(self, application.runtime_installations.status(first(query, "id")))
                 elif parsed.path == "/api/settings":
                     send_json(self, application.workspace.settings())
                 elif parsed.path == "/api/documentation/user-guide":
@@ -527,6 +596,8 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.runtime.pull_image())
                 elif parsed.path == "/api/runtime/install":
                     send_json(self, application.runtime.install_or_update_runtime())
+                elif parsed.path == "/api/runtime/install/start":
+                    send_json(self, application.runtime_installations.start(), 202)
                 elif parsed.path == "/api/runtime/discover":
                     send_json(self, application.runtime.discover_native(payload.get("veRuntime", "")))
                 elif parsed.path == "/api/runtime/verify":
