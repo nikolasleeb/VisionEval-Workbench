@@ -1,12 +1,32 @@
 # Architecture and Developer Overview
 
-VisionEval Workbench is a local desktop system with four main boundaries:
+VisionEval Workbench is a local desktop system that keeps the user interface, workspace management, and platform-specific model execution behind clear boundaries.
 
-1. The Tauri host manages the desktop window, application configuration, backend lifecycle, filesystem permissions, and operating-system integration.
-2. The static web interface provides Explore, Create, Run, Compare, Settings, and documentation views.
-3. The local Python backend manages workspaces, packages, model preparation, jobs, datastore scanning, caching, maps, and exports.
-4. The platform runtime executes VisionEval: native R and `VE_Runtime` on Windows, a pinned ARM64 Docker image on Apple Silicon, or a pinned AMD64 Docker image on Intel macOS.
+## System boundaries
 
-Projects pin a model template and InputLibrary. Scenarios store deliberate overlays rather than altering the baseline. Every run is prepared in a new folder with a reproducible record. Completed VisionEval RDA datastores remain authoritative; SQLite and other comparison caches are disposable accelerators.
+| Layer | Responsibility |
+|---|---|
+| **Tauri host** | Desktop window, application configuration, backend lifecycle, filesystem permissions, and operating-system integration |
+| **Static web interface** | Explore, Create, Run, Compare, Settings, and documentation views |
+| **Local Python backend** | Workspaces, packages, model preparation, jobs, datastore scanning, caching, maps, and exports |
+| **Platform runtime** | Native R and `VE_Runtime` on Windows; pinned ARM64 Docker image on Apple Silicon; pinned AMD64 Docker image on Intel macOS |
 
-The separate `windows/`, `macos/`, and `intel/` source trees reflect intentionally different platform implementations. Root GitHub Actions workflows test and package them independently.
+## Data and reproducibility
+
+- Projects pin a model template and InputLibrary.
+- Scenarios store deliberate overlays instead of altering the baseline.
+- Each run is prepared in a new folder with a reproducible record.
+- Completed VisionEval RDA datastores remain authoritative.
+- SQLite and other comparison caches are disposable accelerators and can be rebuilt.
+
+## Platform source trees
+
+| Source tree | Target |
+|---|---|
+| `windows/` | Windows 11 x64 with a native VisionEval runtime |
+| `macos/` | Apple Silicon macOS with the ARM64 managed runtime |
+| `intel/` | Intel macOS with the AMD64 managed runtime |
+
+These implementations remain intentionally separate. Root GitHub Actions workflows test and package them independently.
+
+**Build guides:** [Windows](Building-the-Windows-App) · [Apple Silicon](Building-the-macOS-App) · [Intel](Building-the-Intel-macOS-App) · [Regional package](Building-a-Regional-Package)

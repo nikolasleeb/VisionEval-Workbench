@@ -1,8 +1,10 @@
-**VisionEval Workbench**
+**Start**
 
 - [Home](Home)
+- [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs)
+- [Latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest)
 
-**Windows**
+**Windows 11 x64**
 
 - [Overview](Windows-Overview)
 - [Installation and Runtime](Windows-Installation-and-Runtime)
@@ -23,9 +25,8 @@
 - [Using Workbench](Using-Workbench-on-Intel-macOS)
 - [Building the App](Building-the-Intel-macOS-App)
 
-**Shared**
+**Reference**
 
-- [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs)
 - [Regional Packages](Regional-Packages)
 - [Building a Regional Package](Building-a-Regional-Package)
 - [Architecture and Developer Overview](Architecture-and-Developer-Overview)

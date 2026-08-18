@@ -7,6 +7,15 @@ Regional data packages are platform-neutral. A correctly built ZIP can be instal
 > [!IMPORTANT]
 > This page covers `region-builder` packages, which provide the data needed to create regional VisionEval models. PlanRVA is a different `model-bundle` package type and is not a template for this process.
 
+## On this page
+
+1. [Understand the package contents](#what-a-regional-package-provides)
+2. [Prepare the source material](#prepare-the-source-material)
+3. [Define the ZIP and manifest](#expected-zip-layout)
+4. [Build or adapt the package](#build-the-virginia-example)
+5. [Test the finished ZIP](#test-the-package)
+6. [Complete the publication checklist](#publication-checklist)
+
 ## What a regional package provides
 
 A regional package combines:
@@ -378,3 +387,9 @@ Before attaching the ZIP to a release, verify:
 - The same ZIP installs and builds successfully on Windows, Apple Silicon macOS, and Intel macOS.
 
 After publication, download the release asset rather than reusing the local build and repeat the install and preview checks. This confirms that the file users receive is the file that was tested.
+
+## Related pages
+
+- [Regional Packages](Regional-Packages)
+- [Architecture and Developer Overview](Architecture-and-Developer-Overview)
+- [Troubleshooting](Troubleshooting)
