@@ -44,9 +44,21 @@ The release also includes two optional platform-neutral packages:
 
 Do not unzip these packages. In Workbench, open **Settings → Assets**, choose the downloaded ZIP, review its information, and install it into your workspace.
 
+## Tutorials
+
+The repository includes a screenshot-driven scenario walkthrough and separate installation guides for Windows 11 x64, Apple Silicon macOS, and Intel macOS. Each guide is available as a ready-to-read PDF and an editable Word document.
+
+- [Browse all tutorials and walkthroughs](docs/tutorials/README.md)
+- [Scenario walkthrough (PDF)](docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf)
+- [Windows installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf)
+- [Apple Silicon macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf)
+- [Intel macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Intel.pdf)
+
+The two macOS editions require different installers and runtime images. Choose the Apple Silicon guide for M-series Macs and the Intel guide for Intel-based Macs.
+
 ## Help and documentation
 
-The [Workbench wiki](https://github.com/nikolasleeb/VisionEval-Workbench/wiki) contains separate Windows and Mac instructions, workflow explanations, troubleshooting, and developer-oriented build notes.
+The [Workbench wiki](https://github.com/nikolasleeb/VisionEval-Workbench/wiki) contains separate Windows, Apple Silicon macOS, and Intel macOS instructions, workflow explanations, troubleshooting, tutorials, and developer-oriented build notes.
 
 If something fails, [open an issue](https://github.com/nikolasleeb/VisionEval-Workbench/issues) and include your operating system, Workbench version, runtime status, installed packages, and a diagnostic ZIP when available.
 

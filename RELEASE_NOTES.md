@@ -13,6 +13,10 @@ This is the first public release of the clean VisionEval Workbench repository. I
 
 Exact platform source snapshots are also attached. GitHub additionally supplies automatic source archives for the full repository.
 
+## Tutorials and guides
+
+The release includes four PDF guides: installation and setup for Windows 11 x64, Apple Silicon macOS, and Intel macOS, plus a screenshot-driven Charlottesville–Albemarle scenario walkthrough. Editable Word copies are maintained in [`docs/tutorials`](docs/tutorials/README.md).
+
 ## Platform differences
 
 The Windows application connects to an existing native `VE_Runtime`, its `VE_HOME` package library, and a compatible `Rscript.exe`. It does not use Docker.

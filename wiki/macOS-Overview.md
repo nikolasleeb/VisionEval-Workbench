@@ -6,4 +6,6 @@ Workbench stores projects, scenarios, packages, logs, and results in a separate 
 
 The desktop shell uses Tauri and the macOS webview. A bundled local Python service performs file, model, comparison, export, and runtime operations.
 
+Tutorial: [Apple Silicon macOS installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf), followed by the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
+
 Next: [macOS Installation and Runtime](macOS-Installation-and-Runtime).

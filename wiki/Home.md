@@ -5,8 +5,10 @@ VisionEval Workbench is an unofficial desktop application for exploring VisionEv
 Start with the guide for your computer:
 
 - [Windows Overview](Windows-Overview)
-- [macOS Overview](macOS-Overview)
+- [Apple Silicon macOS Overview](macOS-Overview)
 - [Intel macOS Overview](Intel-macOS-Overview)
+
+For screenshot-driven setup and workflow guides, open [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs).
 
 All editions follow the same basic workflow—**Explore → Create → Run → Compare**—but their runtime setup is intentionally different. Windows connects to an existing native VisionEval installation. Apple Silicon and Intel macOS use Docker Desktop with ARM64 and AMD64 Workbench runtimes respectively.
 
