@@ -9,7 +9,7 @@
 - [Using Workbench](Using-Workbench-on-Windows)
 - [Building the App](Building-the-Windows-App)
 
-**macOS**
+**Apple Silicon macOS**
 
 - [Overview](macOS-Overview)
 - [Installation and Runtime](macOS-Installation-and-Runtime)
@@ -25,6 +25,7 @@
 
 **Shared**
 
+- [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs)
 - [Regional Packages](Regional-Packages)
 - [Building a Regional Package](Building-a-Regional-Package)
 - [Architecture and Developer Overview](Architecture-and-Developer-Overview)
