@@ -1,11 +1,26 @@
-# Windows Overview
+# Windows 11 x64 Overview
 
-The Windows edition supports Windows 11 x64. It is designed for organizations that already maintain a native VisionEval runtime.
+The Windows edition is designed for organizations that already maintain a compatible native VisionEval installation.
 
-Workbench stores projects, scenarios, packages, logs, and results in a separate workspace. It connects to—but does not install, replace, or modify—your selected `VE_Runtime`, `VE_HOME`, or R installation.
+| Component | Windows behavior |
+|---|---|
+| Supported system | Windows 11 x64 |
+| VisionEval runtime | Existing native `VE_Runtime`, `VE_HOME`, and compatible `Rscript.exe` |
+| Model execution | One job at a time through the verified native runtime |
+| Desktop shell | Tauri with Microsoft WebView2 |
 
-The desktop shell uses Tauri and Microsoft WebView2. A bundled local Python service performs file, model, comparison, export, and runtime operations. Windows model jobs run one at a time through the verified native runtime.
+> [!IMPORTANT]
+> Workbench connects to the runtime you select. It does not install, replace, update, or modify that native VisionEval environment.
 
-Tutorial: [Windows installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf), followed by the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
+## What remains separate
 
-Next: [Windows Installation and Runtime](Windows-Installation-and-Runtime).
+Workbench stores projects, scenarios, packages, logs, and results in its own workspace. The bundled local Python service manages files, comparisons, exports, and runtime operations without altering the source model folders.
+
+## Start here
+
+1. Follow the [Windows installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf).
+2. [Install Workbench and connect the runtime](Windows-Installation-and-Runtime).
+3. Learn the platform workflow in [Using Workbench on Windows](Using-Workbench-on-Windows).
+4. Complete the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
+
+**Developer path:** [Building the Windows App](Building-the-Windows-App)

@@ -1,16 +1,27 @@
-# Building the macOS App
+# Building the Apple Silicon macOS App
 
-The Apple Silicon source is in `macos/`. The application combines:
+This page is for contributors building the native ARM64 edition from the separate `macos/` source tree.
 
-- a Tauri/Rust desktop host;
-- a static HTML, CSS, and JavaScript interface rendered by the macOS webview;
-- a Python backend bundled as a sidecar;
-- Docker-based VisionEval execution.
+## Components
 
-Development requires Node.js 20, Python 3.11, Rust with the `aarch64-apple-darwin` target, Xcode command-line tools, and Docker Desktop for runtime testing.
+- Tauri/Rust desktop host
+- Static HTML, CSS, and JavaScript interface rendered by the macOS webview
+- Python backend bundled as a sidecar
+- Docker-based VisionEval execution
 
-The release workflow validates generated assets and documentation, runs Python and JavaScript tests, runs Rust formatting/tests, builds the sidecar and ARM64 application, ad-hoc signs the bundle, verifies the signature, and packages the app in a DMG.
+## Requirements
 
-The Mac source is intentionally maintained separately from the Windows source. Its guided Docker setup and runtime behavior should remain Mac-specific.
+- Apple Silicon Mac
+- Node.js 20 and Python 3.11
+- Rust with the `aarch64-apple-darwin` target
+- Xcode command-line tools
+- Docker Desktop for runtime testing
 
-The Intel build has its own source and release process in `intel/`; see [Building the Intel macOS App](Building-the-Intel-macOS-App).
+## Release verification
+
+The release workflow validates generated assets and documentation, runs Python and JavaScript tests, runs Rust formatting and tests, builds the sidecar and ARM64 application, ad-hoc signs and verifies the bundle, and packages the app in a DMG.
+
+> [!IMPORTANT]
+> Apple Silicon, Intel, and Windows source trees are maintained separately because their runtime and operating-system integration differ.
+
+**Related:** [Architecture and Developer Overview](Architecture-and-Developer-Overview) · [Building the Intel macOS App](Building-the-Intel-macOS-App)
