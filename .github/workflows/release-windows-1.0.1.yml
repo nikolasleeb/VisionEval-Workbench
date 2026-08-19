@@ -109,8 +109,22 @@ jobs:
           Copy-Item $source.FullName release-assets/VisionEval-Workbench-v1.0.1-windows-x64-setup.exe
       - name: Package exact Windows source
         shell: pwsh
+        working-directory: .
         run: |
-          git archive --format=zip --prefix=VisionEval-Workbench-v1.0.1-windows-source/ --output=release-assets/VisionEval-Workbench-v1.0.1-windows-source.zip HEAD:windows
+          $archivePath = "windows/release-assets/VisionEval-Workbench-v1.0.1-windows-source.zip"
+          git archive --format=zip --prefix=VisionEval-Workbench-v1.0.1-windows-source/ --output=$archivePath HEAD:windows
+
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($archivePath)
+          try {
+            $files = @($archive.Entries | Where-Object { -not [string]::IsNullOrEmpty($_.Name) })
+            $expected = "VisionEval-Workbench-v1.0.1-windows-source/desktop/src-tauri/tauri.conf.json"
+            if ($files.Count -lt 100 -or $expected -notin $archive.Entries.FullName) {
+              throw "Windows source archive is incomplete ($($files.Count) files; missing $expected)."
+            }
+          } finally {
+            $archive.Dispose()
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-1.0.1-release
