@@ -388,7 +388,13 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         app.package_info().name.clone(),
         true,
         &[
-            &PredefinedMenuItem::about(app, None, None)?,
+            &MenuItem::with_id(
+                app,
+                "about",
+                "About VisionEval Workbench",
+                true,
+                None::<&str>,
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "settings", "Settings…", true, Some("CmdOrCtrl+,"))?,
             &MenuItem::with_id(
@@ -2352,7 +2358,7 @@ fn main() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let action = match id {
-                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
+                "about" | "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
                 _ => None,
             };
             if let (Some(action), Some(window)) = (action, app.get_webview_window("main")) {
