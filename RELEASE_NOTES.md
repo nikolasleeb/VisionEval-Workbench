@@ -1,10 +1,10 @@
-# VisionEval Workbench 1.0.0
+# VisionEval Workbench 1.0.0 — Windows updated to 1.0.1
 
-This is the first public release of the clean VisionEval Workbench repository. It provides separate desktop applications for Windows 11 x64, Apple Silicon macOS, and Intel macOS.
+This is the first public release of the clean VisionEval Workbench repository. The existing release tag remains `v1.0.0`; its Windows application has been replaced by Windows 1.0.1, while the Apple Silicon and Intel macOS applications remain at 1.0.0.
 
 ## Downloads
 
-- **Windows 11 x64:** `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`
+- **Windows 11 x64:** `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe`
 - **Apple Silicon macOS:** `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`
 - **Intel macOS:** `VisionEval-Workbench-v1.0.0-macos-x64.dmg`
 - **Intel source snapshot:** `VisionEval-Workbench-v1.0.0-intel-source.zip`
@@ -13,9 +13,17 @@ This is the first public release of the clean VisionEval Workbench repository. I
 
 Exact platform source snapshots are also attached. GitHub additionally supplies automatic source archives for the full repository.
 
+## Windows 1.0.1 patch
+
+Windows 1.0.1 makes native `VE_Runtime` execution strictly serial across jobs, Workbench windows, and backend processes. It keeps onboarding and settings dialogs above the taskbar, restores both About views, and checks GitHub weekly for newer stable Workbench releases using the Windows certificate trust store.
+
+Application errors are retained for 30 days or 500 entries and can be cleared without deleting failed runs or results. Cancelling a run now stops the complete native R process tree and retries cleanup while Windows releases temporary file locks. Settings spacing is also corrected for Numbers, Notifications, and Resources.
+
+The [current Windows User Guide](windows/UserGuide.md) contains the supported installation and operating instructions. The older Windows screenshot PDF and editable Word guide describe version 1.0.0 and remain archived for reference.
+
 ## Tutorials and guides
 
-The release includes four PDF guides: installation and setup for Windows 11 x64, Apple Silicon macOS, and Intel macOS, plus a screenshot-driven Charlottesville–Albemarle scenario walkthrough. Editable Word copies are maintained in [`docs/tutorials`](docs/tutorials/README.md).
+The release includes the current text-based Windows User Guide, installation guides for Apple Silicon and Intel macOS, and a screenshot-driven Charlottesville–Albemarle scenario walkthrough. Editable tutorial files are maintained in [`docs/tutorials`](docs/tutorials/README.md); the Windows PDF/DOCX there are archived version 1.0.0 references.
 
 ## Platform differences
 
