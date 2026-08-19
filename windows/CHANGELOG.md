@@ -7,6 +7,8 @@
 - Reworked spacing for Numbers, Notifications, and Resources settings.
 - Kept onboarding, Settings, About, and other dialogs inside the Windows taskbar-safe area.
 - Restored About in Settings and added a working About window to the application menu.
+- Restored weekly GitHub checks for newer stable Workbench releases, with an actionable in-app notice and manual checks in About.
+- Retained app diagnostic errors for 30 days or 500 entries and added a clear control in Settings.
 
 ## 1.0.0
 
