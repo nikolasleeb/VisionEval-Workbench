@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import platform
+import tempfile
+import threading
 import zipfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from .runtime import ACTIVE_STATES, TERMINAL_STATES, RuntimeManager
 from .workspace import Workspace, now_iso, read_json
+
+APP_ERROR_RETENTION_DAYS = 30
+APP_ERROR_MAX_ENTRIES = 500
 
 
 class DiagnosticsService:
@@ -17,15 +24,17 @@ class DiagnosticsService:
         self.runtime = runtime
         self.app_version = app_version
         self.error_log_path = self.workspace.internal / "diagnostics" / "app-errors.jsonl"
+        self._error_log_lock = threading.Lock()
 
-    def record_app_error(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self.error_log_path.parent.mkdir(parents=True, exist_ok=True)
-        entry = {"timestamp": now_iso(), "source": str(payload.get("source") or "app")[:80], "message": str(payload.get("message") or payload.get("error") or "Unknown error")[:4000], "path": str(payload.get("path") or "")[:500], "context": payload.get("context") if isinstance(payload.get("context"), dict) else {}}
-        with self.error_log_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
-        return entry
+    @staticmethod
+    def _error_timestamp(value: Any) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+            return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        except (TypeError, ValueError):
+            return None
 
-    def recent_errors(self, limit: int = 100) -> list[dict[str, Any]]:
+    def _read_error_entries(self) -> list[dict[str, Any]]:
         if not self.error_log_path.is_file():
             return []
         entries = []
@@ -36,7 +45,49 @@ class DiagnosticsService:
                 continue
             if isinstance(item, dict):
                 entries.append(item)
-        return entries[-max(1, min(limit, 500)):]
+        return entries
+
+    @classmethod
+    def _retained_error_entries(cls, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=APP_ERROR_RETENTION_DAYS)
+        retained = [entry for entry in entries if (cls._error_timestamp(entry.get("timestamp")) or cutoff) >= cutoff]
+        return retained[-APP_ERROR_MAX_ENTRIES:]
+
+    def _write_error_entries(self, entries: list[dict[str, Any]]) -> None:
+        self.error_log_path.parent.mkdir(parents=True, exist_ok=True)
+        if not entries:
+            self.error_log_path.unlink(missing_ok=True)
+            return
+        fd, temporary = tempfile.mkstemp(prefix=f".{self.error_log_path.name}.", dir=self.error_log_path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                for entry in entries:
+                    handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+            os.replace(temporary, self.error_log_path)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def record_app_error(self, payload: dict[str, Any]) -> dict[str, Any]:
+        entry = {"timestamp": now_iso(), "source": str(payload.get("source") or "app")[:80], "message": str(payload.get("message") or payload.get("error") or "Unknown error")[:4000], "path": str(payload.get("path") or "")[:500], "context": payload.get("context") if isinstance(payload.get("context"), dict) else {}}
+        with self._error_log_lock:
+            entries = self._retained_error_entries([*self._read_error_entries(), entry])
+            self._write_error_entries(entries)
+        return entry
+
+    def recent_errors(self, limit: int = 100) -> list[dict[str, Any]]:
+        with self._error_log_lock:
+            existing = self._read_error_entries()
+            entries = self._retained_error_entries(existing)
+            if entries != existing:
+                self._write_error_entries(entries)
+            return entries[-max(1, min(limit, APP_ERROR_MAX_ENTRIES)):]
+
+    def clear_errors(self) -> dict[str, Any]:
+        with self._error_log_lock:
+            cleared = len(self._read_error_entries())
+            self._write_error_entries([])
+        return {"cleared": cleared, "retentionDays": APP_ERROR_RETENTION_DAYS, "maxEntries": APP_ERROR_MAX_ENTRIES}
 
     def runs(self, state: str = "failed") -> list[dict[str, Any]]:
         jobs = self.runtime.list_jobs(include_archived=True)
