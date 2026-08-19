@@ -5,7 +5,8 @@
 - Prevented multiple Windows desktop instances from starting separate backends.
 - Added a cross-process lock so one native `VE_Runtime` can never execute two Workbench jobs concurrently.
 - Reworked spacing for Numbers, Notifications, and Resources settings.
-- Restored the About page in Settings.
+- Kept onboarding, Settings, About, and other dialogs inside the Windows taskbar-safe area.
+- Restored About in Settings and added a working About window to the application menu.
 
 ## 1.0.0
 
