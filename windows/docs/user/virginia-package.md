@@ -9,7 +9,7 @@ The Virginia MPO package is optional. It appears in Create → Develop only afte
 - MPO-specific region asset generation.
 - Virginia Azone/Bzone map visualization for compatible completed results.
 
-The package does not enable running all of Virginia as one model region in Workbench 1.0.0. MPO regions are the supported execution scope.
+The package does not enable running all of Virginia as one model region in Workbench 1.0.1. MPO regions are the supported execution scope.
 
 ## Included data
 

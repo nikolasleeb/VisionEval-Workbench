@@ -1,6 +1,6 @@
 # Settings, Workspaces, and Storage
 
-Settings uses a fixed desktop sidebar for Workspace, Assets, Appearance, Numbers, Notifications, Runtime, Resources, Diagnostics, Documentation, and Storage. Only the selected page scrolls. The dialog leaves a visible gap above the Windows taskbar and white space beneath **Save Settings**.
+Settings uses a fixed desktop sidebar for Workspace, Assets, Appearance, Numbers, Notifications, Runtime, Resources, Diagnostics, Documentation, Storage, and About. Only the selected page scrolls. The dialog leaves a visible gap above the Windows taskbar and white space beneath **Save Settings**.
 
 Open Settings with the gear button or **Ctrl+,**.
 
@@ -37,6 +37,12 @@ Appearance controls theme and accessible decrease, neutral, and increase palette
 Runtime shows the selected `VE_RUNTIME`, detected `VE_HOME`, `Rscript.exe`, R and VisionEval versions, verification result, and repair actions. Re-run verification after any path or installation change.
 
 Windows executes one VisionEval job at a time. Resource guidance reports native-process and workspace usage.
+
+Workbench also prevents a second desktop window from starting and reserves the selected `VE_Runtime` with a cross-process lock while a job is active. These protections keep native runs serial even if an older backend process is still shutting down.
+
+## About
+
+**Settings → About** shows the installed Workbench version, Windows edition, project information, and source/release link.
 
 ## Storage
 
