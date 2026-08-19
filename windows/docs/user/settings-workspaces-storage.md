@@ -12,7 +12,9 @@ Refresh restarts only Workbench's local backend, waits for it to become healthy,
 
 ## Diagnostics
 
-**Settings → Diagnostics** lists failed runs and recent application errors. Exported diagnostic ZIPs include logs, manifests, native runtime/profile information, and app errors. Optional result-datastore and comparison-cache inclusions are off by default because they can be large.
+**Settings → Diagnostics** lists failed runs and recent application errors. App errors are retained in the current workspace for 30 days, up to 500 entries. **Clear app errors** removes only that error history after confirmation; it does not remove failed runs, results, or previously exported diagnostic ZIPs.
+
+Exported diagnostic ZIPs include logs, manifests, native runtime/profile information, and the most recent retained app errors. Optional result-datastore and comparison-cache inclusions are off by default because they can be large.
 
 ## Documentation
 
@@ -42,7 +44,7 @@ Workbench also prevents a second desktop window from starting and reserves the s
 
 ## About
 
-**Settings → About** shows the installed Workbench version, Windows edition, project information, and source/release link.
+**Settings → About** shows the installed Workbench version, Windows edition, project information, and source/release link. Workbench checks GitHub at most once every seven days for a newer published stable release. Use **Check for updates** for an immediate check. Update notices link to the release but never download or install it automatically.
 
 ## Storage
 
