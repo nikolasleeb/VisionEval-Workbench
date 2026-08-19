@@ -5,7 +5,7 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from backend.workbench.diagnostics import DiagnosticsService
+from backend.workbench.diagnostics import APP_ERROR_MAX_ENTRIES, DiagnosticsService
 from backend.workbench.workspace import Workspace
 
 
@@ -28,6 +28,25 @@ class FakeNativeRuntime:
 
 
 class DiagnosticsTests(unittest.TestCase):
+    def test_app_errors_are_pruned_capped_and_clearable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Workspace(Path(directory) / "workspace")
+            service = DiagnosticsService(workspace, FakeNativeRuntime({}), "1.0.1")
+            service.error_log_path.parent.mkdir(parents=True, exist_ok=True)
+            entries = [{"timestamp": "2020-01-01T00:00:00+00:00", "message": "expired"}]
+            entries.extend({"timestamp": "2099-01-01T00:00:00+00:00", "message": f"error-{index}"} for index in range(APP_ERROR_MAX_ENTRIES + 20))
+            service.error_log_path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+
+            retained = service.recent_errors(limit=APP_ERROR_MAX_ENTRIES)
+            self.assertEqual(len(retained), APP_ERROR_MAX_ENTRIES)
+            self.assertNotIn("expired", {entry["message"] for entry in retained})
+            self.assertEqual(len(service.error_log_path.read_text(encoding="utf-8").splitlines()), APP_ERROR_MAX_ENTRIES)
+
+            result = service.clear_errors()
+            self.assertEqual(result["cleared"], APP_ERROR_MAX_ENTRIES)
+            self.assertFalse(service.error_log_path.exists())
+            self.assertEqual(service.recent_errors(), [])
+
     def test_native_bundle_defaults_are_small_and_optional_artifacts_are_explicit(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Workspace(Path(directory) / "workspace")
