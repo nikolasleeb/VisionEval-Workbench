@@ -46,11 +46,12 @@ Do not unzip these packages. In Workbench, open **Settings → Assets**, choose 
 
 ## Tutorials
 
-The repository includes a screenshot-driven scenario walkthrough and separate installation guidance for Windows 11 x64, Apple Silicon macOS, and Intel macOS. The current Windows instructions are maintained as the text-based User Guide; the older Windows PDF and Word files document version 1.0.0 and are retained only as archived references.
+The repository includes a screenshot-driven scenario walkthrough and separate installation guidance for Windows 11 x64, Apple Silicon macOS, and Intel macOS. The Windows installation PDF and editable Word guide remain accurate for installing version 1.0.1. The text-based User Guide provides additional operating and troubleshooting detail.
 
 - [Browse all tutorials and walkthroughs](docs/tutorials/README.md)
 - [Scenario walkthrough (PDF)](docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf)
-- [Current Windows User Guide](windows/UserGuide.md)
+- [Windows 11 x64 installation guide](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf)
+- [Windows User Guide](windows/UserGuide.md)
 - [Apple Silicon macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf)
 - [Intel macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Intel.pdf)
 
