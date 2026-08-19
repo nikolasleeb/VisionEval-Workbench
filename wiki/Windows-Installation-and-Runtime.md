@@ -1,9 +1,9 @@
 # Windows Installation and Runtime
 
-Use this page to install the Windows 11 x64 application and connect it to an existing native VisionEval runtime.
+Use this page to install VisionEval Workbench 1.0.1 for Windows 11 x64 and connect it to an existing native VisionEval runtime.
 
 > [!NOTE]
-> For screenshots and first-time-user guidance, use the complete [Windows installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf).
+> For complete first-time-user guidance, use the current [Windows User Guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/windows/UserGuide.md). The older screenshot PDF and DOCX describe Windows 1.0.0 and are archived references.
 
 ## Requirements
 
@@ -15,7 +15,7 @@ Use this page to install the Windows 11 x64 application and connect it to an exi
 ## Install Workbench
 
 1. Open the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
-2. Download `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`.
+2. Download `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe`.
 3. Run the installer and launch **VisionEval Workbench**.
 4. Choose an empty, recognizable workspace folder that is separate from `VE_Runtime`.
 
