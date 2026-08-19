@@ -2,7 +2,7 @@
 
 ## Supported version
 
-Security fixes are evaluated for the current 1.0.0 release. The Windows installer and macOS application are not code-signed with commercial developer certificates, and the macOS application is not notarized. Workbench should not be treated as a managed enterprise deployment.
+Security fixes are evaluated for the current Windows 1.0.1 release. The Windows installer and macOS application are not code-signed with commercial developer certificates, and the macOS application is not notarized. Workbench should not be treated as a managed enterprise deployment.
 
 ## Reporting
 
