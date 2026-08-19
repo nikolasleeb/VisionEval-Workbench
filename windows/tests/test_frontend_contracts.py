@@ -365,6 +365,11 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn('id="settingsImportTemplate"', markup)
         self.assertNotIn('id="templateImportForm"', markup)
         self.assertIn('id="settingsNumbers"', markup)
+        self.assertIn('data-settings-page="settingsAbout"', markup)
+        self.assertIn('id="settingsAbout"', markup)
+        self.assertIn('id="settingsAboutVersion"', markup)
+        self.assertIn('class="settings-section settings-control-group"', markup)
+        self.assertNotIn('<option value="parallel">', markup)
         for control in ("precisionDefault", "precisionSingleFile", "precisionBatch", "precisionOutput", "precisionPercentage"):
             self.assertIn(f'id="{control}"', markup)
         self.assertIn("numericPrecision", source)
@@ -379,6 +384,14 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("/api/packages/install", source)
         self.assertNotIn("Bundled PlanRVA MM example", markup)
         self.assertNotIn("installBundledPlanrva", source)
+
+    def test_windows_desktop_registers_single_instance_before_other_plugins(self):
+        rust = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        single_instance = rust.index("tauri_plugin_single_instance::init")
+        dialog = rust.index("tauri_plugin_dialog::init")
+        notification = rust.index("tauri_plugin_notification::init")
+        self.assertLess(single_instance, dialog)
+        self.assertLess(single_instance, notification)
 
     def test_handoff_settings_and_custom_region_contracts(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")

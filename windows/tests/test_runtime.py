@@ -1,5 +1,6 @@
 import json
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -75,6 +76,26 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(batch["mode"], "queued")
             self.assertEqual(runtime.queue()["maxActive"], 1)
             self.assertTrue(all(job["batchMode"] == "queued" for job in batch["jobs"]))
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows byte-range locks are platform-specific")
+    def test_native_runtime_lock_is_shared_between_backend_processes(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None), patch.dict("os.environ", {"VISIONEVAL_RUNTIME_LOCK_DIR": directory}):
+            root = Path(directory)
+            first = RuntimeManager(Workspace(root / "workspace-one"), runner=FakeRunner())
+            second = RuntimeManager(Workspace(root / "workspace-two"), runner=FakeRunner())
+            shared_runtime = root / "VE_Runtime"
+            shared_runtime.mkdir()
+            first.native_runtime = shared_runtime
+            second.native_runtime = shared_runtime
+            first_lock = first._try_native_execution_lock()
+            self.assertIsNotNone(first_lock)
+            try:
+                self.assertIsNone(second._try_native_execution_lock())
+            finally:
+                first._release_native_execution_lock(first_lock)
+            second_lock = second._try_native_execution_lock()
+            self.assertIsNotNone(second_lock)
+            second._release_native_execution_lock(second_lock)
 
     def test_native_discovery_reads_separate_runtime_home_and_r_version(self):
         with tempfile.TemporaryDirectory() as directory:

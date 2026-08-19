@@ -160,9 +160,9 @@ class DocumentationSourceTests(unittest.TestCase):
         macos_manifest = json.loads(
             (repository / "docs" / "compatibility-manifest-macos.json").read_text()
         )
-        self.assertEqual(tauri["version"], "1.0.0")
-        self.assertEqual(package["version"], "1.0.0")
-        self.assertEqual(windows["documentationVersion"], "1.0.0-windows")
+        self.assertEqual(tauri["version"], "1.0.1")
+        self.assertEqual(package["version"], "1.0.1")
+        self.assertEqual(windows["documentationVersion"], "1.0.1-windows")
         self.assertEqual(macos["documentationVersion"], "1.0.0-macos")
         self.assertEqual(windows_manifest["runtimeAdapter"], "native-ve-runtime")
         self.assertFalse(windows_manifest["runtime"]["dockerRequired"])
