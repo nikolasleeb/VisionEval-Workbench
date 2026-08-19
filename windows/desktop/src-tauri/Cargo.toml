@@ -1,6 +1,6 @@
 [package]
 name = "visioneval-workbench"
-version = "1.0.0"
+version = "1.0.1"
 description = "Unified VisionEval scenario editor, runtime, and comparison desktop app"
 edition = "2021"
 
@@ -13,6 +13,7 @@ serde_json = "1"
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 ureq = { version = "2", default-features = false }
 base64 = "0.22"
 trash = "5"
