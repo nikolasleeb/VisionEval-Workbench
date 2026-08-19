@@ -22,12 +22,46 @@ const ONBOARDING_VERSION: u32 = 1;
 const WORKSPACE_FORMAT_VERSION: u32 = 2;
 const WORKSPACE_MARKER: &str = ".visioneval-workspace.json";
 const WORKSPACE_SETTINGS: &str = ".workbench/settings.json";
+const WORKBENCH_RELEASES_API: &str =
+    "https://api.github.com/repos/nikolasleeb/VisionEval-Workbench/releases?per_page=20";
+const WORKBENCH_RELEASES_URL: &str = "https://github.com/nikolasleeb/VisionEval-Workbench/releases";
+const WORKBENCH_UPDATE_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
 
 #[derive(Default)]
 struct BackendState {
     child: Mutex<Option<Child>>,
     port: Mutex<Option<u16>>,
     quit_requested: Mutex<bool>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+struct WorkbenchUpdateStatus {
+    status: String,
+    current_version: String,
+    latest_version: String,
+    latest_tag: String,
+    latest_name: String,
+    latest_url: String,
+    latest_published_at: String,
+    checked_at: String,
+    checked_at_epoch: u64,
+    last_attempt_at: String,
+    last_attempt_at_epoch: u64,
+    stale: bool,
+    check_error: String,
+    message: String,
+}
+
+#[derive(Deserialize, Clone, Default)]
+#[serde(default)]
+struct GithubWorkbenchRelease {
+    tag_name: String,
+    name: String,
+    html_url: String,
+    published_at: String,
+    draft: bool,
+    prerelease: bool,
 }
 
 fn default_appearance() -> String {
@@ -819,6 +853,231 @@ fn set_app_zoom(app: AppHandle, scale: f64) -> Result<(), String> {
     window
         .set_zoom(scale.clamp(0.8, 2.0))
         .map_err(|error| error.to_string())
+}
+
+fn release_version(value: &str) -> Option<(u64, u64, u64)> {
+    let normalized = value.trim().strip_prefix('v').unwrap_or(value.trim());
+    let parts = normalized.split('.').collect::<Vec<_>>();
+    if parts.len() != 3 || parts.iter().any(|part| part.is_empty()) {
+        return None;
+    }
+    Some((
+        parts[0].parse().ok()?,
+        parts[1].parse().ok()?,
+        parts[2].parse().ok()?,
+    ))
+}
+
+fn unavailable_update_status(
+    current_version: &str,
+    message: impl Into<String>,
+) -> WorkbenchUpdateStatus {
+    let message = message.into();
+    WorkbenchUpdateStatus {
+        status: "unavailable".into(),
+        current_version: current_version.into(),
+        latest_url: WORKBENCH_RELEASES_URL.into(),
+        stale: true,
+        check_error: message.clone(),
+        message,
+        ..WorkbenchUpdateStatus::default()
+    }
+}
+
+fn update_status_from_releases(
+    current_version: &str,
+    releases: &[GithubWorkbenchRelease],
+    checked_at_epoch: u64,
+) -> Result<WorkbenchUpdateStatus, String> {
+    let current = release_version(current_version)
+        .ok_or_else(|| format!("Installed Workbench version {current_version} is not supported"))?;
+    let (latest, latest_version) = releases
+        .iter()
+        .filter(|release| !release.draft && !release.prerelease)
+        .filter_map(|release| release_version(&release.tag_name).map(|version| (release, version)))
+        .max_by_key(|(_, version)| *version)
+        .ok_or_else(|| "No published stable Workbench releases were returned".to_string())?;
+    let update_available = latest_version > current;
+    let normalized_latest = format!(
+        "{}.{}.{}",
+        latest_version.0, latest_version.1, latest_version.2
+    );
+    Ok(WorkbenchUpdateStatus {
+        status: if update_available {
+            "update_available".into()
+        } else {
+            "current".into()
+        },
+        current_version: current_version.into(),
+        latest_version: normalized_latest.clone(),
+        latest_tag: latest.tag_name.clone(),
+        latest_name: if latest.name.trim().is_empty() {
+            latest.tag_name.clone()
+        } else {
+            latest.name.clone()
+        },
+        latest_url: if latest.html_url.trim().is_empty() {
+            WORKBENCH_RELEASES_URL.into()
+        } else {
+            latest.html_url.clone()
+        },
+        latest_published_at: latest.published_at.clone(),
+        checked_at: checked_at_epoch.to_string(),
+        checked_at_epoch,
+        last_attempt_at: checked_at_epoch.to_string(),
+        last_attempt_at_epoch: checked_at_epoch,
+        stale: false,
+        check_error: String::new(),
+        message: if update_available {
+            format!("VisionEval Workbench {normalized_latest} is available.")
+        } else {
+            "VisionEval Workbench is up to date.".into()
+        },
+    })
+}
+
+fn update_cache_is_fresh(status: &WorkbenchUpdateStatus, now: u64) -> bool {
+    let reference = status.checked_at_epoch.max(status.last_attempt_at_epoch);
+    reference > 0 && now >= reference && now - reference < WORKBENCH_UPDATE_TTL_SECONDS
+}
+
+fn workbench_update_cache_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let directory = app
+        .path()
+        .app_config_dir()
+        .map_err(|error| error.to_string())?;
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    Ok(directory.join("workbench-release-status.json"))
+}
+
+fn read_workbench_update_cache(path: &Path, current_version: &str) -> WorkbenchUpdateStatus {
+    let mut cached = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<WorkbenchUpdateStatus>(&text).ok())
+        .unwrap_or_else(|| {
+            unavailable_update_status(current_version, "No cached update check is available.")
+        });
+    let installed_version_changed =
+        !cached.current_version.is_empty() && cached.current_version != current_version;
+    cached.current_version = current_version.into();
+    if installed_version_changed {
+        cached.checked_at_epoch = 0;
+        cached.last_attempt_at_epoch = 0;
+        if let (Some(current), Some(latest)) = (
+            release_version(current_version),
+            release_version(&cached.latest_version),
+        ) {
+            cached.status = if latest > current {
+                "update_available".into()
+            } else {
+                "current".into()
+            };
+        }
+    }
+    if cached.latest_url.is_empty() {
+        cached.latest_url = WORKBENCH_RELEASES_URL.into();
+    }
+    cached
+}
+
+fn write_workbench_update_cache(path: &Path, status: &WorkbenchUpdateStatus) {
+    if let Ok(text) = serde_json::to_string_pretty(status) {
+        let _ = fs::write(path, text);
+    }
+}
+
+fn fetch_workbench_releases(current_version: &str) -> Result<Vec<GithubWorkbenchRelease>, String> {
+    let response = ureq::get(WORKBENCH_RELEASES_API)
+        .set("Accept", "application/vnd.github+json")
+        .set(
+            "User-Agent",
+            &format!("VisionEval-Workbench/{current_version}"),
+        )
+        .set("X-GitHub-Api-Version", "2022-11-28")
+        .timeout(Duration::from_secs(8))
+        .call()
+        .map_err(|error| error.to_string())?;
+    let body = response.into_string().map_err(|error| error.to_string())?;
+    serde_json::from_str(&body).map_err(|error| error.to_string())
+}
+
+fn check_workbench_update_blocking(
+    cache_path: &Path,
+    current_version: &str,
+    force: bool,
+) -> WorkbenchUpdateStatus {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    check_workbench_update_at(cache_path, current_version, force, now, || {
+        fetch_workbench_releases(current_version)
+    })
+}
+
+fn check_workbench_update_at<F>(
+    cache_path: &Path,
+    current_version: &str,
+    force: bool,
+    now: u64,
+    fetch: F,
+) -> WorkbenchUpdateStatus
+where
+    F: FnOnce() -> Result<Vec<GithubWorkbenchRelease>, String>,
+{
+    let previous = read_workbench_update_cache(cache_path, current_version);
+    if !force && update_cache_is_fresh(&previous, now) {
+        return previous;
+    }
+    match fetch().and_then(|releases| update_status_from_releases(current_version, &releases, now))
+    {
+        Ok(status) => {
+            write_workbench_update_cache(cache_path, &status);
+            status
+        }
+        Err(error) => {
+            let mut failure = previous;
+            failure.current_version = current_version.into();
+            failure.last_attempt_at = now.to_string();
+            failure.last_attempt_at_epoch = now;
+            failure.stale = true;
+            failure.check_error = error.clone();
+            failure.message = "Could not check GitHub for Workbench updates.".into();
+            if failure.status != "current" && failure.status != "update_available" {
+                failure.status = "unavailable".into();
+            }
+            write_workbench_update_cache(cache_path, &failure);
+            failure
+        }
+    }
+}
+
+#[tauri::command]
+async fn check_workbench_update(app: AppHandle, force: bool) -> WorkbenchUpdateStatus {
+    let current_version = app.package_info().version.to_string();
+    if !cfg!(target_os = "windows") || renderer_smoke_mode() {
+        return WorkbenchUpdateStatus {
+            status: "current".into(),
+            current_version,
+            latest_url: WORKBENCH_RELEASES_URL.into(),
+            message: "Automatic Workbench update checks are unavailable in this environment."
+                .into(),
+            ..WorkbenchUpdateStatus::default()
+        };
+    }
+    let cache_path = match workbench_update_cache_path(&app) {
+        Ok(path) => path,
+        Err(error) => return unavailable_update_status(&current_version, error),
+    };
+    let fallback_version = current_version.clone();
+    match tauri::async_runtime::spawn_blocking(move || {
+        check_workbench_update_blocking(&cache_path, &current_version, force)
+    })
+    .await
+    {
+        Ok(status) => status,
+        Err(error) => unavailable_update_status(&fallback_version, error.to_string()),
+    }
 }
 
 fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2365,7 +2624,7 @@ fn main() {
                 if let Ok(value) = serde_json::to_string(action) { let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('visioneval-menu-action', {{ detail: {value} }}));")); }
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, reveal_workspace, reveal_workspace_location, open_user_guide, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
+        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, reveal_workspace, reveal_workspace_location, open_user_guide, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, get_theme, set_theme, set_menu_context, set_app_zoom, check_workbench_update, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
         .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             let already_quitting = window.try_state::<BackendState>().and_then(|state| state.quit_requested.lock().ok().map(|value| *value)).unwrap_or(false);
             if !already_quitting {
@@ -2507,6 +2766,113 @@ mod tests {
             !cfg!(target_os = "windows")
         );
         assert_eq!(config.auto_start_docker, !cfg!(target_os = "windows"));
+    }
+    #[test]
+    fn workbench_release_versions_accept_only_stable_three_part_tags() {
+        assert_eq!(release_version("v1.0.0"), Some((1, 0, 0)));
+        assert_eq!(release_version("1.12.3"), Some((1, 12, 3)));
+        assert_eq!(release_version("v1.2.0-beta.1"), None);
+        assert_eq!(release_version("v1.2"), None);
+        assert_eq!(release_version("release-1.2.3"), None);
+    }
+    #[test]
+    fn workbench_release_selection_ignores_drafts_prereleases_and_malformed_tags() {
+        let releases = vec![
+            GithubWorkbenchRelease {
+                tag_name: "v9.0.0".into(),
+                draft: true,
+                ..GithubWorkbenchRelease::default()
+            },
+            GithubWorkbenchRelease {
+                tag_name: "v8.0.0".into(),
+                prerelease: true,
+                ..GithubWorkbenchRelease::default()
+            },
+            GithubWorkbenchRelease {
+                tag_name: "newest".into(),
+                ..GithubWorkbenchRelease::default()
+            },
+            GithubWorkbenchRelease {
+                tag_name: "v1.2.0".into(),
+                name: "VisionEval Workbench 1.2.0".into(),
+                html_url: "https://example.test/v1.2.0".into(),
+                ..GithubWorkbenchRelease::default()
+            },
+            GithubWorkbenchRelease {
+                tag_name: "v1.10.0".into(),
+                name: "VisionEval Workbench 1.10.0".into(),
+                html_url: "https://example.test/v1.10.0".into(),
+                ..GithubWorkbenchRelease::default()
+            },
+        ];
+        let available = update_status_from_releases("1.0.1", &releases, 100).unwrap();
+        assert_eq!(available.status, "update_available");
+        assert_eq!(available.latest_version, "1.10.0");
+        assert_eq!(available.latest_tag, "v1.10.0");
+        let current = update_status_from_releases("1.10.0", &releases, 100).unwrap();
+        assert_eq!(current.status, "current");
+        let newer = update_status_from_releases("2.0.0", &releases, 100).unwrap();
+        assert_eq!(newer.status, "current");
+    }
+    #[test]
+    fn workbench_release_cache_honors_weekly_ttl_force_and_offline_fallback() {
+        let root = std::env::temp_dir().join(stable_id("workbench-update-test"));
+        fs::create_dir_all(&root).unwrap();
+        let cache_path = root.join("release-status.json");
+        let cached = WorkbenchUpdateStatus {
+            status: "current".into(),
+            current_version: "1.0.1".into(),
+            latest_version: "1.0.1".into(),
+            latest_tag: "v1.0.1".into(),
+            checked_at_epoch: 1_000,
+            stale: false,
+            ..WorkbenchUpdateStatus::default()
+        };
+        write_workbench_update_cache(&cache_path, &cached);
+        let fresh = check_workbench_update_at(
+            &cache_path,
+            "1.0.1",
+            false,
+            1_000 + WORKBENCH_UPDATE_TTL_SECONDS - 1,
+            || -> Result<Vec<GithubWorkbenchRelease>, String> {
+                panic!("a fresh cache must not query GitHub")
+            },
+        );
+        assert_eq!(fresh.status, "current");
+
+        let release = GithubWorkbenchRelease {
+            tag_name: "v1.0.2".into(),
+            html_url: "https://example.test/v1.0.2".into(),
+            ..GithubWorkbenchRelease::default()
+        };
+        let forced =
+            check_workbench_update_at(&cache_path, "1.0.1", true, 1_100, || Ok(vec![release]));
+        assert_eq!(forced.status, "update_available");
+        assert!(!forced.stale);
+
+        let offline =
+            check_workbench_update_at(&cache_path, "1.0.1", true, 1_200, || Err("offline".into()));
+        assert_eq!(offline.status, "update_available");
+        assert!(offline.stale);
+        assert_eq!(offline.check_error, "offline");
+        let cached_failure = check_workbench_update_at(
+            &cache_path,
+            "1.0.1",
+            false,
+            1_201,
+            || -> Result<Vec<GithubWorkbenchRelease>, String> {
+                panic!("a recent failed attempt must also honor the weekly cache")
+            },
+        );
+        assert!(cached_failure.stale);
+        assert_eq!(cached_failure.check_error, "offline");
+        let upgraded_offline =
+            check_workbench_update_at(&cache_path, "1.0.2", false, 1_300, || {
+                Err("offline after upgrade".into())
+            });
+        assert_eq!(upgraded_offline.status, "current");
+        assert!(upgraded_offline.stale);
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn runtime_profile_migration_selects_the_platform_adapter() {
