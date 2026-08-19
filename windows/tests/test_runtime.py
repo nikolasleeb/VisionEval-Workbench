@@ -1,4 +1,5 @@
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -508,6 +509,59 @@ class RuntimeTests(unittest.TestCase):
             self.assertFalse(waiting_model.exists())
             self.assertTrue(complete_datastore.exists())
             self.assertIn("datastore-complete", {item["id"] for item in workspace.catalog()["datastores"]})
+
+    def test_windows_cancel_terminates_the_complete_process_tree(self):
+        class FakeProcess:
+            pid = 4321
+
+            def __init__(self):
+                self.terminated = False
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                self.terminated = True
+
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            run_dir = workspace.runs / "run-active"; run_dir.mkdir()
+            write_json(run_dir / "job.json", {
+                "id": "run-active", "state": "running", "containerName": "",
+                "modelPath": str(workspace.models / "run-active"), "logPath": str(run_dir / "run.log"),
+            })
+            runner = FakeRunner()
+            runtime = RuntimeManager(workspace, runner=runner)
+            job = json.loads((run_dir / "job.json").read_text(encoding="utf-8")); job["state"] = "running"; write_json(run_dir / "job.json", job)
+            process = FakeProcess()
+            runtime.processes["run-active"] = process
+
+            result = runtime.cancel("run-active")
+
+            self.assertEqual(result["state"], "stopping")
+            self.assertIn(["taskkill.exe", "/PID", "4321", "/T", "/F"], runner.calls)
+            self.assertFalse(process.terminated)
+
+    def test_windows_cancelled_cleanup_retries_transient_file_locks(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            runtime = RuntimeManager(Workspace(directory), runner=FakeRunner())
+            target = Path(directory) / "locked-results"
+            target.mkdir()
+            real_rmtree = shutil.rmtree
+            attempts = []
+
+            def temporarily_locked(path):
+                attempts.append(Path(path))
+                if len(attempts) < 3:
+                    raise PermissionError(32, "file is in use", str(path))
+                real_rmtree(path)
+
+            with patch("backend.workbench.runtime.shutil.rmtree", side_effect=temporarily_locked), patch("backend.workbench.runtime.time.sleep") as sleep:
+                runtime._remove_cancelled_tree(target)
+
+            self.assertEqual(len(attempts), 3)
+            self.assertEqual(sleep.call_count, 2)
+            self.assertFalse(target.exists())
 
     def test_shutdown_requires_confirmation_for_active_jobs(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
