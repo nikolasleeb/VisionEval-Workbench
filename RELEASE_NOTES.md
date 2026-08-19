@@ -19,11 +19,11 @@ Windows 1.0.1 makes native `VE_Runtime` execution strictly serial across jobs, W
 
 Application errors are retained for 30 days or 500 entries and can be cleared without deleting failed runs or results. Cancelling a run now stops the complete native R process tree and retries cleanup while Windows releases temporary file locks. Settings spacing is also corrected for Numbers, Notifications, and Resources.
 
-The [current Windows User Guide](windows/UserGuide.md) contains the supported installation and operating instructions. The older Windows screenshot PDF and editable Word guide describe version 1.0.0 and remain archived for reference.
+Use the [Windows installation guide](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf) for illustrated setup instructions. Its [editable Word version](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.docx) is also available. The [Windows User Guide](windows/UserGuide.md) provides additional operating and troubleshooting detail.
 
 ## Tutorials and guides
 
-The release includes the current text-based Windows User Guide, installation guides for Apple Silicon and Intel macOS, and a screenshot-driven Charlottesville–Albemarle scenario walkthrough. Editable tutorial files are maintained in [`docs/tutorials`](docs/tutorials/README.md); the Windows PDF/DOCX there are archived version 1.0.0 references.
+The release includes installation guides for Windows 11 x64, Apple Silicon macOS, and Intel macOS; the text-based Windows User Guide; and a screenshot-driven Charlottesville–Albemarle scenario walkthrough. Editable tutorial files are maintained in [`docs/tutorials`](docs/tutorials/README.md).
 
 ## Platform differences
 
