@@ -4208,6 +4208,7 @@ async function openSettings(page="settingsWorkspace") {
   applyComparisonPalettes();
   renderComparisonPaletteSettings();
   const workspaceSettings=state.data?.workspaceSettings||{};
+  $("settingsAboutVersion").textContent=state.data?.version||"1.0.1";
   renderSettingsWorkspaces();
   const templates=state.data?.templates||[],libraries=state.data?.inputLibraries||[],explanations=state.data?.inputExplanations||[];
   $("defaultTemplate").innerHTML=`<option value="">No default</option>${templates.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;

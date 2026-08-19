@@ -129,6 +129,12 @@ h3 { margin-bottom: 5px; font-size: 17px; }
 .settings-page-heading { display: flex; align-items: start; justify-content: space-between; gap: 18px; }
 .settings-page-heading p { margin: 4px 0 0; color: var(--muted); }
 .settings-section { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.settings-control-group { gap: 12px; align-content:start; }
+.settings-control-group > label:not(.checkbox):not(.inline-check) { display:grid; gap:6px; }
+.settings-actions { display:flex; align-items:center; gap:8px; padding-top:2px; }
+.about-product { grid-template-columns:auto minmax(0,1fr); align-items:center; gap:14px; }
+.about-product p { margin:4px 0 0; }
+.about-mark { width:52px; height:52px; display:grid; place-items:center; border-radius:13px; background:var(--blue); color:white; font-weight:700; letter-spacing:.04em; }
 .settings-default-grid, .precision-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .precision-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .settings-disclosure { padding: 11px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); }
