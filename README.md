@@ -17,7 +17,7 @@ VisionEval is powerful, but a complete workflow normally involves many folders, 
 
 | Edition | Supported system | Installer | VisionEval runtime |
 |---|---|---|---|
-| Windows | Windows 11 x64 | `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe` | Existing native `VE_Runtime`, `VE_HOME`, and compatible R installation |
+| Windows | Windows 11 x64 | `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe` | Existing native `VE_Runtime`, `VE_HOME`, and compatible R installation |
 | Apple Silicon Mac | macOS 12 or newer | `VisionEval-Workbench-v1.0.0-macos-arm64.dmg` | Docker Desktop with the managed ARM64 Workbench runtime |
 | Intel Mac | macOS 12 or newer | `VisionEval-Workbench-v1.0.0-macos-x64.dmg` | Docker Desktop with the managed AMD64 Workbench runtime |
 
@@ -27,7 +27,7 @@ The editions are maintained separately because their runtime setup and operating
 
 Go to the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
 
-- **Windows:** download `VisionEval-Workbench-v1.0.0-windows-x64-setup.exe`, run the installer, and connect Workbench to an existing native VisionEval runtime.
+- **Windows:** download `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe`, run the installer, and connect Workbench to an existing native VisionEval runtime.
 - **Apple Silicon Mac:** download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Apple silicon before setting up the runtime.
 - **Intel Mac:** download `VisionEval-Workbench-v1.0.0-macos-x64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Mac with an Intel chip before setting up the runtime.
 
@@ -46,11 +46,11 @@ Do not unzip these packages. In Workbench, open **Settings → Assets**, choose 
 
 ## Tutorials
 
-The repository includes a screenshot-driven scenario walkthrough and separate installation guides for Windows 11 x64, Apple Silicon macOS, and Intel macOS. Each guide is available as a ready-to-read PDF and an editable Word document.
+The repository includes a screenshot-driven scenario walkthrough and separate installation guidance for Windows 11 x64, Apple Silicon macOS, and Intel macOS. The current Windows instructions are maintained as the text-based User Guide; the older Windows PDF and Word files document version 1.0.0 and are retained only as archived references.
 
 - [Browse all tutorials and walkthroughs](docs/tutorials/README.md)
 - [Scenario walkthrough (PDF)](docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf)
-- [Windows installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf)
+- [Current Windows User Guide](windows/UserGuide.md)
 - [Apple Silicon macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf)
 - [Intel macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Intel.pdf)
 
