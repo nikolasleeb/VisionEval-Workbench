@@ -32,6 +32,7 @@ commands.allow = [
   "set_theme",
   "set_menu_context",
   "set_app_zoom",
+  "check_workbench_update",
   "start_docker_desktop",
   "start_backend",
   "restart_backend",
