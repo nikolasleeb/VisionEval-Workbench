@@ -221,6 +221,14 @@ main { width: 100%; min-width: 0; max-width: 1640px; margin: 0 auto; padding: 30
 .notice { position: sticky; z-index: 5; top: 10px; border: 1px solid #5b4a28; background: #251f14; color: #f2d699; border-radius: 10px; padding: 12px 15px; margin-bottom: 18px; }
 .notice.error { background: #2b171a; color: #ffb4ba; border-color: #6d3036; }
 .notice.success { background: #12251d; color: #9be4bf; border-color: #285c43; }
+.update-notice { display:flex; align-items:center; justify-content:space-between; gap:18px; background:var(--surface); color:var(--text); border-color:var(--blue); }
+.update-notice[hidden] { display:none; }
+.update-notice > div:first-child { display:grid; gap:3px; }
+.update-notice-actions, .update-status-card .settings-actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.update-notice .button-link, .update-status-card .button-link { min-height:40px; padding:10px 15px; }
+.update-status-card { align-content:start; }
+.diagnostics-errors-heading { align-items:center; margin-bottom:0; }
+.diagnostics-errors-heading h4 { margin-bottom:4px; }
 
 .radio, .checkbox { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 9px; }
 .radio input, .checkbox input, .mode-option input { width: auto; accent-color: var(--blue); }
