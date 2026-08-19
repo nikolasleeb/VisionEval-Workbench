@@ -1,6 +1,6 @@
 # Windows 11 x64 Overview
 
-The Windows edition is designed for organizations that already maintain a compatible native VisionEval installation.
+The Windows 1.0.1 edition is designed for organizations that already maintain a compatible native VisionEval installation.
 
 | Component | Windows behavior |
 |---|---|
@@ -18,7 +18,7 @@ Workbench stores projects, scenarios, packages, logs, and results in its own wor
 
 ## Start here
 
-1. Follow the [Windows installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf).
+1. Read the [current Windows User Guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/windows/UserGuide.md).
 2. [Install Workbench and connect the runtime](Windows-Installation-and-Runtime).
 3. Learn the platform workflow in [Using Workbench on Windows](Using-Workbench-on-Windows).
 4. Complete the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
