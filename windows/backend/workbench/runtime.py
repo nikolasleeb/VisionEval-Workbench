@@ -8,6 +8,7 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
@@ -227,6 +228,64 @@ class RuntimeManager:
         if self.release_check_enabled:
             self._schedule_release_check()
 
+    def _native_execution_lock_path(self) -> Path:
+        """Return the per-runtime lock shared by every Workbench backend process."""
+        runtime_identity = str((self.native_runtime or Path("VE_Runtime")).resolve()).casefold()
+        runtime_hash = hashlib.sha256(runtime_identity.encode("utf-8")).hexdigest()[:24]
+        lock_root = Path(
+            os.environ.get(
+                "VISIONEVAL_RUNTIME_LOCK_DIR",
+                Path(os.environ.get("LOCALAPPDATA", tempfile.gettempdir())) / "VisionEval Workbench" / "locks",
+            )
+        )
+        lock_root.mkdir(parents=True, exist_ok=True)
+        return lock_root / f"native-runtime-{runtime_hash}.lock"
+
+    def _try_native_execution_lock(self):
+        """Acquire the Windows byte-range lock without blocking."""
+        import msvcrt
+
+        handle = self._native_execution_lock_path().open("a+b")
+        try:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return handle
+        except OSError:
+            handle.close()
+            return None
+
+    @staticmethod
+    def _release_native_execution_lock(handle) -> None:
+        import msvcrt
+
+        try:
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+        finally:
+            handle.close()
+
+    def _wait_for_native_execution_lock(self, job_id: str):
+        """Wait until this VE_Runtime is free, unless another process took the job."""
+        while True:
+            job = self._safe_job(job_id)
+            if job.get("state") != "waiting":
+                return None
+            handle = self._try_native_execution_lock()
+            if handle is not None:
+                # A second backend can observe the same queued job. Recheck after
+                # acquiring the machine-wide lock so only its original claimant runs it.
+                if self._safe_job(job_id).get("state") == "waiting":
+                    return handle
+                self._release_native_execution_lock(handle)
+                return None
+            time.sleep(0.5)
+
     def _workspace_mount_args(self) -> list[str]:
         # Keep the runtime image's stable /workspace contract while allowing the
         # host workspace to use a cleaner managed layout.
@@ -329,7 +388,7 @@ class RuntimeManager:
             RELEASES_API,
             headers={
                 "Accept": "application/vnd.github+json",
-                "User-Agent": "VisionEval-Workbench/1.0.0",
+                "User-Agent": "VisionEval-Workbench/1.0.1",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
@@ -636,9 +695,16 @@ class RuntimeManager:
                     self.condition.wait(timeout=1.0)
 
     def _worker_entry(self, job_id: str) -> None:
+        native_lock = None
         try:
+            if self.adapter == "native":
+                native_lock = self._wait_for_native_execution_lock(job_id)
+                if native_lock is None:
+                    return
             self._run_job(job_id)
         finally:
+            if native_lock is not None:
+                self._release_native_execution_lock(native_lock)
             with self.condition:
                 self.workers.pop(job_id, None)
                 self._normalize_queue_locked(increment=True)

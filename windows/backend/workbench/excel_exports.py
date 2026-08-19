@@ -29,7 +29,7 @@ def _registration_fingerprint(record: dict[str, Any]) -> str:
 
 
 class WorkbookWriter:
-    def __init__(self, path: Path, app_version: str = "1.0.0"):
+    def __init__(self, path: Path, app_version: str = "1.0.1"):
         try:
             import xlsxwriter
         except ImportError as exc:
@@ -330,7 +330,7 @@ class WorkbookWriter:
 
 
 class ComparisonExportManager:
-    def __init__(self, service, app_version: str = "1.0.0"):
+    def __init__(self, service, app_version: str = "1.0.1"):
         self.service = service
         self.app_version = app_version
         self.root = service.workspace.exchange / "comparison-exports"
