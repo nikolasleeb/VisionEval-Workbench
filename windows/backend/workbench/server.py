@@ -484,6 +484,8 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, settings)
                 elif parsed.path == "/api/diagnostics/app-error":
                     send_json(self, application.diagnostics.record_app_error(payload), 201)
+                elif parsed.path == "/api/diagnostics/errors/clear":
+                    send_json(self, application.diagnostics.clear_errors())
                 elif parsed.path == "/api/templates/import":
                     send_json(self, application.workspace.import_template(payload.get("source", ""), payload.get("name", "")), 201)
                 elif parsed.path == "/api/templates/validate":
