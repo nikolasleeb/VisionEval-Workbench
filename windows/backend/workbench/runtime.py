@@ -1286,6 +1286,36 @@ class RuntimeManager:
         except WorkspaceError:
             pass
 
+    @staticmethod
+    def _remove_cancelled_tree(path: Path) -> None:
+        """Remove cancelled-run files after Windows releases transient handles."""
+        delays = (0.1, 0.25, 0.5, 1.0, 2.0)
+        for attempt in range(len(delays) + 1):
+            try:
+                shutil.rmtree(path)
+                return
+            except FileNotFoundError:
+                return
+            except OSError:
+                if platform.system() != "Windows" or attempt == len(delays):
+                    raise
+                time.sleep(delays[attempt])
+
+    def _terminate_process_tree(self, process: subprocess.Popen[Any]) -> None:
+        """Stop a native Windows run and every R process it launched."""
+        if process.poll() is not None:
+            return
+        if platform.system() == "Windows":
+            result = self.runner(
+                ["taskkill.exe", "/PID", str(process.pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                return
+        process.terminate()
+
     def _cleanup_cancelled_job(self, job_id: str) -> dict[str, Any]:
         job_path = self.workspace.runs / job_id / "job.json"
         job = read_json(job_path, {})
@@ -1303,11 +1333,11 @@ class RuntimeManager:
             if job.get("modelPath"):
                 self.workspace.within(model_path, self.workspace.models, must_exist=False)
                 if model_path.exists():
-                    shutil.rmtree(model_path)
+                    self._remove_cancelled_tree(model_path)
             self._remove_from_batch_and_project(job)
             run_dir = self.workspace.runs / job_id
             if run_dir.exists():
-                shutil.rmtree(run_dir)
+                self._remove_cancelled_tree(run_dir)
             self.cancelled.discard(job_id)
             return {"removed": True, "jobId": job_id}
         except Exception as exc:
@@ -1371,7 +1401,7 @@ class RuntimeManager:
             self.runner([executable, "stop", "--time", "10", job["containerName"]], capture_output=True, text=True)
         process = self.processes.get(job_id)
         if process and process.poll() is None:
-            process.terminate()
+            self._terminate_process_tree(process)
         with self.condition:
             self.condition.notify_all()
         return self._safe_job(job_id)
