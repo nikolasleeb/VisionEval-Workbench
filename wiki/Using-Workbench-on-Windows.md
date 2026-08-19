@@ -1,6 +1,6 @@
 # Using Workbench on Windows
 
-The Windows edition follows the same **Explore → Create → Run → Compare** workflow as macOS while executing models through a verified native VisionEval runtime.
+Windows 1.0.1 follows the same **Explore → Create → Run → Compare** workflow as macOS while executing models through a verified native VisionEval runtime.
 
 ## Explore
 
@@ -17,6 +17,8 @@ Workbench prepares a fresh model copy, applies the selected scenario overlay, an
 > [!NOTE]
 > Windows model jobs run one at a time. Allow the active run to finish before the next queued scenario begins.
 
+This serial limit applies across batches, Workbench windows, and backend processes connected to the same native runtime. Cancelling a native run stops its R process tree and retries cleanup if Windows temporarily holds result files open.
+
 ## Compare
 
 Register completed VisionEval datastores and compare tables, statistics, charts, 2D maps, optional 3D geography, and exports. Generated caches can be rebuilt and are not the authoritative result.
@@ -24,5 +26,11 @@ Register completed VisionEval datastores and compare tables, statistics, charts,
 ## Assets and guided exercise
 
 Regional ZIP files are installed through **Settings → Assets**; see [Regional Packages](Regional-Packages). For a complete worked example, use the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
+
+## Updates and diagnostics
+
+**Settings → About** reports the installed version and can check GitHub for newer stable releases. Automatic checks run at most weekly and use the Windows certificate trust store; Workbench never downloads or installs an update automatically.
+
+**Settings → Diagnostics** retains recent app errors for 30 days or 500 entries. **Clear app errors** removes only that history, leaving failed runs, results, and exported diagnostic ZIPs unchanged.
 
 **Related:** [Windows Installation and Runtime](Windows-Installation-and-Runtime) · [Troubleshooting](Troubleshooting)
