@@ -107,6 +107,7 @@ window.addEventListener('resize', syncWorkbenchViewport);
 
 const state = {
   data: null,
+  workbenchUpdate: null,
   selectedProject: null,
   csv: null,
   selectedJob: null,
@@ -452,6 +453,40 @@ function notify(message, type = "") {
   notice.hidden = false;
   clearTimeout(noticeTimer);
   noticeTimer = setTimeout(() => { notice.hidden = true; }, type === "error" ? 9000 : 4500);
+}
+
+const WORKBENCH_UPDATE_DISMISS_KEY = "visioneval-workbench-dismissed-update";
+function workbenchUpdateStatusText(status=state.workbenchUpdate) {
+  if(!status)return "Update status has not been checked yet.";
+  if(status.status==="update_available")return `Version ${status.latestVersion||status.latestTag} is available.${status.stale?" This is the last successful GitHub result.":""}`;
+  if(status.status==="current")return `Version ${status.currentVersion||state.data?.version||"1.0.1"} is up to date.${status.stale?" GitHub could not be reached for a fresh check.":""}`;
+  return status.checkError?"GitHub could not be reached. Try again when you are online.":"Update status is unavailable.";
+}
+function renderWorkbenchUpdateStatus() {
+  const status=state.workbenchUpdate,text=workbenchUpdateStatusText(status),releaseUrl=status?.latestUrl||"";
+  ["aboutDialogUpdateStatus","settingsAboutUpdateStatus"].forEach((id)=>{const node=$(id);if(node)node.textContent=text;});
+  [["aboutDialogReleaseLink"],["settingsAboutReleaseLink"]].forEach(([id])=>{const link=$(id);if(!link)return;link.hidden=!(status?.status==="update_available"&&releaseUrl);if(releaseUrl)link.href=releaseUrl;});
+  const notice=$("workbenchUpdateNotice");
+  if(!notice)return;
+  let dismissed="";
+  try{dismissed=localStorage.getItem(WORKBENCH_UPDATE_DISMISS_KEY)||"";}catch(_){}
+  const available=status?.status==="update_available"&&Boolean(releaseUrl),version=status?.latestTag||status?.latestVersion||"";
+  notice.hidden=!available||dismissed===version;
+  if(available){$("workbenchUpdateTitle").textContent=`VisionEval Workbench ${status.latestVersion||status.latestTag} is available`;$("workbenchUpdateMessage").textContent=" Download it from the published GitHub release when you are ready.";$("workbenchUpdateReleaseLink").href=releaseUrl;}
+}
+async function checkWorkbenchUpdate({force=false}={}) {
+  const invoke=window.__TAURI_INTERNALS__?.invoke;
+  if(!invoke)return null;
+  const buttons=[$("aboutDialogCheckUpdates"),$("settingsAboutCheckUpdates")].filter(Boolean);
+  if(force){buttons.forEach(button=>setBusy(button,true,"Checking…"));["aboutDialogUpdateStatus","settingsAboutUpdateStatus"].forEach(id=>{const node=$(id);if(node)node.textContent="Checking GitHub for updates…";});}
+  try{
+    state.workbenchUpdate=await invoke("check_workbench_update",{force:Boolean(force)});
+    renderWorkbenchUpdateStatus();
+    return state.workbenchUpdate;
+  }catch(error){
+    if(force){state.workbenchUpdate={status:"unavailable",checkError:String(error),currentVersion:state.data?.version||"1.0.1"};renderWorkbenchUpdateStatus();}
+    return null;
+  }finally{if(force)buttons.forEach(button=>setBusy(button,false));}
 }
 
 function nativeNotification(title, body, {outcome="succeeded", elapsedSeconds=null, force=false}={}) {
@@ -4241,6 +4276,7 @@ async function openSettings(page="settingsWorkspace") {
   renderComparisonPaletteSettings();
   const workspaceSettings=state.data?.workspaceSettings||{};
   $("settingsAboutVersion").textContent=state.data?.version||"1.0.1";
+  renderWorkbenchUpdateStatus();
   renderSettingsWorkspaces();
   const templates=state.data?.templates||[],libraries=state.data?.inputLibraries||[],explanations=state.data?.inputExplanations||[];
   $("defaultTemplate").innerHTML=`<option value="">No default</option>${templates.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;
@@ -4313,10 +4349,11 @@ async function loadSettingsDocumentation(path="README.md"){const body=$("setting
 function diagnosticsOptions(){return{includeResults:Boolean($("diagnosticsIncludeResults").checked),includeCache:Boolean($("diagnosticsIncludeCache").checked)}}
 function diagnosticFilename(job){const safe=(value)=>String(value||"run").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,48)||"run";return `visioneval-diagnostics-${safe(job?.projectName)}-${safe(jobDisplayName(job))}.zip`}
 async function exportRunDiagnostics(jobId){const job=state.data?.jobs?.find(item=>item.id===jobId);if(!job)return notify("Select a run before exporting diagnostics.","error");const options=diagnosticsOptions(),params=new URLSearchParams({jobId,includeResults:String(options.includeResults),includeCache:String(options.includeCache)});const route=`/api/diagnostics/run?${params}`,invoke=window.__TAURI_INTERNALS__?.invoke;if(invoke){const saved=await invoke("save_backend_export",{exportKind:"diagnostics-run",query:params.toString(),filename:diagnosticFilename(job)});if(saved)notify(`Saved ${saved}.`,"success");return}const link=document.createElement("a");link.href=route;link.download=diagnosticFilename(job);link.click()}
-async function loadDiagnosticsSettings(){const runsEl=$("diagnosticsRuns"),errorsEl=$("diagnosticsErrors");runsEl.textContent="Loading failed runs…";errorsEl.textContent="Loading recent app errors…";try{const[runsPayload,errorsPayload]=await Promise.all([request("/api/diagnostics/runs?state=failed"),request("/api/diagnostics/errors")]),runs=runsPayload.runs||[],errors=errorsPayload.errors||[];runsEl.innerHTML=runs.length?runs.map(job=>`<article class="asset-row"><div><strong>${escapeHtml(jobDisplayName(job))}</strong><small>${escapeHtml(job.projectName||"Unknown project")} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(job.message||"")}</small></div><button type="button" class="secondary" data-diagnostics-run="${escapeHtml(job.id)}">Export diagnostics</button></article>`).join(""):"No failed runs are available.";runsEl.querySelectorAll("[data-diagnostics-run]").forEach(button=>button.addEventListener("click",()=>exportRunDiagnostics(button.dataset.diagnosticsRun).catch(error=>notify(error.message,"error"))));errorsEl.innerHTML=errors.length?errors.slice().reverse().map(error=>`<article class="asset-row"><div><strong>${escapeHtml(error.message||"Unknown app error")}</strong><small>${escapeHtml(error.source||"app")} · ${formatTime(error.timestamp)}</small></div></article>`).join(""):"No recent app errors are recorded."}catch(error){runsEl.textContent=error.message||String(error);errorsEl.textContent="Diagnostics could not be loaded."}}
+async function loadDiagnosticsSettings(){const runsEl=$("diagnosticsRuns"),errorsEl=$("diagnosticsErrors"),clearButton=$("clearDiagnosticErrors");runsEl.textContent="Loading failed runs…";errorsEl.textContent="Loading recent app errors…";clearButton.disabled=true;try{const[runsPayload,errorsPayload]=await Promise.all([request("/api/diagnostics/runs?state=failed"),request("/api/diagnostics/errors")]),runs=runsPayload.runs||[],errors=errorsPayload.errors||[];runsEl.innerHTML=runs.length?runs.map(job=>`<article class="asset-row"><div><strong>${escapeHtml(jobDisplayName(job))}</strong><small>${escapeHtml(job.projectName||"Unknown project")} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(job.message||"")}</small></div><button type="button" class="secondary" data-diagnostics-run="${escapeHtml(job.id)}">Export diagnostics</button></article>`).join(""):"No failed runs are available.";runsEl.querySelectorAll("[data-diagnostics-run]").forEach(button=>button.addEventListener("click",()=>exportRunDiagnostics(button.dataset.diagnosticsRun).catch(error=>notify(error.message,"error"))));errorsEl.innerHTML=errors.length?errors.slice().reverse().map(error=>`<article class="asset-row"><div><strong>${escapeHtml(error.message||"Unknown app error")}</strong><small>${escapeHtml(error.source||"app")} · ${formatTime(error.timestamp)}</small></div></article>`).join(""):"No recent app errors are recorded.";clearButton.disabled=!errors.length}catch(error){runsEl.textContent=error.message||String(error);errorsEl.textContent="Diagnostics could not be loaded."}}
+async function clearDiagnosticErrors(){if(!await confirmWorkbench("Clear all recorded app errors from this workspace?\n\nFailed runs, results, and exported diagnostic ZIPs will not be changed.",{title:"Clear app errors",confirmLabel:"Clear errors"}))return;const button=$("clearDiagnosticErrors");let result=null;setBusy(button,true,"Clearing…");try{result=await post("/api/diagnostics/errors/clear",{})}catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}if(result){await loadDiagnosticsSettings();notify(`Cleared ${result.cleared||0} app error${result.cleared===1?"":"s"}.`,"success")}}
 function switchSettingsPage(page){document.querySelectorAll(".settings-page").forEach(item=>item.classList.toggle("active",item.id===page));document.querySelectorAll("[data-settings-page]").forEach(item=>item.classList.toggle("active",item.dataset.settingsPage===page));if(page==="settingsStorage")loadStorageReport();if(page==="settingsDiagnostics")loadDiagnosticsSettings();if(page==="settingsDocumentation")loadSettingsDocumentation()}
 document.querySelectorAll("[data-settings-page]").forEach(button=>button.addEventListener("click",()=>switchSettingsPage(button.dataset.settingsPage)));
-$('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);$('refreshDocumentation').addEventListener('click',()=>loadSettingsDocumentation());$('settingsDocumentationBody').addEventListener('click',(event)=>{const link=event.target.closest('[data-doc-path]');if(!link)return;event.preventDefault();loadSettingsDocumentation(link.dataset.docPath||'README.md')});
+$('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);$('clearDiagnosticErrors').addEventListener('click',clearDiagnosticErrors);$('refreshDocumentation').addEventListener('click',()=>loadSettingsDocumentation());$('settingsDocumentationBody').addEventListener('click',(event)=>{const link=event.target.closest('[data-doc-path]');if(!link)return;event.preventDefault();loadSettingsDocumentation(link.dataset.docPath||'README.md')});
 async function loadStorageReport(){try{const report=await request("/api/storage");$("storageReport").innerHTML=metric("Workspace",humanBytes(report.workspaceBytes))+metric("Model runs",humanBytes(report.categories.models))+metric("Datastores",humanBytes(report.runs.reduce((sum,item)=>sum+item.datastoreBytes,0)))+metric("Full CSV exports",humanBytes(report.runs.reduce((sum,item)=>sum+item.exportBytes,0)))+metric("Comparison cache",`${humanBytes(report.comparisonCache?.bytes||0)} · ${report.comparisonCache?.entries||0} tables`);}catch(error){$("storageReport").innerHTML=`<p class="muted">${escapeHtml(error.message)}</p>`}}
 async function clearComparisonCache(rebuild=false){const button=$(rebuild?"rebuildComparisonCache":"clearComparisonCache");setBusy(button,true,"Clearing…");try{await post(rebuild?"/api/comparison/cache/rebuild":"/api/comparison/cache/clear",{});state.lastComparison=null;await loadStorageReport();notify(rebuild?"Comparison cache cleared and will rebuild on next use.":"Comparison cache cleared.","success");}catch(error){notify(error.message,"error");}finally{setBusy(button,false);}}
 $("clearComparisonCache").addEventListener("click",()=>clearComparisonCache(false));
@@ -4897,7 +4934,7 @@ let lastMenuContext = "";
 const APP_ZOOM_KEY="visioneval-app-zoom";
 function appZoomValue(){const value=Number(localStorage.getItem(APP_ZOOM_KEY)||1);return Math.max(.8,Math.min(2,Number.isFinite(value)?value:1));}
 async function setApplicationZoom(value){const scale=Math.max(.8,Math.min(2,Math.round(value*10)/10));localStorage.setItem(APP_ZOOM_KEY,String(scale));if(window.__TAURI_INTERNALS__?.invoke)await window.__TAURI_INTERNALS__.invoke('set_app_zoom',{scale});syncWorkbenchViewport();requestAnimationFrame(syncWorkbenchViewport);}
-function openAboutDialog(){const dialog=$("aboutDialog");$("aboutDialogVersion").textContent=state.data?.version||"1.0.1";applyTaskbarSafeDialogBounds();if(!dialog.open)dialog.showModal();requestAnimationFrame(applyTaskbarSafeDialogBounds);}
+function openAboutDialog(){const dialog=$("aboutDialog");$("aboutDialogVersion").textContent=state.data?.version||"1.0.1";renderWorkbenchUpdateStatus();applyTaskbarSafeDialogBounds();if(!dialog.open)dialog.showModal();requestAnimationFrame(applyTaskbarSafeDialogBounds);}
 function activeMapKind(){if($('regionMapDialog').open&&state.regionMapScene)return'region';if($('comparePage').classList.contains('active')&&$('mapData').classList.contains('active')&&state.comparisonMapScene)return'comparison';return'';}
 function runActiveMapAction(action){const kind=activeMapKind();if(kind==='region'){if(action==='in')return zoomRegionMap(.76);if(action==='out')return zoomRegionMap(1.32);if(action==='fit'&&state.regionMapScene?.focusView)return setRegionMapView(state.regionMapScene.focusView);if(action==='extent'&&state.regionMapScene?.fullView)return setRegionMapView(state.regionMapScene.fullView);}if(kind==='comparison'){if(action==='in')return zoomComparisonMap(.65);if(action==='out')return zoomComparisonMap(1/.65);if(action==='fit')return focusComparisonMapProject({zoom:true});if(action==='extent'&&state.comparisonMapScene)return setComparisonMapView(state.comparisonMapScene.fullView);}}
 function syncMenuContext() {
@@ -5029,11 +5066,13 @@ function setRunHistoryHidden(hidden) {
 $("hideRunHistory").addEventListener("click", () => setRunHistoryHidden(true));
 $("showRunHistory").addEventListener("click", () => setRunHistoryHidden(false));
 $("reloadWorkbench").addEventListener("click", () => window.location.reload());
+$("dismissWorkbenchUpdate").addEventListener("click",()=>{const version=state.workbenchUpdate?.latestTag||state.workbenchUpdate?.latestVersion||"";try{if(version)localStorage.setItem(WORKBENCH_UPDATE_DISMISS_KEY,version)}catch(_){}renderWorkbenchUpdateStatus();});
+[$("aboutDialogCheckUpdates"),$("settingsAboutCheckUpdates")].forEach(button=>button.addEventListener("click",()=>checkWorkbenchUpdate({force:true})));
 
 renderPlatformShortcuts();
 initializeComparisonMap3dCapability();
 setApplicationZoom(appZoomValue()).catch(()=>{});
-refreshState({ quiet: true });
+refreshState({ quiet: true }).then(()=>checkWorkbenchUpdate()).catch(()=>{});
 setInterval(() => {
   if ($("runPage").classList.contains("active") && !state.selectedJob) refreshState({ quiet: true });
 }, 5000);
