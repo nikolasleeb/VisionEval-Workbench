@@ -8,7 +8,9 @@
 - Kept onboarding, Settings, About, and other dialogs inside the Windows taskbar-safe area.
 - Restored About in Settings and added a working About window to the application menu.
 - Restored weekly GitHub checks for newer stable Workbench releases, with an actionable in-app notice and manual checks in About.
+- Used Windows' trusted certificates for GitHub update checks, including locally installed network certificates.
 - Retained app diagnostic errors for 30 days or 500 entries and added a clear control in Settings.
+- Stopped the complete native R process tree on cancellation and retried cleanup when Windows temporarily holds result files open.
 
 ## 1.0.0
 
