@@ -8,7 +8,7 @@ This is the first public release of the clean VisionEval Workbench repository. I
 - **Apple Silicon macOS:** `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`
 - **Intel macOS:** `VisionEval-Workbench-v1.0.0-macos-x64.dmg`
 - **Intel source snapshot:** `VisionEval-Workbench-v1.0.0-intel-source.zip`
-- **PlanRVA model package:** `planrva-mm.zip`
+- **PlanRVA 2.0 model package:** `planrva-mm.zip`
 - **Virginia MPO regional package:** `virginia-mpo-regions.zip`
 
 Exact platform source snapshots are also attached. GitHub additionally supplies automatic source archives for the full repository.
@@ -33,3 +33,4 @@ The refreshed Mac builds keep first-launch runtime downloads in background opera
 - Each Mac DMG is architecture-specific; use the ARM64 build on Apple Silicon and the x64 build on Intel.
 - The runtime is an unofficial distribution built from VisionEval VE-40-RC6 and includes the documented Workbench compatibility patch.
 - Regional planning data are provided as-is and are installed separately through **Settings → Assets**.
+- PlanRVA 2.0 includes the Virginia comparison-map provider and does not require the Virginia MPO package. Its first map use downloads geometry from the official ArcGIS services; subsequent map use reuses the shared Virginia cache and can work offline.

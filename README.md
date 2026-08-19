@@ -39,10 +39,12 @@ The Mac applications are ad-hoc signed but are not Apple-notarized. If macOS blo
 
 The release also includes two optional platform-neutral packages:
 
-- `planrva-mm.zip` provides the PlanRVA multimodal model template and matching InputLibrary.
+- `planrva-mm.zip` provides PlanRVA MM 2.0, including the original working model template and InputLibrary plus the Virginia comparison-map provider.
 - `virginia-mpo-regions.zip` provides Virginia MPO regional data and Region Builder support.
 
 Do not unzip these packages. In Workbench, open **Settings → Assets**, choose the downloaded ZIP, review its information, and install it into your workspace.
+
+PlanRVA 2.0 does not require the Virginia MPO package. On the first comparison-map use, Workbench downloads Virginia MPO, Azone, and Bzone geometry from the official ArcGIS services and saves it in the shared Virginia cache. Later map uses can reuse that cache offline; installing the Virginia MPO package remains optional and uses the same cache.
 
 ## Tutorials
 

@@ -30,6 +30,19 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def make_shared_map_package(path: Path) -> Path:
+    source = ROOT / "resources/examples/planrva-mm/map-context"
+    manifest = {"schemaVersion": 1, "type": "region-builder", "id": "virginia-mpo-regions", "name": "Virginia MPO Regional Data", "version": "2026.08.12.3", "coverage": "Virginia", "builder": {"kind": "mpo-bzone-crosswalk", "regionsPath": "data/regions.json", "crosswalkPath": "data/mpo_bzone_crosswalk.json", "localitiesPath": "data/virginia_county_equivalents_2020.txt"}, "comparisonMap": {"enabled": True, "jurisdictionLabel": "Virginia", "fullExtentLabel": "Virginia", "geographies": [{"id": "county", "label": "County / locality", "geometry": "azone", "identifier": "FIPS", "technicalLevel": "Azone"}, {"id": "bzone", "label": "Bzone", "geometry": "bzone", "identifier": "GEOID", "technicalLevel": "Bzone"}]}, "sourcesDocument": "SOURCES.md"}
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        prefix = "virginia-mpo-regions-2026.08.12.3"
+        archive.writestr(f"{prefix}/workbench-package.json", json.dumps(manifest))
+        archive.write(source / "virginia_mpo_regions.json", f"{prefix}/data/regions.json")
+        archive.write(source / "virginia_mpo_bzone_crosswalk.json", f"{prefix}/data/mpo_bzone_crosswalk.json")
+        archive.write(source / "virginia_county_equivalents_2020.txt", f"{prefix}/data/virginia_county_equivalents_2020.txt")
+        archive.write(source / "SOURCES.md", f"{prefix}/SOURCES.md")
+    return path
+
+
 class BundledAssetTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -111,7 +124,7 @@ class BundledAssetTests(unittest.TestCase):
     def test_separate_planrva_package_installs_linked_assets(self):
         archive = Path(self.temp.name) / "planrva.zip"
         subprocess.run(
-            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--output", str(archive)],
+            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--shared-map-package", str(make_shared_map_package(Path(self.temp.name) / "virginia.zip")), "--output", str(archive)],
             cwd=ROOT,
             check=True,
             capture_output=True,
@@ -119,23 +132,25 @@ class BundledAssetTests(unittest.TestCase):
         )
         record = ModelPackageService(self.workspace).install(archive)
         self.assertEqual(record["name"], "PlanRVA MM")
+        self.assertEqual(record["version"], "2.0.0")
         self.assertTrue((self.workspace.input_library / "PlanRVA MM" / "bzone_employment.csv").is_file())
         self.assertTrue((self.workspace.templates / "template-planrva-mm-8f140cd4cb" / "visioneval.cnf").is_file())
-        self.assertTrue((self.workspace.map_contexts / "planrva-virginia-map-context" / "workbench-map-context.json").is_file())
+        self.assertTrue((self.workspace.map_contexts / "virginia-mpo-regions" / "workbench-map-context.json").is_file())
         providers = RegionPackageService(self.workspace).comparison_map_providers()
-        self.assertEqual(providers[0]["id"], "planrva-virginia-map-context")
+        self.assertEqual(providers[0]["id"], "virginia-mpo-regions")
         self.assertEqual(providers[0]["compatibleTemplateIds"], ["template-planrva-mm-8f140cd4cb"])
         _, context, regions, crosswalk = RegionBuilderService(
             self.workspace, ROOT / "backend", RegionPackageService(self.workspace)
-        )._map_package_context("planrva-virginia-map-context")
+        )._map_package_context("virginia-mpo-regions")
         self.assertEqual(context["componentOf"], "planrva-mm-v1")
+        self.assertEqual(context["version"], "2026.08.12.3")
+        self.assertNotIn("geometryPath", context["builder"])
         self.assertEqual(len(regions["regions"]), 15)
         self.assertEqual(len(crosswalk["regions"]), 15)
         self.assertEqual(self.workspace.settings()["defaultInputLibraryId"], "PlanRVA MM")
         dependencies = self.workspace.asset_dependencies("input-library", "PlanRVA MM")
         self.assertEqual(dependencies["related"][0]["id"], "template-planrva-mm-8f140cd4cb")
-
-        context_root = self.workspace.map_contexts / "planrva-virginia-map-context"
+        context_root = self.workspace.map_contexts / "virginia-mpo-regions"
         legacy_root = self.workspace.templates / "template-planrva-mm-8f140cd4cb" / ".workbench-map-context"
         context_root.rename(legacy_root)
         RegionPackageService(self.workspace)
@@ -145,7 +160,7 @@ class BundledAssetTests(unittest.TestCase):
     def test_separate_planrva_package_rejects_tampering(self):
         archive = Path(self.temp.name) / "planrva.zip"
         subprocess.run(
-            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--output", str(archive)],
+            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--shared-map-package", str(make_shared_map_package(Path(self.temp.name) / "virginia.zip")), "--output", str(archive)],
             cwd=ROOT,
             check=True,
             capture_output=True,
