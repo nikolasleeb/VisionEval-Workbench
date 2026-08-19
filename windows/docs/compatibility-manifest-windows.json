@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "releaseStatus": "public",
-  "applicationVersion": "1.0.0",
+  "applicationVersion": "1.0.1",
   "releaseDate": "August 14, 2026",
   "platform": "Windows",
   "architecture": "x86_64",
