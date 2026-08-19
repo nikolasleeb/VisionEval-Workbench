@@ -5,12 +5,44 @@ function syncWorkbenchViewport() {
   // or short on Windows display scaling changes.
   const height = Math.max(320, Math.floor(visualHeight));
   document.documentElement.style.setProperty('--workbench-viewport-height', `${height}px`);
+  applyTaskbarSafeDialogBounds();
+  applyOnboardingDialogBounds();
   applySettingsDialogPreferredSize();
+}
+
+const ONBOARDING_DIALOG_DEFAULT_SIZE = Object.freeze({width:880,height:680});
+const TASKBAR_SAFE_MARGIN = Object.freeze({horizontal:20,top:24,bottom:144});
+function taskbarSafeArea() {
+  const viewport=settingsVisualViewport();
+  const width=Math.max(1,Math.floor(viewport.width-(2*TASKBAR_SAFE_MARGIN.horizontal)));
+  const height=Math.max(1,Math.floor(viewport.height-TASKBAR_SAFE_MARGIN.top-TASKBAR_SAFE_MARGIN.bottom));
+  return{viewport,width,height};
+}
+function applyTaskbarSafeDialogBounds() {
+  const {viewport,width:maxWidth,height:maxHeight}=taskbarSafeArea();
+  document.querySelectorAll(".taskbar-safe-dialog:not(#onboardingDialog):not(#settingsDialog)").forEach((dialog)=>{
+    const compact=dialog.classList.contains("about-dialog");
+    const width=Math.min(compact?600:880,maxWidth),height=Math.min(compact?440:720,maxHeight);
+    dialog.style.width=`${width}px`;
+    dialog.style.height=`${height}px`;
+    dialog.style.left=`${Math.round(viewport.left+(viewport.width-width)/2)}px`;
+    dialog.style.top=`${Math.round(viewport.top+TASKBAR_SAFE_MARGIN.top+(maxHeight-height)/2)}px`;
+  });
+}
+function applyOnboardingDialogBounds() {
+  const dialog=document.getElementById("onboardingDialog");
+  if(!dialog)return;
+  const {viewport,width:maxWidth,height:maxHeight}=taskbarSafeArea();
+  const width=Math.min(ONBOARDING_DIALOG_DEFAULT_SIZE.width,maxWidth);
+  const height=Math.min(ONBOARDING_DIALOG_DEFAULT_SIZE.height,maxHeight);
+  dialog.style.width=`${width}px`;
+  dialog.style.height=`${height}px`;
+  dialog.style.left=`${Math.round(viewport.left+(viewport.width-width)/2)}px`;
+  dialog.style.top=`${Math.round(viewport.top+TASKBAR_SAFE_MARGIN.top+(maxHeight-height)/2)}px`;
 }
 
 const SETTINGS_DIALOG_SIZE_KEY = "visioneval-settings-dialog-size-v1";
 const SETTINGS_DIALOG_DEFAULT_SIZE = Object.freeze({width:880,height:720});
-const SETTINGS_DIALOG_SAFE_MARGIN = Object.freeze({horizontal:20,vertical:28});
 function loadSettingsDialogPreferredSize() {
   try {
     const value=JSON.parse(localStorage.getItem(SETTINGS_DIALOG_SIZE_KEY)||"null");
@@ -25,9 +57,7 @@ function settingsVisualViewport() {
   return{left:viewport?.offsetLeft||0,top:viewport?.offsetTop||0,width:viewport?.width||window.innerWidth||document.documentElement.clientWidth||SETTINGS_DIALOG_DEFAULT_SIZE.width,height:viewport?.height||window.innerHeight||document.documentElement.clientHeight||SETTINGS_DIALOG_DEFAULT_SIZE.height};
 }
 function settingsDialogSizeLimits() {
-  const viewport=settingsVisualViewport();
-  const maxWidth=Math.max(1,Math.floor(viewport.width-(2*SETTINGS_DIALOG_SAFE_MARGIN.horizontal)));
-  const maxHeight=Math.max(1,Math.floor(viewport.height-(2*SETTINGS_DIALOG_SAFE_MARGIN.vertical)));
+  const {width:maxWidth,height:maxHeight}=taskbarSafeArea();
   return{minWidth:Math.min(520,maxWidth),minHeight:Math.min(420,maxHeight),maxWidth,maxHeight};
 }
 function clampedSettingsDialogSize(size=settingsDialogPreferredSize) {
@@ -37,11 +67,11 @@ function clampedSettingsDialogSize(size=settingsDialogPreferredSize) {
 function applySettingsDialogPreferredSize() {
   const dialog=document.getElementById("settingsDialog");
   if(!dialog)return;
-  const viewport=settingsVisualViewport(),size=clampedSettingsDialogSize();
+  const {viewport,height:safeHeight}=taskbarSafeArea(),size=clampedSettingsDialogSize();
   dialog.style.width=`${size.width}px`;
   dialog.style.height=`${size.height}px`;
   dialog.style.left=`${Math.round(viewport.left+(viewport.width-size.width)/2)}px`;
-  dialog.style.top=`${Math.round(viewport.top+(viewport.height-size.height)/2)}px`;
+  dialog.style.top=`${Math.round(viewport.top+TASKBAR_SAFE_MARGIN.top+(safeHeight-size.height)/2)}px`;
   const handle=document.getElementById("settingsDialogResizer");
   handle?.setAttribute("aria-valuetext",`${size.width} by ${size.height} pixels`);
 }
@@ -4069,7 +4099,9 @@ function maybeShowOnboarding() {
   $("onboardingRuntimeStatus").textContent=native?(runtime.error||((runtime.imagePresent&&runtime.executable)?"Runtime paths detected. Verify them to enable runs.":"Choose VE_RUNTIME first. You can review or override the detected VE_HOME and Rscript paths.")):runtime.error||(!runtime.installed?"Docker Desktop is not installed. You can skip and set it up later.":!runtime.running?"Docker Desktop is installed but its engine is stopped. Start Docker Desktop, then verify.":runtime.imagePresent?`Found ${runtime.image}. Verify it to save its digest.`:"No compatible local Docker runtime was found. Open Runtime setup for installation commands.");
   $("onboardingStartDocker").hidden=native||!runtime.installed||runtime.running;
   $("onboardingVerify").disabled=native?!($("onboardingVeRuntime").value&&$("onboardingVeHome").value&&$("onboardingRscript").value):!(runtime.running&&runtime.imagePresent);
+  applyOnboardingDialogBounds();
   $("onboardingDialog").showModal();
+  requestAnimationFrame(applyOnboardingDialogBounds);
 }
 
 function closeWorkspaceMenus(except=null) {
@@ -4865,6 +4897,7 @@ let lastMenuContext = "";
 const APP_ZOOM_KEY="visioneval-app-zoom";
 function appZoomValue(){const value=Number(localStorage.getItem(APP_ZOOM_KEY)||1);return Math.max(.8,Math.min(2,Number.isFinite(value)?value:1));}
 async function setApplicationZoom(value){const scale=Math.max(.8,Math.min(2,Math.round(value*10)/10));localStorage.setItem(APP_ZOOM_KEY,String(scale));if(window.__TAURI_INTERNALS__?.invoke)await window.__TAURI_INTERNALS__.invoke('set_app_zoom',{scale});syncWorkbenchViewport();requestAnimationFrame(syncWorkbenchViewport);}
+function openAboutDialog(){const dialog=$("aboutDialog");$("aboutDialogVersion").textContent=state.data?.version||"1.0.1";applyTaskbarSafeDialogBounds();if(!dialog.open)dialog.showModal();requestAnimationFrame(applyTaskbarSafeDialogBounds);}
 function activeMapKind(){if($('regionMapDialog').open&&state.regionMapScene)return'region';if($('comparePage').classList.contains('active')&&$('mapData').classList.contains('active')&&state.comparisonMapScene)return'comparison';return'';}
 function runActiveMapAction(action){const kind=activeMapKind();if(kind==='region'){if(action==='in')return zoomRegionMap(.76);if(action==='out')return zoomRegionMap(1.32);if(action==='fit'&&state.regionMapScene?.focusView)return setRegionMapView(state.regionMapScene.focusView);if(action==='extent'&&state.regionMapScene?.fullView)return setRegionMapView(state.regionMapScene.fullView);}if(kind==='comparison'){if(action==='in')return zoomComparisonMap(.65);if(action==='out')return zoomComparisonMap(1/.65);if(action==='fit')return focusComparisonMapProject({zoom:true});if(action==='extent'&&state.comparisonMapScene)return setComparisonMapView(state.comparisonMapScene.fullView);}}
 function syncMenuContext() {
@@ -4893,6 +4926,7 @@ function syncMenuContext() {
 }
 
 async function handleMenuAction(action) {
+  if(action==='about')return openAboutDialog();
   if(action==='zoom-in')return setApplicationZoom(appZoomValue()+.1);
   if(action==='zoom-out')return setApplicationZoom(appZoomValue()-.1);
   if(action==='actual-size')return setApplicationZoom(1);
