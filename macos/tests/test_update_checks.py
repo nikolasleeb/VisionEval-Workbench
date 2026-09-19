@@ -72,6 +72,33 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertIn("updateChecks", stored)
         self.assertNotIn("checkVisionEvalUpdates", stored)
 
+    def test_runtime_candidate_revalidates_complete_cached_index_fields(self):
+        service = self.service(lambda _url: [])
+        digest = "sha256:" + "2" * 64
+        profile = {
+            "runtimeApi": 1,
+            "visionEvalVersion": "VE-40-RC7",
+            "visionEvalCommit": "7" * 40,
+            "digest": digest,
+            "reference": f"ghcr.io/nikolasleeb/visioneval-workbench-runtime@{digest}",
+            "platform": "macos",
+            "architecture": "arm64",
+            "capabilities": ["doctor", "verify-upstream-release", "verify-household-id-alignment", "run", "export"],
+            "minimumWorkbenchVersion": "1.1.0",
+            "downloadSizeBytes": 1,
+            "storageSizeBytes": 1,
+        }
+        self.workspace.update_check_cache(checked_at="2026-09-19T00:00:00+00:00", statuses={
+            "runtimeImage": {
+                "source": "runtimeImage",
+                "status": "update_available",
+                "url": self.release_url,
+                "releaseNotesUrl": self.release_url,
+                "runtimeProfile": profile,
+            }
+        })
+        self.assertEqual(service.runtime_candidate(), profile)
+
     def test_unselected_source_is_not_requested(self):
         self.workspace.update_settings({"updateChecks": {"automatic": False, "sources": {"visioneval": False, "runtimeImage": False, "workbench": True}}})
         releases, _, _ = self.responses()
