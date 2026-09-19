@@ -416,6 +416,8 @@ class UpdateCheckService:
             "runtimeApi": profile.get("runtimeApi"),
             "preferredVisionEvalVersion": profile.get("visionEvalVersion"),
             "visionEvalCommit": profile.get("visionEvalCommit"),
+            "minimumWorkbenchVersion": profile.get("minimumWorkbenchVersion"),
+            "releaseUrl": status.get("releaseNotesUrl") or status.get("url"),
             "capabilities": profile.get("capabilities"),
             "images": [profile],
         })
