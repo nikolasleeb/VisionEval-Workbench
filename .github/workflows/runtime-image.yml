@@ -46,8 +46,8 @@ jobs:
           python3 -m pip install -r intel/packaging/requirements-backend.txt
       - name: Validate Workbench 1.1 runtime contracts
         run: |
-          python3 -m unittest discover -s macos/tests
-          python3 -m unittest discover -s intel/tests
+          (cd macos && python3 -m unittest discover -s tests)
+          (cd intel && python3 -m unittest discover -s tests)
           node --check macos/public/app.js
           node --check intel/public/app.js
           python3 macos/packaging/check_documentation.py
