@@ -5,7 +5,7 @@
 | ⌘N | New Scenario |
 | ⇧⌘N | New File |
 | ⌥⌘B | Batch Change |
-| ⌘S | Save File Changes |
+| ⌘S | Save Direct Edits |
 | ⇧⌘R | Review / Run Selected; always opens confirmation |
 | ⌘. | Stop Selected Run |
 | ⌘1 | Explore |
@@ -15,4 +15,4 @@
 | ⌘R | Refresh |
 | ⌘, | Settings |
 
-Commands that do not apply to the current project, scenario, file, or job are disabled. ⌘S saves only the currently open file preview and its file note; it does not save a batch or start a run.
+Commands that do not apply to the current project, scenario, file, or job are disabled. ⌘S saves only unsaved direct table edits; calculated operations use **Apply and Save Change** and notes autosave independently.

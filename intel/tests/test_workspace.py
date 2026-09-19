@@ -46,7 +46,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue((self.workspace.internal / "settings.json").is_file())
         self.assertTrue(marker["id"].startswith("workspace-"))
         self.assertTrue(self.workspace.settings()["retainFullExports"])
-        self.assertFalse(self.workspace.settings()["checkVisionEvalUpdates"])
+        self.assertFalse(self.workspace.settings()["updateChecks"]["automatic"])
         self.assertEqual(
             self.workspace.settings()["numericPrecision"],
             {"default": 2, "singleFile": None, "batch": None, "output": None, "percentage": None},
@@ -102,7 +102,7 @@ class WorkspaceTests(unittest.TestCase):
         settings = self.workspace.update_settings({"defaultTemplateId": template["id"], "defaultInputLibraryId": "Plan"})
         self.assertEqual(settings["defaultTemplateId"], template["id"])
         settings = self.workspace.update_settings({"checkVisionEvalUpdates": False})
-        self.assertFalse(settings["checkVisionEvalUpdates"])
+        self.assertFalse(settings["updateChecks"]["automatic"])
 
     def test_unused_asset_is_archived_restored_and_purged(self):
         self.workspace.copy_input_library(self.library_source)

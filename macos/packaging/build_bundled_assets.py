@@ -67,13 +67,13 @@ def build_payload() -> dict[str, object]:
     return {
         "schemaVersion": 1,
         "id": "planrva-mm-v1",
-        "version": "1.0.0",
-        "name": "PlanRVA MM Example",
+        "version": "2.2",
+        "name": "PlanRVA",
         "assetType": "bundled-example",
-        "inputLibrary": {"id": "PlanRVA MM", "csvCount": EXPECTED_INPUT_CSVS, "inputFileCount": 52},
+        "inputLibrary": {"id": "PlanRVA MM", "name": "PlanRVA", "csvCount": EXPECTED_INPUT_CSVS, "inputFileCount": 52},
         "modelTemplate": {
             "id": "template-planrva-mm-8f140cd4cb",
-            "name": "PlanRVA MM",
+            "name": "PlanRVA",
             "fingerprint": "20d581d194edb965960506ca61dcb320f7314ff1c80b79fe07ca2a25ffd274b8",
         },
         "comparisonMap": {
@@ -81,11 +81,10 @@ def build_payload() -> dict[str, object]:
             "path": "map-context",
         },
         "compatibility": {
-            "workbenchVersion": "1.0.0",
-            "visionEvalVersion": "VE-40-RC6",
-            "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-            "runtimeDigest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
-            "patch": "2026-08-03-composite-household-id-alignment",
+            "minimumWorkbenchVersion": "1.0.0",
+            "testedWorkbenchVersion": "1.1.0",
+            "supportedVisionEvalVersions": ["VE-40-RC6", "VE-40-RC7"],
+            "runtimeApi": 1,
             "architecture": "arm64",
         },
         "provenance": {

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.workbench.region_builder import DEFAULT_FAMPO_ID, RegionBuilderService
+from backend.workbench.region_builder import DEFAULT_FAMPO_ID, RegionBuilderService, region_code_from_name
 from backend.workbench.region_packages import RegionPackageService, file_sha256, package_manifest_type, package_root
 from backend.workbench.workspace import Workspace, WorkspaceError, read_json
 
@@ -283,6 +283,19 @@ class RegionBuilderTests(unittest.TestCase):
         manifest = read_json(template / "region_builder_manifest.json", {})
         self.assertEqual(manifest["selection"]["bzones"], ["101"])
 
+    def test_region_code_is_derived_from_the_visible_name(self):
+        self.assertEqual(region_code_from_name("  Hénrico   County: Study Area!  "), "henrico_county_study_area")
+        self.assertEqual(region_code_from_name("地域計画"), region_code_from_name("地域計画"))
+        self.assertRegex(region_code_from_name("地域計画"), r"^region_[0-9a-f]{12}$")
+        result = self.service.build({
+            "sourceTemplateId": self.template["id"],
+            "regionName": "Henrico County Study Area",
+            "stateAbbr": "VA",
+            "selectedBzones": ["101"],
+        })
+        template = self.workspace.templates / result["modelTemplate"]["id"]
+        self.assertIn("Region: henrico_county_study_area", (template / "visioneval.cnf").read_text(encoding="utf-8"))
+
     def test_unmatched_bzone_is_rejected(self):
         with self.assertRaisesRegex(WorkspaceError, "not in defs/geo.csv"):
             self.service.preview({"sourceTemplateId": self.template["id"], "selectedBzones": ["999"]})
@@ -459,7 +472,7 @@ class RegionBuilderTests(unittest.TestCase):
     def test_spatial_crosswalk_rejects_a_mismatched_input_library(self):
         packages, package_id, source_id = install_va_package(self.root, self.workspace, spatial=True, missing_bzone=True)
         service = RegionBuilderService(self.workspace, self.root, packages)
-        with self.assertRaisesRegex(WorkspaceError, "absent from this InputLibrary"):
+        with self.assertRaisesRegex(WorkspaceError, "absent from this Input Library"):
             service.preview({"packageId": package_id, "sourceLibraryId": source_id, "regionId": DEFAULT_FAMPO_ID})
 
     def test_fampo_preview_resolves_whole_jurisdiction_membership(self):
@@ -514,6 +527,32 @@ class RegionBuilderTests(unittest.TestCase):
         self.assertEqual(manifest["selection"]["method"], "official-boundary-bzone-crosswalk")
         self.assertEqual(manifest["selection"]["boundary"]["sources"]["mpo"]["provider"], "Virginia Department of Transportation")
         self.assertEqual(manifest["selection"]["boundary"]["boundaryCount"], 2)
+
+    def test_model_bundle_installed_scope_has_a_clean_read_only_name(self):
+        service = RegionBuilderService(self.workspace, self.root)
+        source = {"id": "planrva-mm", "name": "PlanRVA", "coverage": "PlanRVA"}
+        scope = {
+            "template": {"name": "PlanRVA MM"},
+            "azoneByFips": {"51001": "Alpha County", "51003": "Beta County"},
+            "bzones": {"510010001001", "510030001001"},
+            "regionCode": "planrva",
+            "state": "VA",
+        }
+        with patch.object(service, "_model_bundle_source", return_value=source), patch.object(service, "_model_scope", return_value=scope):
+            result = service.regions("planrva-mm")
+        region = result["regions"][0]
+        self.assertEqual(region["name"], "PlanRVA installed scope")
+        self.assertEqual(region["shortName"], "PlanRVA")
+        self.assertEqual(region["defaultRegionName"], "PlanRVA Subregion")
+        self.assertEqual(region["selectedCount"], 2)
+
+    def test_model_bundle_preview_and_build_require_custom_geography(self):
+        service = RegionBuilderService(self.workspace, self.root)
+        with patch.object(service, "_model_bundle_source", return_value={"id": "planrva-mm"}):
+            with self.assertRaisesRegex(WorkspaceError, "Build your own region"):
+                service.preview({"packageId": "planrva-mm", "geographyMode": "official"})
+            with self.assertRaisesRegex(WorkspaceError, "Build your own region"):
+                service.build({"packageId": "planrva-mm", "geographyMode": "official"})
 
 
 if __name__ == "__main__":

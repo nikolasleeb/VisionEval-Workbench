@@ -75,13 +75,22 @@ class ComparisonService:
         return self.cache.clear() if self.cache else {"cleared":True,"removed":0,"bytes":0,"entries":0}
 
     def _record(self, datastore_id: str) -> dict[str, Any]:
-        record = next((item for item in self.workspace.catalog(False)["datastores"] if item.get("id") == datastore_id), None)
+        record = next((item for item in self.workspace.display_catalog(False)["datastores"] if item.get("id") == datastore_id), None)
         if not record:
             raise WorkspaceError("Unknown datastore")
         path = self.workspace.within(record["path"])
         if not (path / "DatastoreListing.Rda").is_file():
             raise WorkspaceError("Datastore is incomplete")
-        return {**record, "path": str(path)}
+        return {
+            **record,
+            "recordedLabel": record.get("label", ""),
+            "recordedProjectName": record.get("projectName", ""),
+            "recordedVariationName": record.get("variationName", ""),
+            "label": record.get("displayLabel") or record.get("label", ""),
+            "projectName": record.get("displayProjectName") or record.get("projectName", ""),
+            "variationName": record.get("displayVariationName") or record.get("variationName", ""),
+            "path": str(path),
+        }
 
     @lru_cache(maxsize=4096)
     def _read_rda(self, path_text: str, metadata: bool = False) -> dict[str, Any]:
@@ -299,22 +308,26 @@ class ComparisonService:
         """Resolve datastore geography labels to package-compatible FIPS and GEOIDs."""
         mapping = self._county_mapping(record)
         if not mapping:
-            return {"azone": {}, "bzone": {}, "names": {}}
+            return {"azone": {}, "bzone": {}, "marea": {}, "bzoneToMarea": {}, "azoneToMarea": {}, "names": {}}
         azone_ids: dict[str, str] = {}
         bzone_ids: dict[str, str] = {}
+        marea_ids: dict[str, str] = {}
+        bzone_to_marea: dict[str, str] = {}
+        azone_to_marea: dict[str, str] = {}
         names: dict[str, str] = {}
         template_id = record.get("templateId")
         if not template_id:
-            return {"azone": azone_ids, "bzone": bzone_ids, "names": names}
+            return {"azone": azone_ids, "bzone": bzone_ids, "marea": marea_ids, "bzoneToMarea": bzone_to_marea, "azoneToMarea": azone_to_marea, "names": names}
         try:
             template_path, _ = self.workspace.template(template_id)
         except WorkspaceError:
-            return {"azone": azone_ids, "bzone": bzone_ids, "names": names}
+            return {"azone": azone_ids, "bzone": bzone_ids, "marea": marea_ids, "bzoneToMarea": bzone_to_marea, "azoneToMarea": azone_to_marea, "names": names}
         path = template_path / "defs" / "geo.csv"
         with path.open("r", encoding="utf-8-sig", newline="") as handle:
             for row in csv.DictReader(handle):
                 name = str(row.get("Azone", "")).strip()
                 bzone = re.sub(r"\.0$", "", str(row.get("Bzone", "")).strip())
+                marea = str(row.get("Marea", "")).strip()
                 if not name or name.upper() == "NA" or not bzone or bzone.upper() == "NA":
                     continue
                 bzone = bzone.zfill(12) if bzone.isdigit() else bzone
@@ -326,13 +339,21 @@ class ComparisonService:
                 bzone_ids[bzone.casefold()] = bzone
                 names[azone] = name
                 names[bzone] = name
-        return {"azone": azone_ids, "bzone": bzone_ids, "names": names}
+                if marea and marea.upper() != "NA":
+                    marea_ids[marea.casefold()] = marea
+                    marea_ids[marea] = marea
+                    bzone_to_marea[bzone] = marea
+                    azone_to_marea[name.casefold()] = marea
+                    azone_to_marea[azone] = marea
+                    names[marea] = marea.replace("__", " — ").replace("_", " ")
+        return {"azone": azone_ids, "bzone": bzone_ids, "marea": marea_ids, "bzoneToMarea": bzone_to_marea, "azoneToMarea": azone_to_marea, "names": names}
 
     def map_options(self, datastore_ids: list[str]) -> dict[str, Any]:
         variables = self.variables(datastore_ids)
         if not datastore_ids:
             return {"variables": [], "message": "Load at least two datastore results to create a map."}
         reference = self._record(datastore_ids[0])
+        geography = self._map_geography(reference)
         root = Path(reference["path"])
         output = []
         for item in variables:
@@ -347,6 +368,8 @@ class ComparisonService:
                     item["table"] in {"Vehicle", "Worker"} and "HhId" in names
                 ):
                     levels.add("bzone")
+                if geography.get("marea") and (item["table"] in {"Marea", "Azone", "Bzone"} or {"Marea", "Azone", "Bzone"}.intersection(names)):
+                    levels.add("marea")
             if levels:
                 descriptors = {
                     "county": {
@@ -357,10 +380,14 @@ class ComparisonService:
                         "id": "bzone", "label": "Bzone", "identifier": "GEOID",
                         "geometry": "bzone", "technicalLevel": "Bzone",
                     },
+                    "marea": {
+                        "id": "marea", "label": "Marea", "identifier": "Marea",
+                        "geometry": "bzone", "technicalLevel": "Marea",
+                    },
                 }
                 output.append({
                     **item,
-                    "geographyLevels": [descriptors[level] for level in ("county", "bzone") if level in levels],
+                    "geographyLevels": [descriptors[level] for level in ("county", "bzone", "marea") if level in levels],
                 })
         return {
             "variables": output,
@@ -371,7 +398,7 @@ class ComparisonService:
         signature = []
         for record in records:
             root = Path(record["path"])
-            names = {variable, "Bzone" if geography == "bzone" else "Azone", "Bzone"}
+            names = {variable, "Bzone" if geography in {"bzone", "marea"} else "Azone", "Bzone", "Marea", "Azone"}
             if table in {"Vehicle", "Worker"} and geography == "bzone":
                 names.add("HhId")
             files = []
@@ -395,6 +422,8 @@ class ComparisonService:
         assignment = "direct"
         if geography == "bzone":
             field = "Bzone" if table == "Bzone" or "Bzone" in available else ""
+        elif geography == "marea":
+            field = "Marea" if table == "Marea" or "Marea" in available else "Bzone" if table == "Bzone" or "Bzone" in available else "Azone" if table == "Azone" or "Azone" in available else ""
         else:
             field = "Azone" if table == "Azone" or "Azone" in available else "Bzone" if table == "Bzone" or "Bzone" in available else ""
         locations: list[Any]
@@ -447,6 +476,12 @@ class ComparisonService:
                 bzone = raw.zfill(12) if raw.isdigit() else raw
                 geography_id = lookup["bzone"].get(bzone.casefold(), bzone)
                 if geography in {"azone", "county"}: geography_id = lookup["azone"].get(geography_id[:5], geography_id[:5])
+                elif geography == "marea": geography_id = lookup["bzoneToMarea"].get(geography_id, "")
+            elif geography == "marea" and field == "Azone":
+                azone = lookup["azone"].get(raw.casefold(), raw)
+                geography_id = lookup["azoneToMarea"].get(azone, lookup["azoneToMarea"].get(raw.casefold(), ""))
+            elif geography == "marea":
+                geography_id = lookup["marea"].get(raw.casefold(), raw)
             else:
                 geography_id = lookup["azone"].get(raw.casefold(), raw if len(raw) == 5 and raw.isdigit() else "")
             if not geography_id:
@@ -465,8 +500,8 @@ class ComparisonService:
     def comparison_map(self, reference_id: str, comparison_id: str, year: str, table: str, variable: str, geography: str, aggregation: str = "mean", cancelled=None) -> dict[str, Any]:
         if geography == "azone":
             geography = "county"
-        if geography not in {"county", "bzone"}:
-            raise WorkspaceError("Map geography must be County/locality or Bzone")
+        if geography not in {"county", "bzone", "marea"}:
+            raise WorkspaceError("Map geography must be County/locality, Bzone, or Marea")
         if aggregation not in {"mean", "sum", "count"}:
             raise WorkspaceError("Map aggregation must be mean, sum, or count")
         records = [self._record(reference_id), self._record(comparison_id)]
@@ -515,11 +550,12 @@ class ComparisonService:
         payload = {
             "mapToken": token, "reference": public_records[0], "comparison": public_records[1], "year": year,
             "table": table, "variable": variable, "geographyLevel": geography,
-            "geographyLabel": "County / locality" if geography == "county" else "Bzone",
+            "geographyLabel": "County / locality" if geography == "county" else "Marea" if geography == "marea" else "Bzone",
             "units": metadata.get("units") or "", "description": metadata.get("description") or "",
             "geographyRows": rows, "mappedGeographies": len(rows),
             "unavailableGeographies": sum(item["referenceValue"] is None or item["comparisonValue"] is None for item in rows),
             "aggregation": aggregation,
+            "mareaBzones": ({key: sorted([bzone for bzone, value in geography_lookup.get("bzoneToMarea", {}).items() if value == key], key=_natural) for key in geography_lookup.get("marea", {}).values()} if geography == "marea" else {}),
             "assignments": [
                 {"resultId": record.get("id"), **{key: aggregate.get(key) for key in ("assignment", "numericRows", "matchedRows", "unmatchedRows")}}
                 for record, aggregate in zip(records, aggregate_results)
@@ -544,8 +580,8 @@ class ComparisonService:
         """Count changed, safely assignable variables for every project geography."""
         if geography == "county":
             geography = "azone"
-        if geography not in {"azone", "bzone"}:
-            raise WorkspaceError("Change density geography must be Bzone or Azone")
+        if geography not in {"azone", "bzone", "marea"}:
+            raise WorkspaceError("Change density geography must be Bzone, Azone, or Marea")
         if reference_id == comparison_id:
             raise WorkspaceError("Choose different reference and comparison results")
         records = [self._record(reference_id), self._record(comparison_id)]
@@ -566,7 +602,9 @@ class ComparisonService:
             table = item["table"]
             names = by_table.setdefault(table, set())
             names.add(item["name"])
-            names.add("Bzone" if geography == "bzone" else "Azone")
+            names.add("Bzone" if geography in {"bzone", "marea"} else "Azone")
+            if geography == "marea":
+                names.update({"Marea", "Azone"})
             if geography == "azone":
                 names.add("Bzone")
             if table in {"Vehicle", "Worker"} and geography == "bzone":
@@ -611,7 +649,7 @@ class ComparisonService:
         scanned_counts: Counter[str] = Counter()
         unavailable: list[dict[str, Any]] = []
         assignments: list[dict[str, Any]] = []
-        normalized_geography = "county" if geography == "azone" else "bzone"
+        normalized_geography = "county" if geography == "azone" else geography
         for index, item in enumerate(variables, 1):
             if cancelled and cancelled():
                 raise WorkspaceError("Change-density calculation cancelled")
@@ -657,7 +695,7 @@ class ComparisonService:
             progress(phase="finalizing", message="Finalizing change-density map", completed=len(variables),
                      total=len(variables), cacheHits=cache_hits, cacheMisses=cache_misses)
         lookup = self._map_geography(records[0])
-        project_ids = set(lookup["bzone" if geography == "bzone" else "azone"].values())
+        project_ids = set(lookup["marea" if geography == "marea" else "bzone" if geography == "bzone" else "azone"].values())
         rows = [{
             "geographyId": geography_id,
             "name": lookup.get("names", {}).get(geography_id, geography_id),
@@ -675,7 +713,7 @@ class ComparisonService:
         payload = {
             "densityToken": token, "operationKind": "change-density", "reference": public_records[0],
             "comparison": public_records[1], "year": year, "geographyLevel": geography,
-            "geographyLabel": "Bzone" if geography == "bzone" else "Azone / locality",
+            "geographyLabel": "Marea" if geography == "marea" else "Bzone" if geography == "bzone" else "Azone / locality",
             "geographyRows": rows, "scannedVariables": len(variables) - len(unavailable),
             "unavailableVariables": unavailable, "assignments": assignments,
             "cacheHits": cache_hits, "cacheMisses": cache_misses, "generatedAt": now_iso(),

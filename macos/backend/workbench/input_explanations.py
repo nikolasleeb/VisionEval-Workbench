@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -27,6 +28,20 @@ def _file_sha256(path: Path) -> str:
         while block := handle.read(1024 * 1024):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _catalog_fingerprint(catalog: dict[str, Any]) -> str:
+    """Fingerprint guidance content without provider-specific package branding."""
+    explanations = {
+        str(key): {"html": str(value.get("html", ""))} if isinstance(value, dict) else value
+        for key, value in (catalog.get("explanations") or {}).items()
+    }
+    content = {
+        "variables": catalog.get("variables") or {},
+        "inputFields": catalog.get("inputFields") or {},
+        "explanations": explanations,
+    }
+    return hashlib.sha256(json.dumps(content, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def _text(element: ET.Element) -> str:
@@ -198,8 +213,27 @@ class InputExplanationPackageService:
             manifest = self._manifest(package_root)
             catalog = self._catalog(package_root, manifest)
             target = self.workspace.input_explanations / manifest["id"]
+            family_id = manifest.get("familyId") or ("virginia-visioneval-input-explanations" if manifest.get("appliesTo", {}).get("state") == "VA" else manifest["id"])
+            catalog_fingerprint = _catalog_fingerprint(catalog)
+            precedence = int(manifest.get("precedence", 100 if manifest.get("appliesTo", {}).get("state") == "VA" else 25))
+            provider = {"packageId": manifest["id"], "packageName": manifest["name"], "packageType": "input-explanations", "coverage": str(manifest.get("coverage") or manifest.get("appliesTo", {}).get("state", "")), "precedence": precedence, "installedAt": now_iso()}
             if target.exists():
-                raise WorkspaceError(f"Input explanations are already installed: {manifest['name']}")
+                existing = read_json(target / "workbench-package.json", {})
+                existing_catalog = read_json(target / "catalog.json", {})
+                existing_fingerprint = existing.get("catalogFingerprint") or _catalog_fingerprint(existing_catalog)
+                if existing_fingerprint == catalog_fingerprint and (existing.get("familyId") or family_id) == family_id:
+                    providers = [item for item in existing.get("providers", []) if item.get("packageId") != provider["packageId"]]
+                    providers.append(provider)
+                    preferred = max(providers, key=lambda item: int(item.get("precedence", 0)))
+                    existing.update({"familyId": family_id, "catalogFingerprint": catalog_fingerprint, "providers": providers, "preferredProvider": preferred})
+                    if preferred["packageId"] == provider["packageId"]:
+                        existing.update({"name": manifest["name"], "packageVersion": manifest.get("version", ""), "description": manifest.get("description", ""), "appliesTo": manifest.get("appliesTo", {}), "source": str(Path(source).expanduser())})
+                    write_json(target / "workbench-package.json", existing)
+                    self.workspace.record_asset_registration({"id": manifest["id"], "type": "input-explanations", "version": manifest.get("version", ""), "installedAt": now_iso()})
+                    return existing
+                target = self.workspace.input_explanations / f"{manifest['id']}--{catalog_fingerprint[:10]}"
+                if target.exists():
+                    raise WorkspaceError(f"Input explanations are already installed: {manifest['name']}")
             staging = Path(tempfile.mkdtemp(prefix=f".{target.name}.", dir=self.workspace.input_explanations))
             try:
                 shutil.copytree(package_root, staging / "source")
@@ -207,7 +241,7 @@ class InputExplanationPackageService:
                 record = {
                     "version": 1,
                     "type": "input-explanations",
-                    "id": manifest["id"],
+                    "id": target.name,
                     "name": manifest["name"],
                     "packageVersion": manifest.get("version", ""),
                     "description": manifest.get("description", ""),
@@ -216,7 +250,11 @@ class InputExplanationPackageService:
                     "installedAt": now_iso(),
                     "fingerprint": fingerprint_tree(staging / "source"),
                     "fileCount": len(catalog["explanations"]),
+                    "familyId": family_id,
+                    "catalogFingerprint": catalog_fingerprint,
+                    "providers": [provider],
                 }
+                record["preferredProvider"] = record["providers"][0]
                 write_json(staging / "workbench-package.json", record)
                 os.replace(staging, target)
             finally:
@@ -238,8 +276,46 @@ class InputExplanationPackageService:
         for path in sorted((p for p in self.workspace.input_explanations.iterdir() if p.is_dir()), key=lambda item: item.name.lower()):
             record = read_json(path / "workbench-package.json", {})
             if record:
+                catalog_path = path / "catalog.json"
+                if not record.get("catalogFingerprint") and catalog_path.is_file():
+                    # Use the same content fingerprint as new packages so a
+                    # pre-Preview installation consolidates with an identical
+                    # Virginia provider after migration.
+                    catalog = read_json(catalog_path, {})
+                    record["catalogFingerprint"] = _catalog_fingerprint(catalog)
+                if not record.get("familyId"):
+                    record["familyId"] = "virginia-visioneval-input-explanations" if record.get("appliesTo", {}).get("state") == "VA" else record.get("id", path.name)
+                if not record.get("providers"):
+                    provider = {"packageId": record.get("componentOf") or record.get("id", path.name), "packageName": record.get("name", path.name), "packageType": "embedded" if record.get("componentOf") else "input-explanations", "coverage": str(record.get("appliesTo", {}).get("state", "")), "precedence": 50 if record.get("componentOf") else 25, "installedAt": record.get("installedAt", "")}
+                    record["providers"] = [provider]
+                    record["preferredProvider"] = provider
+                write_json(path / "workbench-package.json", record)
                 records.append(record)
-        return records
+        visible: list[dict[str, Any]] = []
+        grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        for record in records:
+            grouped.setdefault((str(record.get("familyId", "")), str(record.get("catalogFingerprint", ""))), []).append(record)
+        for group in grouped.values():
+            preferred = max(group, key=lambda item: max((int(provider.get("precedence", 0)) for provider in item.get("providers", [])), default=0))
+            providers = [provider for item in group for provider in item.get("providers", [])]
+            preferred_provider = max(providers, key=lambda item: int(item.get("precedence", 0))) if providers else {}
+            merged = {**preferred, "providers": providers, "preferredProvider": preferred_provider, "providerCount": len(providers), "consolidated": len(group) > 1 or len(providers) > 1}
+            visible.append(merged)
+        families: dict[str, set[str]] = {}
+        for item in visible:
+            families.setdefault(str(item.get("familyId", "")), set()).add(str(item.get("catalogFingerprint", "")))
+        for item in visible:
+            item["familyConflict"] = len(families.get(str(item.get("familyId", "")), set())) > 1
+        visible.sort(key=lambda item: str(item.get("name", "")).lower())
+        settings = self.workspace.settings()
+        visible_ids = {item.get("id") for item in visible}
+        if settings.get("defaultInputExplanationId") not in visible_ids:
+            hidden = next((record for record in records if record.get("id") == settings.get("defaultInputExplanationId")), None)
+            replacement = next((item for item in visible if hidden and item.get("familyId") == hidden.get("familyId") and item.get("catalogFingerprint") == hidden.get("catalogFingerprint")), None)
+            if replacement:
+                settings["defaultInputExplanationId"] = replacement["id"]
+                write_json(self.workspace.settings_path, settings)
+        return visible
 
     def record(self, package_id: str) -> dict[str, Any]:
         path = self.workspace.within(self.workspace.input_explanations / package_id, self.workspace.input_explanations)
@@ -258,5 +334,13 @@ class InputExplanationPackageService:
 
     def remove(self, package_id: str) -> dict[str, Any]:
         record = self.record(package_id)
+        providers = list(record.get("providers") or [])
+        if len(providers) > 1:
+            preferred = record.get("preferredProvider") or max(providers, key=lambda item: int(item.get("precedence", 0)))
+            remaining = [item for item in providers if item.get("packageId") != preferred.get("packageId")]
+            next_provider = max(remaining, key=lambda item: int(item.get("precedence", 0)))
+            record.update({"providers": remaining, "preferredProvider": next_provider, "name": next_provider.get("packageName") or record.get("name")})
+            write_json(self.workspace.input_explanations / package_id / "workbench-package.json", record)
+            return {"removedProvider": preferred, "restoredProvider": next_provider, "package": record}
         shutil.rmtree(self.workspace.input_explanations / package_id)
         return {"removed": record}

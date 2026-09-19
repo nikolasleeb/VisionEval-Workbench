@@ -7,7 +7,7 @@ from pathlib import Path
 
 from unittest.mock import patch
 
-from backend.workbench.runtime import AMD64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LOCAL_IMAGE, RuntimeManager, discover_native_installation, docker_host_supported, docker_platform, find_native_runtime, local_runtime_image, read_renviron
+from backend.workbench.runtime import AMD64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LEGACY_RUNTIME_PROFILE, LOCAL_IMAGE, PINNED_AMD64_RUNTIME_DIGEST, PINNED_AMD64_RUNTIME_REFERENCE, RuntimeManager, discover_native_installation, docker_host_supported, docker_platform, find_native_runtime, local_runtime_image, read_renviron
 from backend.workbench.workspace import Workspace, WorkspaceError, write_json
 
 
@@ -22,12 +22,13 @@ class FakeRunner:
             return subprocess.CompletedProcess(command, 1, "", "not found")
         if "image" in command and "inspect" in command and "--format" in command and "{{json .Config.Labels}}" in command:
             labels = {
-                "org.opencontainers.image.version": "1.0.0-ve-40-rc6-household-id-ordering-amd64",
+                "org.opencontainers.image.version": "1.1.0-ve-40-rc7-amd64",
                 "org.opencontainers.image.revision": "workbench-build-revision",
                 "org.opencontainers.image.architecture": "amd64",
                 "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
                 "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,
-                "com.visioneval.workbench.compatibility-patch": COMPATIBILITY_PATCH,
+                "com.visioneval.workbench.compatibility-patch": "none",
+                "com.visioneval.workbench.runtime-api": "1",
             }
             return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
         return subprocess.CompletedProcess(command, 0, "{}", "")
@@ -110,7 +111,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(result["veRuntime"], str(runtime_path.resolve()))
 
     def test_optional_memory_cap_uses_docker_argument_array(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"VISIONEVAL_MEMORY_GB": "6"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"VISIONEVAL_MEMORY_GB": "6"}), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             runtime = RuntimeManager(Workspace(directory), runner=FakeRunner())
             self.assertEqual(runtime._container_resource_args(), ["--memory", "6g"])
 
@@ -119,12 +120,12 @@ class RuntimeTests(unittest.TestCase):
             installed = command[-1] == LOCAL_IMAGE
             return subprocess.CompletedProcess(command, 0 if installed else 1, "{}" if installed else "", "")
 
-        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             runtime = RuntimeManager(Workspace(directory), runner=image_runner)
             self.assertEqual(runtime.image, LOCAL_IMAGE)
 
     def test_status_uses_argument_arrays(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
             runner = FakeRunner()
             runtime = RuntimeManager(workspace, runner=runner)
@@ -132,19 +133,20 @@ class RuntimeTests(unittest.TestCase):
             if result["installed"]:
                 self.assertTrue(all(isinstance(call, list) for call in runner.calls))
 
-    def test_verification_uses_rc6_and_alignment_checks(self):
+    def test_verification_uses_profile_specific_alignment_checks(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None), patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"), patch("backend.workbench.runtime.platform.machine", return_value="AMD64"):
             runner = FakeRunner()
             runtime = RuntimeManager(Workspace(directory), runner=runner)
+            runtime.active_runtime_profile = {"runtimeApi":1,"visionEvalVersion":CURRENT_RELEASE_TAG,"visionEvalCommit":CURRENT_RELEASE_COMMIT,"digest":PINNED_AMD64_RUNTIME_DIGEST,"reference":PINNED_AMD64_RUNTIME_REFERENCE,"platform":"macos","architecture":"x86_64","capabilities":["doctor","verify-upstream-release","verify-household-id-alignment","run","export"],"verificationCommands":["doctor","verify-upstream-release","verify-household-id-alignment"],"compatibilityPatch":"none"}
             result = runtime.verify_runtime()
             docker_runs = [call for call in runner.calls if "run" in call]
             self.assertTrue(any(call[-1] == "doctor" for call in docker_runs))
             self.assertTrue(any(call[-1] == "verify-upstream-release" for call in docker_runs))
-            self.assertTrue(any(call[-1] == "verify-alignment-patch" for call in docker_runs))
+            self.assertTrue(any(call[-1] == "verify-household-id-alignment" for call in docker_runs))
             self.assertTrue(all(call[call.index("--platform") + 1] == "linux/amd64" for call in docker_runs))
-            self.assertEqual(result["runtimeVersion"], "VisionEval VE-40-RC6 / R 4.5.1")
+            self.assertEqual(result["runtimeVersion"], "VisionEval VE-40-RC7 / R 4.5.1")
             self.assertEqual(result["revision"], CURRENT_RELEASE_COMMIT)
-            self.assertEqual(result["compatibilityPatch"], COMPATIBILITY_PATCH)
+            self.assertEqual(result["compatibilityPatch"], "none")
             self.assertEqual(runtime.expected_digest, result["digest"])
 
     def test_verification_rejects_image_with_wrong_release_hash(self):
@@ -206,17 +208,18 @@ class RuntimeTests(unittest.TestCase):
         )
 
     def test_managed_macos_install_pulls_pinned_digest_tags_and_verifies(self):
-        published_digest = "sha256:" + ("1" * 64)
-        published_reference = f"ghcr.io/nikolasleeb/visioneval-workbench-runtime@{published_digest}"
+        published_digest = PINNED_AMD64_RUNTIME_DIGEST
+        published_reference = PINNED_AMD64_RUNTIME_REFERENCE
 
         class InstallRunner(FakeRunner):
             def __call__(self, command, **kwargs):
                 self.calls.append(command)
                 if "image" in command and "inspect" in command and "{{json .Config.Labels}}" in command:
                     labels = {
-                        "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
-                        "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,
+                        "com.visioneval.upstream.release": LEGACY_RUNTIME_PROFILE["visionEvalVersion"],
+                        "com.visioneval.upstream.revision": LEGACY_RUNTIME_PROFILE["visionEvalCommit"],
                         "com.visioneval.workbench.compatibility-patch": COMPATIBILITY_PATCH,
+                        "com.visioneval.workbench.runtime-api": "0",
                         "org.opencontainers.image.architecture": "amd64",
                     }
                     return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
@@ -229,16 +232,12 @@ class RuntimeTests(unittest.TestCase):
                 patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"), \
                 patch("backend.workbench.runtime.platform.system", return_value="Darwin"), \
                 patch("backend.workbench.runtime.platform.machine", return_value="x86_64"), \
-                patch("backend.workbench.runtime.macos_running_under_rosetta", return_value=False), \
-                patch("backend.workbench.runtime.PINNED_AMD64_RUNTIME_DIGEST", published_digest), \
-                patch("backend.workbench.runtime.PINNED_AMD64_RUNTIME_REFERENCE", published_reference):
+                patch("backend.workbench.runtime.macos_running_under_rosetta", return_value=False):
             runner = InstallRunner()
             runtime = RuntimeManager(Workspace(directory), runner=runner)
             result = runtime.install_or_update_runtime()
             self.assertIn(["/docker", "pull", "--platform", "linux/amd64", published_reference], runner.calls)
-            self.assertIn(["/docker", "tag", published_reference, AMD64_LOCAL_IMAGE], runner.calls)
             self.assertEqual(result["digest"], published_digest)
-            self.assertEqual(result["localAlias"], AMD64_LOCAL_IMAGE)
             self.assertEqual(result["source"], published_reference)
 
     def test_managed_runtime_install_is_rejected_outside_intel_macos(self):
@@ -255,7 +254,7 @@ class RuntimeTests(unittest.TestCase):
             runtime.release_check_supported = True
             runtime.release_check_enabled = True
             runtime._fetch_public_releases = lambda: [
-                {"tag_name": "VE-40-RC7", "name": "RC7", "published_at": "2026-08-01T00:00:00Z", "html_url": "https://example.test/rc7"},
+                {"tag_name": "VE-40-RC8", "name": "RC8", "published_at": "2026-08-01T00:00:00Z", "html_url": "https://example.test/rc8"},
                 {"tag_name": CURRENT_RELEASE_TAG},
             ]
             runtime._refresh_release_status()

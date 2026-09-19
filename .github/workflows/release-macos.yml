@@ -1,10 +1,10 @@
-name: Refresh Apple Silicon macOS assets for release 1.0.0
+name: Publish Apple Silicon macOS assets for release 1.1.0
 
 on:
   workflow_dispatch:
     inputs:
       approved_publication:
-        description: Build verified Apple Silicon assets and replace them on the public v1.0.0 release
+        description: Build verified Apple Silicon assets and publish them to v1.1.0
         required: true
         type: boolean
         default: false
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: workbench-release-1.0.0-macos-arm64
+  group: workbench-release-1.1.0-macos-arm64
   cancel-in-progress: false
 
 jobs:
@@ -49,7 +49,7 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           test "$(uname -m)" = "arm64"
-          test "$(python3 -c 'import json; print(json.load(open("docs/user-macos/documentation.json"))["documentationVersion"])')" = "1.0.0-macos"
+          test "$(python3 -c 'import json; print(json.load(open("desktop/src-tauri/tauri.conf.json"))["version"])')" = "1.1.0"
           python3 packaging/build_bundled_assets.py --check
           python3 packaging/build_user_guide.py --check
           python3 packaging/check_documentation.py
@@ -68,8 +68,12 @@ jobs:
         run: npm run tauri:build -- --target aarch64-apple-darwin --bundles app
         working-directory: macos/desktop
       - name: Verify, sign, and package Apple Silicon DMG
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p release-assets
+          gh release download runtime-VE-40-RC7 --repo "${{ github.repository }}" --pattern runtime-index.json --dir release-assets
+          python3 packaging/build_update_manifest.py --runtime-index release-assets/runtime-index.json --output release-assets/update-manifest.json
           SOURCE_APP="$(find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name 'VisionEval Workbench.app' -type d -print -quit)"
           test -n "$SOURCE_APP"
           APP_EXECUTABLE="$SOURCE_APP/Contents/MacOS/visioneval-workbench"
@@ -83,9 +87,9 @@ jobs:
           DMG_ROOT="$(mktemp -d)"
           ditto "$SOURCE_APP" "$DMG_ROOT/VisionEval Workbench.app"
           ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname "VisionEval Workbench 1.0.0 Apple Silicon" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
+          hdiutil create -volname "VisionEval Workbench 1.1.0 Apple Silicon" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v1.1.0-macos-arm64.dmg
           MOUNT_ROOT="$(mktemp -d)"
-          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" release-assets/VisionEval-Workbench-v1.1.0-macos-arm64.dmg
           test -d "$MOUNT_ROOT/VisionEval Workbench.app"
           test -L "$MOUNT_ROOT/Applications"
           codesign --verify --deep --strict "$MOUNT_ROOT/VisionEval Workbench.app"
@@ -93,15 +97,16 @@ jobs:
           hdiutil detach "$MOUNT_ROOT"
       - name: Package exact Apple Silicon source snapshot
         run: |
-          mkdir -p staging/VisionEval-Workbench-v1.0.0-macos-source
-          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist --exclude release-assets --exclude staging --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store ./ staging/VisionEval-Workbench-v1.0.0-macos-source/
-          ditto -c -k --keepParent staging/VisionEval-Workbench-v1.0.0-macos-source release-assets/VisionEval-Workbench-v1.0.0-macos-source.zip
+          mkdir -p staging/VisionEval-Workbench-v1.1.0-macos-source
+          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist --exclude release-assets --exclude staging --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store ./ staging/VisionEval-Workbench-v1.1.0-macos-source/
+          ditto -c -k --keepParent staging/VisionEval-Workbench-v1.1.0-macos-source release-assets/VisionEval-Workbench-v1.1.0-macos-source.zip
       - uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-release
           path: |
-            macos/release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
-            macos/release-assets/VisionEval-Workbench-v1.0.0-macos-source.zip
+            macos/release-assets/VisionEval-Workbench-v1.1.0-macos-arm64.dmg
+            macos/release-assets/VisionEval-Workbench-v1.1.0-macos-source.zip
+            macos/release-assets/update-manifest.json
           if-no-files-found: error
 
   attach-to-release:
@@ -118,9 +123,13 @@ jobs:
           path: release-assets
       - name: Verify Apple Silicon release assets
         run: |
-          test -f release-assets/VisionEval-Workbench-v1.0.0-macos-arm64.dmg
-          test -f release-assets/VisionEval-Workbench-v1.0.0-macos-source.zip
+          test -f release-assets/VisionEval-Workbench-v1.1.0-macos-arm64.dmg
+          test -f release-assets/VisionEval-Workbench-v1.1.0-macos-source.zip
+          test -f release-assets/update-manifest.json
       - name: Replace only Apple Silicon assets and refresh release notes
         run: |
-          gh release upload v1.0.0 release-assets/* --repo "${{ github.repository }}" --clobber
-          gh release edit v1.0.0 --repo "${{ github.repository }}" --notes-file RELEASE_NOTES.md
+          if gh release view v1.1.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release upload v1.1.0 release-assets/* --repo "${{ github.repository }}" --clobber
+          else
+            gh release create v1.1.0 release-assets/* --repo "${{ github.repository }}" --title "VisionEval Workbench 1.1.0" --notes-file RELEASE_NOTES.md --draft
+          fi

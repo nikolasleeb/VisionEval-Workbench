@@ -106,4 +106,4 @@ for (i in seq_along(request$variables)) {
 }
 results <- results[order(vapply(results, function(x) -x$changedRows, numeric(1)))]
 write_json(list(year=request$year, scanned=total, changedVariables=length(results), results=results, skipped=skipped,
-                filterField=request$filterField, filterValues=request$filterValues), output_path, auto_unbox=TRUE, pretty=TRUE, na="null")
+                filterField=request$filterField, filterValues=request$filterValues), output_path, auto_unbox=TRUE, pretty=TRUE, na="null", digits=NA)

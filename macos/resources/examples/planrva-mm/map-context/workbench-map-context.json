@@ -35,6 +35,13 @@
         "geometry": "bzone",
         "identifier": "GEOID",
         "technicalLevel": "Bzone"
+      },
+      {
+        "id": "marea",
+        "label": "Marea",
+        "geometry": "bzone",
+        "identifier": "Marea",
+        "technicalLevel": "Marea"
       }
     ]
   },

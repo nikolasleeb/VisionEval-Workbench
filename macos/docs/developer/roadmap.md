@@ -17,7 +17,7 @@ Formatted Excel exports and native Save dialogs are implemented. Older imported-
 ### Approved immutable runtime
 
 - **Motivation:** users need reproducible runtime setup.
-- **Current limitation:** the v1 candidate uses official VE-40-RC6 plus an explicitly unofficial Workbench compatibility patch; publication and clean-machine verification remain gated.
+- **Runtime compatibility:** Workbench 1.1 supports the verified RC6 rollback profile and prefers official VE-40-RC7 through runtime API v1 and immutable platform digests.
 - **Dependencies:** ARM64 build verification, clean-machine model checks, public registry policy, and repository approval.
 - **Acceptance:** publish the approved image by immutable digest, update compatibility data, verify clean first launch, and provide rollback instructions.
 
@@ -110,6 +110,12 @@ Formatted Excel exports and native Save dialogs are implemented. Older imported-
 - **Acceptance:** add only charts tied to documented questions, with reference/comparison roles, accessible legends, filters, provenance, and downloadable output.
 
 ## Research
+
+### Editing-year simplification
+
+- **Question:** can Workbench reliably select the editing year from model-package metadata instead of asking for it in single-file, Batch Change, and Hypercube controls?
+- **Current decision:** retain the explicit Target Year and Shared target year selectors so dated CSV rows are never changed on an inferred year.
+- **Acceptance before implementation:** define an unambiguous package contract for the editable year, cover timeless and multi-year files, preserve replay/copy provenance, and provide a safe manual override for exceptional packages.
 
 ### Virginia dataset to MPO workflow
 

@@ -4,7 +4,7 @@
 
 A runtime profile records adapter, platform, architecture, image reference, immutable digest, VisionEval/R version, verification result, and verification time. It is not a connection to a permanent container.
 
-Intel uses Docker and recognizes the model-neutral local alias `local/visioneval:1.0.0-amd64`. The image is built from official VisionEval `VE-40-RC6` at its pinned commit and contains the unofficial Workbench composite household-ID ordering patch for `VETravelDemandMM::DoPredictions`. Verification checks Docker availability, architecture, image presence/digest, `doctor`, upstream release provenance, and the compatibility patch marker. The public package name is `ghcr.io/nikolasleeb/visioneval-workbench-runtime`; no floating `latest` tag is used.
+Intel uses Docker and executes a validated AMD64 immutable digest. Workbench 1.1.0 negotiates runtime API v1, supports the pinned RC6 legacy profile, and prefers official VisionEval `VE-40-RC7`. Verification checks Docker availability, architecture, image digest, OCI provenance, runtime API, `doctor`, upstream release, and complete household-ID alignment. The public package is `ghcr.io/nikolasleeb/visioneval-workbench-runtime`; `latest` exists only as a convenience alias and is never trusted for execution.
 
 ## Dispatcher invariants
 

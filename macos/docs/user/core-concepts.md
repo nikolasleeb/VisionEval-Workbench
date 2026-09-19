@@ -12,7 +12,7 @@ A validated, complete VisionEval model. It supplies configuration, module order,
 A comparison workspace that pins a model template and InputLibrary and contains a baseline, editable scenarios, and run/result references.
 
 **Baseline**  
-The reference scenario. A fresh baseline uses untouched project inputs. An existing completed baseline can be referenced, but Workbench warns when its provenance cannot be verified against the project.
+The reference scenario. A fresh baseline uses untouched project inputs. An existing completed baseline can be referenced only when Workbench verifies that it completed successfully with the exact same Model package and Input Library.
 
 **Scenario**  
 A named set of saved file changes and notes. A scenario starts from the project's untouched inputs; only saved file changes are applied when it runs.
@@ -55,4 +55,3 @@ VisionEval geography levels defined by the selected model. Their meaning and rel
 
 **County filter**  
 A convenience mapping from county labels to related Azone and Bzone values. It selects matching rows; it does not aggregate them into a county total.
-

@@ -1,0 +1,29 @@
+{
+  "runtimeImages": [
+    {
+      "architecture": "arm64",
+      "digest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
+      "minimumWorkbenchVersion": "1.1.0",
+      "platform": "macos",
+      "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
+      "visionEvalVersion": "VE-40-RC6"
+    },
+    {
+      "architecture": "x86_64",
+      "digest": "sha256:8440e9c490ba12333b94ce1aef561c9b30a30a428e98be87aec7ba17be23c2da",
+      "minimumWorkbenchVersion": "1.1.0",
+      "platform": "macos",
+      "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:8440e9c490ba12333b94ce1aef561c9b30a30a428e98be87aec7ba17be23c2da",
+      "visionEvalVersion": "VE-40-RC6"
+    }
+  ],
+  "schemaVersion": 1,
+  "visionEval": {
+    "releaseUrl": "https://github.com/VisionEval/VisionEval-4/releases",
+    "version": "VE-40-RC6"
+  },
+  "workbench": {
+    "releaseUrl": "https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v1.1.0",
+    "version": "1.1.0"
+  }
+}

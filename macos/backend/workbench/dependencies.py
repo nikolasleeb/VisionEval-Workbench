@@ -215,7 +215,7 @@ class DependencyService:
             "visionEvalVersion": self.catalog.get("visionEvalVersion", ""),
             "template": {"id": BUILTIN_CATALOG_ID, "name": "VisionEval module catalog", "fingerprint": "builtin"},
             "graphMode": "catalog", "executionOrderAvailable": False,
-            "notice": "Built-in module declarations are shown by package. Install or import a model template to see its actual execution order.",
+            "notice": "Built-in module declarations are shown by package. Install or import a model package to see its actual execution order.",
             "nodes": nodes, "edges": edges, "unknownModules": [],
             "counts": {
                 "files": len(files), "activeFiles": len(files), "modules": len(modules),

@@ -12,12 +12,12 @@ Choose **Skip for now** if you only need to inspect inputs, edit projects, or vi
 
 ## Install assets
 
-New workspaces contain no regional data. Open **Settings → Assets** and install an approved regional package. Region Builder creates compatible model templates and InputLibraries; manual runnable-model importing is not required.
+New workspaces contain no model or regional data. Open **Settings → Assets** and install an approved model or regional package. Workbench automatically pairs each InputLibrary with its packaged model template; manual runnable-model importing is not supported.
 
 ## Create your first project
 
 1. Open **Create → Develop** and preview or build the required region assets.
-2. Open **Create → Setup** and choose a project name, model template, and InputLibrary.
+2. Open **Create → Setup** and choose a project name and InputLibrary. Workbench selects its paired template automatically.
 3. Choose an untouched baseline or a compatible completed baseline.
 4. Create the project, open Editor, and add a scenario.
 5. Save changes, open Review, and continue to Run when validation passes.

@@ -174,10 +174,10 @@ class DocumentationSourceTests(unittest.TestCase):
         macos_manifest = json.loads(
             (repository / "docs" / "compatibility-manifest-intel.json").read_text()
         )
-        self.assertEqual(tauri["version"], "1.0.0")
-        self.assertEqual(package["version"], "1.0.0")
+        self.assertEqual(tauri["version"], "1.1.0")
+        self.assertEqual(package["version"], "1.1.0")
         self.assertEqual(windows["documentationVersion"], "1.0.0-windows")
-        self.assertEqual(macos["documentationVersion"], "1.0.0-macos-intel")
+        self.assertEqual(macos["documentationVersion"], "1.1.0-macos-intel")
         self.assertEqual(windows_manifest["runtimeAdapter"], "native-ve-runtime")
         self.assertFalse(windows_manifest["runtime"]["dockerRequired"])
         self.assertEqual(macos_manifest["runtimeAdapter"], "docker")
@@ -193,7 +193,7 @@ class DocumentationSourceTests(unittest.TestCase):
         repository = Path(__file__).resolve().parents[1]
         pages = sorted((repository / "docs" / "user-intel").glob("*.md"))
         combined = "\n".join(path.read_text(encoding="utf-8") for path in pages)
-        self.assertIn("VisionEval-Workbench-v1.0.0-macos-x64.dmg", combined)
+        self.assertIn("VisionEval-Workbench-v1.1.0-macos-x64.dmg", combined)
         self.assertNotIn("repository's release candidate", combined)
         for corrupted in ("â", "Ã"):
             self.assertNotIn(corrupted, combined)

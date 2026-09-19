@@ -1,6 +1,6 @@
 # Runtime image maintenance
 
-The supported v1 runtime is `local/visioneval:1.0.0-arm64`, built from `VisionEval/VisionEval-4` tag `VE-40-RC6` at commit `f7ef3389b5626daeba6c86eeda9d172a0f8cccc2` with R 4.5.1 and compatibility patch `2026-08-03-composite-household-id-alignment`.
+The preferred runtime API v1 image is built from official `VisionEval/VisionEval-4` tag `VE-40-RC7` at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad` with R 4.5.1. It carries no unofficial VisionEval source patch. Workbench 1.1.0 also accepts the pinned RC6 profile as a legacy rollback image.
 
 ## Updating VisionEval
 
@@ -11,31 +11,27 @@ The supported v1 runtime is `local/visioneval:1.0.0-arm64`, built from `VisionEv
 5. Run `doctor`, the release-specific upstream verification, automated Workbench tests, a representative PlanRVA baseline, and comparison parity checks.
 6. Record the resulting image digest. Publish only after the runtime-publication environment is approved.
 
-Compatibility patches require a reviewed decision, a distinct image tag, an OCI identity label, behavioral verification, and a representative model smoke test. Upstream fixes remain preferred, and the exact repository, tag, commit, and patch identifier must stay visible in `/opt/visioneval/RELEASE` and OCI labels.
+Compatibility patches require a reviewed decision, a distinct image tag, an OCI identity label, behavioral verification, and a representative model smoke test. Upstream fixes remain preferred. RC7 incorporates the complete-household-ID correction upstream, so the runtime verifies that official behavior with numeric and nonnumeric multi-Azone regression cases instead of applying a Workbench patch.
 
-RC6 is built with `ve.build(..., check = FALSE)` plus an in-memory build-tool override that prevents VisionEval's builder from forcing a first-time `R CMD check`. RC6 contains module-documentation filenames that differ only by capitalization, which R 4.5's cross-platform package check rejects even though the package installs on Linux. The image must pass `doctor`, `verify-upstream-release`, `verify-alignment-patch`, provenance-label validation, and the PlanRVA smoke test before public release.
-
-The official RC6 `VETravelDemandMM::DoPredictions` implementation extracts digits from composite household IDs. Any model whose identifier namespaces reuse numeric suffixes can therefore produce a non-unique global order and reach RC6's interactive `browser()` fallback. The Workbench patch disables that reorder for the affected household models and applies an exact full-ID matcher at every prediction output. PlanRVA is the representative smoke-test model that exposed and validates this general VisionEval compatibility issue; on 2026-08-03 the patched image completed both affected modules and its entire 2024 model year without the ordering error.
-
-The CLI opens Workbench jobs by their absolute `/workspace/models/<job>` path and resets the process working directory to `/` after `startVisionEval()`. RC6 represents normalized absolute paths as `./workspace/...`; resolving those paths from `/` avoids the invalid `/workspace/workspace/...` path that otherwise prevents model scripts from loading. This is wrapper compatibility behavior and does not alter VisionEval source or model inputs.
+The CLI retains the Workbench filesystem-path wrapper: jobs open by absolute `/workspace/models/<job>` path and the process working directory resets to `/` after `startVisionEval()`. This wrapper compatibility behavior does not alter VisionEval source or model inputs.
 
 ## Local validation
 
 Use the commands in the user guide's canonical [Setup](../user/setup.md) page. Inspect provenance with:
 
 ```bash
-docker image inspect local/visioneval:1.0.0-arm64
-docker run --rm local/visioneval:1.0.0-arm64 doctor
-docker run --rm local/visioneval:1.0.0-arm64 verify-upstream-release
-docker run --rm local/visioneval:1.0.0-arm64 verify-alignment-patch
+docker image inspect visioneval-workbench-runtime:VE-40-RC7-arm64
+docker run --rm visioneval-workbench-runtime:VE-40-RC7-arm64 doctor
+docker run --rm visioneval-workbench-runtime:VE-40-RC7-arm64 verify-upstream-release
+docker run --rm visioneval-workbench-runtime:VE-40-RC7-arm64 verify-household-id-alignment
 ```
 
 The runtime image is an execution dependency, not a permanent service. Workbench creates disposable containers only for jobs.
 
 ## Release freshness checker
 
-The backend queries the official public GitHub releases API no more than once every 24 hours and stores the result under `exchange/system/runtime-release-status.json`. It includes release candidates because VisionEval 4 releases use RC tags. Network failures retain a stale cached result when available and never disable a valid runtime.
+The backend reads the GitHub-hosted runtime index through the opt-in update checker. The index declares runtime API, capabilities, platform digests, publication time, and the minimum Workbench version. Network failures retain a valid installed runtime and never disable offline execution.
 
-Users can disable this advisory request in **Settings → Runtime → Check for newer VisionEval releases**. The workspace setting applies immediately; `VISIONEVAL_RELEASE_CHECK_ENABLED=false` remains an administrator-level override. Neither setting disables local image provenance and digest verification.
+Runtime installation is always user-approved in **Settings → Updates**. The installer pulls the selected platform digest, verifies architecture, provenance, runtime API, doctor, upstream release, and household alignment, then atomically activates it. A failed candidate leaves the active image unchanged. One previous verified Workbench runtime is retained for rollback.
 
-`CURRENT_RELEASE_TAG`, `CURRENT_RELEASE_COMMIT`, and `COMPATIBILITY_PATCH` in `backend/workbench/runtime.py` form the trusted runtime identity. The Dockerfile must write the same values to the OCI release, revision, and compatibility-patch labels. Update them together, add regression tests, and rebuild the image. The release checker may recommend a newer upstream tag, but it must never mutate the runtime profile or pull an image automatically.
+The runtime index and OCI labels form the compatibility contract. `VE-40-RC7` is the readable multi-platform tag and `latest` is a movable convenience alias; neither is the execution identity. Workbench stores and runs the validated architecture-specific digest.

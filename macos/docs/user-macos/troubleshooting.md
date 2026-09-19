@@ -12,11 +12,11 @@ Install Docker Desktop, select **Start Docker Desktop** in Workbench, and wait f
 
 ## Runtime verification fails
 
-Check that `local/visioneval:1.0.0-arm64` exists and has not changed digest. If necessary, pull the versioned GHCR image described in [Setup](setup.md), recreate the local alias, and select **Verify runtime**. Review the `doctor`, `verify-upstream-release`, or `verify-alignment-patch` error before rebuilding the runtime.
+Open **Settings → Runtime** and confirm the active digest exists. If necessary, install the approved update or restore the previous verified runtime, then select **Verify runtime**. Review the `doctor`, `verify-upstream-release`, or `verify-household-id-alignment` error before rebuilding the runtime.
 
 ## A PlanRVA run stops in `DoPredictions`
 
-This error indicates that Workbench used an unpatched VE-40-RC6 image or a stale saved runtime profile. Install `local/visioneval:1.0.0-arm64`, open **Settings → Runtime**, and select **Verify runtime**. The accepted image must pass `verify-alignment-patch`; merely retagging an unpatched image will fail provenance verification.
+This error indicates that the active image failed its complete-ID behavior contract or has a stale runtime profile. Install or restore a manifest-approved runtime and select **Verify runtime**. The accepted image must pass `verify-household-id-alignment`; retagging an unknown image cannot satisfy digest and provenance verification.
 
 ## A project does not appear in Run or Compare
 
@@ -24,7 +24,7 @@ The project may be archived. Restore it from **Create → Setup → Archived Pro
 
 ## A scenario change is missing from a run
 
-Apply Preview is temporary. Return to the file and select **Save File Changes** (or press **⌘S**) before Review and Run. Batch changes save immediately after confirmation.
+Calculated operations save when **Apply and Save Change** succeeds. For direct table-cell edits, return to the file and select **Save Direct Edits** (or press **⌘S**) before Review and Run. Batch changes save immediately after confirmation.
 
 ## County filtering is unavailable
 
@@ -37,6 +37,12 @@ A cold scan may need to load large datastores. Keep the activity strip open to s
 ## Stop leaves “cleanup failed”
 
 Workbench retains only enough information to finish cleanup. Start Docker if necessary and select **Retry Cleanup**. The result is not registered while cleanup is incomplete.
+
+## A run reports insufficient memory or exit code 137
+
+Docker exit code 137 means the container process was forcibly killed. When Docker's `OOMKilled` state is available, Workbench reports this as confirmed memory exhaustion. Without that flag, memory pressure remains the most common cause but is not assumed to be certain.
+
+Open **Settings → Resources** and compare Docker Desktop's total allocation with the number of concurrent runs. Reduce concurrency, increase Docker Desktop's allocation in Docker Desktop settings, or raise an overly restrictive Workbench per-run limit. Then right-click the failed History card and choose **Retry Run…**. The retry is a new job; the original failed log remains available. If it fails again, export its bundle from **Settings → Diagnostics**.
 
 ## Documentation warning
 

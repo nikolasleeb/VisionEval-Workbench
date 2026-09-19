@@ -81,11 +81,10 @@ def build_payload() -> dict[str, object]:
             "path": "map-context",
         },
         "compatibility": {
-            "workbenchVersion": "1.0.0",
-            "visionEvalVersion": "VE-40-RC6",
-            "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
-            "runtimeDigest": "sha256:8440e9c490ba12333b94ce1aef561c9b30a30a428e98be87aec7ba17be23c2da",
-            "patch": "2026-08-03-composite-household-id-alignment",
+            "minimumWorkbenchVersion": "1.0.0",
+            "testedWorkbenchVersion": "1.1.0",
+            "supportedVisionEvalVersions": ["VE-40-RC6", "VE-40-RC7"],
+            "runtimeApi": 1,
             "architecture": "amd64",
         },
         "provenance": {

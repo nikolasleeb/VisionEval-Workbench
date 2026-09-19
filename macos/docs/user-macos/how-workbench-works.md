@@ -16,7 +16,7 @@ Packages are ZIP files installed from **Settings → Assets → Add package**. T
 
 ## Runtime
 
-Docker Desktop is required only for **Run**. Workbench downloads the compatible GHCR runtime image, tags the expected local alias, verifies the image identity, and records the immutable digest. A VisionEval container is created only for a model job and is stopped when the job ends or Workbench quits.
+Docker Desktop is required only for **Run**. Workbench downloads a manifest-approved GHCR runtime by architecture-specific immutable digest, verifies its identity, and records the active profile. A VisionEval container is created only for a model job and is stopped when the job ends or Workbench quits.
 
 ## Projects and scenarios
 

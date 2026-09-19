@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .embedded_explanations import install_embedded_explanations, validate_embedded_explanations
 from .workspace import Workspace, WorkspaceError, fingerprint_tree, now_iso, read_json, write_json
 
 
@@ -196,6 +197,7 @@ class RegionPackageService:
             for relative in ("visioneval.cnf", "scripts/run_model.R", "defs/units.csv", "defs/deflators.csv"):
                 if not (template_path / relative).is_file():
                     raise WorkspaceError(f"Regional package model template is missing {relative}")
+        validate_embedded_explanations(root, manifest)
         return manifest
 
     def install(self, source: str | Path) -> dict[str, Any]:
@@ -228,6 +230,12 @@ class RegionPackageService:
             self.workspace.record_asset_registration({
                 "id": manifest["id"], "type": "region-builder", "version": manifest["version"], "installedAt": now_iso(),
             })
+            explanation = install_embedded_explanations(self.workspace, package_root, manifest, source)
+            if explanation:
+                settings = self.workspace.settings()
+                if not settings.get("defaultInputExplanationId"):
+                    settings["defaultInputExplanationId"] = explanation["id"]
+                    write_json(self.workspace.settings_path, settings)
             return self.record(manifest["id"])
         finally:
             if temp:

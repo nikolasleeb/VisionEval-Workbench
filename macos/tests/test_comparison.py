@@ -75,6 +75,29 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(result["operationKind"], "change-density")
         self.assertNotIn("path", result["reference"])
 
+    def test_marea_aggregates_member_bzones_and_change_density(self):
+        geography = {
+            "azone": {"001": "001"}, "bzone": {"001000000001": "001000000001", "001000000002": "001000000002"},
+            "marea": {"metro": "metro"},
+            "bzoneToMarea": {"001000000001": "metro", "001000000002": "metro"},
+            "azoneToMarea": {"001": "metro"}, "names": {"metro": "Metro"},
+        }
+        self.service.columns.update({
+            ("reference", "2045", "Bzone", "Bzone"): ["001000000001", "001000000002"],
+            ("reference", "2045", "Bzone", "Value"): [10, 20],
+            ("comparison", "2045", "Bzone", "Bzone"): ["001000000001", "001000000002"],
+            ("comparison", "2045", "Bzone", "Value"): [15, 20],
+        })
+        files = [{"year": "2045", "table": "Bzone", "name": name} for name in ("Bzone", "Value")]
+        with patch.object(self.service, "_variable_files", return_value=files), \
+             patch.object(self.service, "_map_geography", return_value=geography):
+            aggregate = self.service._aggregate_map_record(self.service.records["reference"], "2045", "Bzone", "Value", "marea")
+            self.assertEqual(aggregate["values"]["metro"]["sum"], 30)
+            with patch.object(self.service, "variables", return_value=[{"table": "Bzone", "name": "Value", "type": "double", "years": ["2045"]}]):
+                density = self.service.change_density("reference", "comparison", "2045", "marea")
+        self.assertEqual(density["geographyRows"][0]["geographyId"], "metro")
+        self.assertEqual(density["geographyRows"][0]["changedVariableCount"], 1)
+
     def test_synthetic_microdata_defaults_to_independent_aggregate_summaries(self):
         self.service.columns.update({
             ("reference", "2045", "Household", "HhId"): ["a", "b"],

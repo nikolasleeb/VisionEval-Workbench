@@ -4,7 +4,7 @@ VisionEval Workbench 1.0.0 provides two optional, platform-neutral ZIP packages.
 
 | Package | Type | Purpose |
 |---|---|---|
-| `planrva-mm.zip` | Model bundle | Ready-to-use PlanRVA multimodal model template, matching InputLibrary, and comparison-map context |
+| `planrva-2.2.zip` | Model bundle | Ready-to-use PlanRVA multimodal model template, matching InputLibrary, and comparison-map context |
 | `virginia-mpo-regions.zip` | Region builder | Statewide inputs, official VDOT MPO boundaries joined to VisionEval Bzones, and resources for creating MPO or custom regional assets |
 
 ## Install a package
@@ -20,7 +20,7 @@ VisionEval Workbench 1.0.0 provides two optional, platform-neutral ZIP packages.
 
 ## Which package should I use?
 
-- Use **PlanRVA MM** when you want the prepared PlanRVA model and InputLibrary.
+- Use **PlanRVA** when you want the prepared PlanRVA model and InputLibrary.
 - Use **Virginia MPO Regional Data** when Region Builder should create assets for an official Virginia MPO or a supported custom region.
 
 ## Build another regional package
