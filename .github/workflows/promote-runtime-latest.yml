@@ -1,0 +1,86 @@
+name: Promote verified runtime to latest
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtime_release:
+        description: Runtime release containing the verified runtime index
+        required: true
+        default: runtime-VE-40-RC7
+        type: string
+      workbench_release:
+        description: Workbench release required before promotion
+        required: true
+        default: v1.1.0
+        type: string
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: runtime-latest-promotion
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/visioneval-workbench-runtime
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and validate the published runtime index
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKBENCH_RELEASE: ${{ inputs.workbench_release }}
+        run: |
+          gh release download "${{ inputs.runtime_release }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern runtime-index.json
+          jq -e '
+            .schemaVersion == 1 and
+            .runtimeApi == 1 and
+            (.preferredVisionEvalVersion | type == "string") and
+            (.visionEvalCommit | test("^[0-9a-f]{40}$")) and
+            (.images | length == 2) and
+            ([.images[].architecture] | sort == ["arm64", "x86_64"]) and
+            (all(.images[];
+              (.digest | test("^sha256:[0-9a-f]{64}$")) and
+              (.reference | startswith("ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:"))
+            ))
+          ' runtime-index.json
+          VERSION="${WORKBENCH_RELEASE#v}"
+          test "$(jq -r .minimumWorkbenchVersion runtime-index.json)" = "$VERSION"
+      - name: Confirm both Workbench Mac applications are published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          WORKBENCH_RELEASE: ${{ inputs.workbench_release }}
+        run: |
+          gh release view "${{ inputs.workbench_release }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease,assets > workbench-release.json
+          test "$(jq -r .isDraft workbench-release.json)" = false
+          jq -r '.assets[].name' workbench-release.json > release-assets.txt
+          VERSION="${WORKBENCH_RELEASE#v}"
+          grep -Fx "VisionEval-Workbench-v${VERSION}-macos-arm64.dmg" release-assets.txt
+          grep -Fx "VisionEval-Workbench-v${VERSION}-macos-x64.dmg" release-assets.txt
+          grep -Fx update-manifest.json release-assets.txt
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Promote the verified architecture digests
+        run: |
+          ARM_DIGEST="$(jq -r '.images[] | select(.architecture == "arm64") | .digest' runtime-index.json)"
+          AMD_DIGEST="$(jq -r '.images[] | select(.architecture == "x86_64") | .digest' runtime-index.json)"
+          test "$ARM_DIGEST" != null
+          test "$AMD_DIGEST" != null
+          docker buildx imagetools inspect "$IMAGE@$ARM_DIGEST"
+          docker buildx imagetools inspect "$IMAGE@$AMD_DIGEST"
+          docker buildx imagetools create \
+            --tag "$IMAGE:latest" \
+            "$IMAGE@$ARM_DIGEST" "$IMAGE@$AMD_DIGEST"
+          docker buildx imagetools inspect "$IMAGE:latest"
