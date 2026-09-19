@@ -1,12 +1,11 @@
-VisionEval Workbench Runtime 1.0.0
+VisionEval Workbench Runtime 1.1.0
 
-Unofficial AMD64 runtime built from the official VisionEval VE-40-RC6 source at
-commit f7ef3389b5626daeba6c86eeda9d172a0f8cccc2 and R 4.5.1.
+AMD64 runtime image built from the official VisionEval VE-40-RC7 source at
+commit 7852dc58fad460ff279f5eebf4dd55fe191470ad and R 4.5.1.
 
-This image includes the unofficial Workbench compatibility patch
-2026-08-03-composite-household-id-alignment for composite household-ID
-prediction ordering in VETravelDemandMM::DoPredictions. It is not an official
-VisionEval distribution and does not imply endorsement by VisionEval.
+This image applies no unofficial VisionEval source patch. VE-40-RC7 contains
+the official complete-household-ID alignment correction. The container is a
+Workbench distribution and does not imply endorsement by VisionEval.
 
 VisionEval is distributed under Apache-2.0. Its upstream license is available
 at /opt/visioneval/source/LICENSE, and this runtime modification notice is

@@ -24,6 +24,8 @@ from .input_explanations import InputExplanationPackageService
 from .model_packages import ModelPackageService
 from .region_packages import RegionPackageService, package_manifest_type
 from .runtime import RuntimeManager
+from .runtime import CURRENT_RELEASE_TAG
+from .update_checks import UpdateCheckService
 from .region_builder import RegionBuilderService
 from .workspace import Workspace, WorkspaceError, make_id, now_iso, read_json
 
@@ -44,7 +46,7 @@ class RuntimeInstallOperationManager:
         self.operations: dict[str, dict] = {}
         self.active_id = ""
 
-    def start(self) -> dict:
+    def start(self, profile: dict | None = None) -> dict:
         with self.lock:
             active = self.operations.get(self.active_id, {})
             if active.get("state") in {"waiting", "running"}:
@@ -59,6 +61,7 @@ class RuntimeInstallOperationManager:
                 "finishedAt": "",
                 "message": "Preparing the pinned runtime installation.",
                 "result": None,
+                "profile": profile,
             }
             self.operations[operation_id] = operation
             self.active_id = operation_id
@@ -75,7 +78,12 @@ class RuntimeInstallOperationManager:
                 "message": "Downloading and verifying the pinned runtime… This can take several minutes the first time.",
             })
         try:
-            result = self.runtime.install_or_update_runtime()
+            profile = operation.get("profile")
+            result = (
+                self.runtime.install_or_update_runtime(profile)
+                if profile is not None
+                else self.runtime.install_or_update_runtime()
+            )
             with self.lock:
                 operation.update({
                     "state": "succeeded",
@@ -133,6 +141,7 @@ class WorkbenchApplication:
         if not runtime_cli.is_file():
             runtime_cli = self.resource_root.parent / "runtime" / "scripts" / "ve-cli-native.R"
         self.runtime = RuntimeManager(self.workspace, cli_path=runtime_cli)
+        self.update_checks = UpdateCheckService(self.workspace, __version__, CURRENT_RELEASE_TAG, self.runtime.image_digest, self.runtime.adapter, self.runtime.runtime_profiles)
         self.runtime_installations = RuntimeInstallOperationManager(self.runtime)
         self.diagnostics = DiagnosticsService(self.workspace, self.runtime, __version__)
         self.comparison = ComparisonService(self.workspace, self.runtime, helper_target, scan_target, conflicts_target, cache_extractor_target)
@@ -172,6 +181,7 @@ class WorkbenchApplication:
             "catalog": self.workspace.catalog(False, False)["datastores"],
             "archivedProjects": self.workspace.list_archived_projects(),
             "runtime": runtime_status,
+            "updates": self.update_checks.status(),
             "workspaceSettings": self.workspace.settings(),
             "assets": self.workspace.asset_inventory(),
             "assetCatalog": self.asset_catalog,
@@ -267,6 +277,8 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.runtime_installations.status(first(query, "id")))
                 elif parsed.path == "/api/settings":
                     send_json(self, application.workspace.settings())
+                elif parsed.path == "/api/updates/status":
+                    send_json(self, application.update_checks.status())
                 elif parsed.path == "/api/documentation/user-guide":
                     send_json(self, application.documentation.user_guide())
                 elif parsed.path == "/api/documentation/page":
@@ -556,8 +568,10 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.workspace.purge_asset(str(payload.get("archiveId", ""))))
                 elif parsed.path == "/api/settings":
                     settings = application.workspace.update_settings(payload)
-                    application.runtime.set_release_check_enabled(settings["checkVisionEvalUpdates"])
+                    application.update_checks.settings_changed()
                     send_json(self, settings)
+                elif parsed.path == "/api/updates/check":
+                    send_json(self, application.update_checks.check(force=True, sources=payload.get("sources")))
                 elif parsed.path == "/api/diagnostics/app-error":
                     send_json(self, application.diagnostics.record_app_error(payload), 201)
                 elif parsed.path == "/api/templates/import":
@@ -602,9 +616,13 @@ def handler_class(application: WorkbenchApplication):
                 elif parsed.path == "/api/runtime/pull":
                     send_json(self, application.runtime.pull_image())
                 elif parsed.path == "/api/runtime/install":
-                    send_json(self, application.runtime.install_or_update_runtime())
+                    profile = application.update_checks.runtime_candidate() if payload.get("source") == "update" else None
+                    send_json(self, application.runtime.install_or_update_runtime(profile))
                 elif parsed.path == "/api/runtime/install/start":
-                    send_json(self, application.runtime_installations.start(), 202)
+                    profile = application.update_checks.runtime_candidate() if payload.get("source") == "update" else None
+                    send_json(self, application.runtime_installations.start(profile), 202)
+                elif parsed.path == "/api/runtime/restore-previous":
+                    send_json(self, application.runtime.restore_previous_runtime())
                 elif parsed.path == "/api/runtime/discover":
                     send_json(self, application.runtime.discover_native(payload.get("veRuntime", "")))
                 elif parsed.path == "/api/runtime/verify":

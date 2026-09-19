@@ -12,11 +12,11 @@ Install Docker Desktop, select **Start Docker Desktop** in Workbench, and wait f
 
 ## Runtime verification fails
 
-Check that `local/visioneval:1.0.0-amd64` exists and has not changed digest. If necessary, pull the versioned GHCR image described in [Setup](setup.md), recreate the local alias, and select **Verify runtime**. Review the `doctor`, `verify-upstream-release`, or `verify-alignment-patch` error before rebuilding the runtime.
+Open **Settings → Runtime** and confirm the active digest exists. If necessary, install the approved update or restore the previous verified runtime, then select **Verify runtime**. Review the `doctor`, `verify-upstream-release`, or `verify-household-id-alignment` error before rebuilding the runtime.
 
 ## A PlanRVA run stops in `DoPredictions`
 
-This error indicates that Workbench used an unpatched VE-40-RC6 image or a stale saved runtime profile. Install `local/visioneval:1.0.0-amd64`, open **Settings → Runtime**, and select **Verify runtime**. The accepted image must pass `verify-alignment-patch`; merely retagging an unpatched image will fail provenance verification.
+This error indicates that the active image failed its complete-ID behavior contract or has a stale runtime profile. Install or restore a manifest-approved runtime and select **Verify runtime**. The accepted image must pass `verify-household-id-alignment`; retagging an unknown image cannot satisfy digest and provenance verification.
 
 ## A project does not appear in Run or Compare
 

@@ -1,17 +1,18 @@
 {
   "schemaVersion": 1,
   "id": "planrva-mm-v1",
-  "version": "1.0.0",
-  "name": "PlanRVA MM Example",
+  "version": "2.2",
+  "name": "PlanRVA",
   "assetType": "bundled-example",
   "inputLibrary": {
     "id": "PlanRVA MM",
+    "name": "PlanRVA",
     "csvCount": 51,
     "inputFileCount": 52
   },
   "modelTemplate": {
     "id": "template-planrva-mm-8f140cd4cb",
-    "name": "PlanRVA MM",
+    "name": "PlanRVA",
     "fingerprint": "20d581d194edb965960506ca61dcb320f7314ff1c80b79fe07ca2a25ffd274b8"
   },
   "comparisonMap": {
@@ -19,11 +20,13 @@
     "path": "map-context"
   },
   "compatibility": {
-    "workbenchVersion": "1.0.0",
-    "visionEvalVersion": "VE-40-RC6",
-    "runtimeImage": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-    "runtimeDigest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
-    "patch": "2026-08-03-composite-household-id-alignment",
+    "minimumWorkbenchVersion": "1.0.0",
+    "testedWorkbenchVersion": "1.1.0",
+    "supportedVisionEvalVersions": [
+      "VE-40-RC6",
+      "VE-40-RC7"
+    ],
+    "runtimeApi": 1,
     "architecture": "arm64"
   },
   "provenance": {
@@ -31,12 +34,12 @@
     "source": "Public PlanRVA VisionEval multimodal planning model and input data",
     "notice": "Public planning example provided without warranty; not owned or published by VisionEval."
   },
-  "treeSha256": "43f4f61b1e39234ccdf825d24112bcdf3805e54ebd786aa56d38b5e30d5e4c16",
+  "treeSha256": "ba66b6cbcc4cc8ddc8c6298f5bee052d3023289278caa5efd534ae682e26c8f9",
   "files": [
     {
       "path": "NOTICE.md",
-      "size": 805,
-      "sha256": "674feb1d816a794500434f86324df41cfd9d2b5ecd20e75d42252a7876193b96"
+      "size": 802,
+      "sha256": "2ffdb6739d5962a65d57644e9e87822c2a59fc126efc3c37ecefa6c434ebd650"
     },
     {
       "path": "input-library/azone_carsvc_characteristics.csv",
@@ -320,8 +323,8 @@
     },
     {
       "path": "map-context/workbench-map-context.json",
-      "size": 1250,
-      "sha256": "a79c91b454e7a815de057221d5d49ae082ec6619c8aec3bc69acfea30840d5de"
+      "size": 1410,
+      "sha256": "96d0fc5159142be4d96575e0dd16f0dce96b1ecd0628700cefedd03df33a6879"
     },
     {
       "path": "model-template/defs/deflators.csv",
@@ -620,8 +623,8 @@
     },
     {
       "path": "model-template/workbench_template.json",
-      "size": 2055,
-      "sha256": "581129064bc6181e42bc911617c3c7333d1a89db9c662c080450176db0f0bc67"
+      "size": 2050,
+      "sha256": "4a181aa256840f93c1b2f3afadb5af83e56590d1541e18c8559ba1fec2a452ed"
     }
   ]
 }

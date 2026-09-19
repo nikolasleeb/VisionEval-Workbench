@@ -181,6 +181,7 @@ def build(input_library: Path, output: Path) -> Path:
                 "geographies": [
                     {"id": "county", "label": "County / locality", "geometry": "azone", "identifier": "FIPS", "technicalLevel": "Azone"},
                     {"id": "bzone", "label": "Bzone", "geometry": "bzone", "identifier": "GEOID", "technicalLevel": "Bzone"},
+                    {"id": "marea", "label": "Marea", "geometry": "bzone", "identifier": "Marea", "technicalLevel": "Marea"},
                 ],
             },
             "sourcesDocument": "SOURCES.md",

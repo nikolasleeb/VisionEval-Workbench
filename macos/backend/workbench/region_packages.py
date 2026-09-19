@@ -10,6 +10,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from .embedded_explanations import install_embedded_explanations, validate_embedded_explanations
 from .workspace import Workspace, WorkspaceError, fingerprint_tree, now_iso, read_json, write_json
 
 
@@ -130,7 +131,7 @@ class RegionPackageService:
         if model_template_path:
             required.add(model_template_path)
         if "" in required:
-            raise WorkspaceError("Regional package must define its InputLibrary, regions, crosswalk, and sources document")
+            raise WorkspaceError("Regional package must define its Input Library, regions, crosswalk, and sources document")
         files = manifest.get("files")
         if not isinstance(files, list) or not files:
             raise WorkspaceError("Regional package must contain a checked file inventory")
@@ -154,12 +155,13 @@ class RegionPackageService:
         input_path = safe_package_path(root, str(manifest["inputLibrary"]["path"]))
         for filename in manifest["inputLibrary"].get("requiredFiles", []):
             if not (input_path / str(filename)).is_file():
-                raise WorkspaceError(f"Regional package InputLibrary is missing {filename}")
+                raise WorkspaceError(f"Regional package Input Library is missing {filename}")
         if model_template_path:
             template_path = safe_package_path(root, model_template_path)
             for relative in ("visioneval.cnf", "scripts/run_model.R", "defs/units.csv", "defs/deflators.csv"):
                 if not (template_path / relative).is_file():
-                    raise WorkspaceError(f"Regional package model template is missing {relative}")
+                    raise WorkspaceError(f"Regional model package is missing {relative}")
+        validate_embedded_explanations(root, manifest)
         return manifest
 
     def install(self, source: str | Path) -> dict[str, Any]:
@@ -192,6 +194,12 @@ class RegionPackageService:
             self.workspace.record_asset_registration({
                 "id": manifest["id"], "type": "region-builder", "version": manifest["version"], "installedAt": now_iso(),
             })
+            explanation = install_embedded_explanations(self.workspace, package_root, manifest, source)
+            if explanation:
+                settings = self.workspace.settings()
+                if not settings.get("defaultInputExplanationId"):
+                    settings["defaultInputExplanationId"] = explanation["id"]
+                    write_json(self.workspace.settings_path, settings)
             return self.record(manifest["id"])
         finally:
             if temp:

@@ -1,14 +1,14 @@
-# VisionEval Workbench 1.0.0 — Windows updated to 1.0.1
+# VisionEval Workbench 1.1.0
 
-This is the first public release of the clean VisionEval Workbench repository. The existing release tag remains `v1.0.0`; its Windows application has been replaced by Windows 1.0.1, while the Apple Silicon and Intel macOS applications remain at 1.0.0.
+Version 1.1.0 adds the runtime compatibility contract and the official VisionEval VE-40-RC7 runtime for Apple Silicon and Intel Macs. Existing verified RC6 images remain supported as the rollback profile.
 
 ## Downloads
 
 - **Windows 11 x64:** `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe`
-- **Apple Silicon macOS:** `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`
-- **Intel macOS:** `VisionEval-Workbench-v1.0.0-macos-x64.dmg`
-- **Intel source snapshot:** `VisionEval-Workbench-v1.0.0-intel-source.zip`
-- **PlanRVA model package:** `planrva-mm.zip`
+- **Apple Silicon macOS:** `VisionEval-Workbench-v1.1.0-macos-arm64.dmg`
+- **Intel macOS:** `VisionEval-Workbench-v1.1.0-macos-x64.dmg`
+- **Intel source snapshot:** `VisionEval-Workbench-v1.1.0-intel-source.zip`
+- **PlanRVA model package:** `planrva-2.2.zip`
 - **Virginia MPO regional package:** `virginia-mpo-regions.zip`
 
 Exact platform source snapshots are also attached. GitHub additionally supplies automatic source archives for the full repository.
@@ -37,7 +37,10 @@ The refreshed Mac builds keep first-launch runtime downloads in background opera
 
 ## Important notes
 
+- **Settings → Updates** provides optional weekly or manual advisory checks for stable Workbench releases, official VisionEval releases, and architecture-compatible runtime images approved by the release manifest. It never installs updates automatically.
 - The Mac application is ad-hoc signed for bundle integrity but is not Apple-notarized.
 - Each Mac DMG is architecture-specific; use the ARM64 build on Apple Silicon and the x64 build on Intel.
-- The runtime is an unofficial distribution built from VisionEval VE-40-RC6 and includes the documented Workbench compatibility patch.
+- The preferred runtime is built from the official VisionEval `VE-40-RC7` source at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad`, with no unofficial source patch.
+- Settings can install a manifest-approved, architecture-specific immutable runtime digest and restore the previous verified runtime.
+- `VE-40-RC7` and `latest` are readable multi-platform registry tags; Workbench executes the validated digest, never the floating tag.
 - Regional planning data are provided as-is and are installed separately through **Settings → Assets**.

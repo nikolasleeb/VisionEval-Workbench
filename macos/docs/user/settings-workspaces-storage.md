@@ -14,17 +14,19 @@ Open Settings with the gear button or **Ctrl+,**.
 
 ## Workspace
 
-The workspace contains `Projects`, `Assets`, `Results`, `Documentation`, and internal `.workbench` state. Use **Open another workspace…** or **Move workspace…** to change it safely. Back up the complete workspace when you need a portable copy.
+The workspace contains `Projects`, `Assets`, `Results`, `Documentation`, and internal `.workbench` state. Use **Open another workspace** or **Move workspace** to change it safely. Back up the complete workspace when you need a portable copy.
 
 **Forget** removes only a saved shortcut. **Move to Recycle Bin** is offered only for an inactive verified workspace and never for the current workspace.
 
 ## Assets
 
-Install approved Workbench packages from Assets. Regional packages provide matched model-template and InputLibrary assets. Workbench blocks removal while a project references an asset. Removed unreferenced assets remain recoverable for 30 days.
+Install approved Workbench packages from Assets. Model and regional packages provide a matched Model package and Input Library. Choose the Model package; Workbench selects its verified internal pairing automatically. Workbench blocks removal while a project references an asset. Removed unreferenced assets remain recoverable for 30 days. Removing a Region Builder pair clears any temporary Setup selection so another installed Model package can be used immediately.
+
+**Settings → Reset → Repair workspace structure** recreates missing workspace folders, cleans abandoned staging data, rebuilds references, and audits path lengths. It applies immediately and does not require saving Settings. It does not restore removed assets or rebuild regional packages.
 
 ## Appearance and numbers
 
-Appearance controls theme and accessible decrease, neutral, and increase palettes. The optional master palette applies one set everywhere while retaining individual choices. Number settings control calculation and display precision without changing authoritative raw values.
+Appearance controls theme and accessible decrease, neutral, and increase palettes. The optional master palette applies one set everywhere while retaining individual choices. Number settings control calculation and display precision without changing authoritative raw values. VisionEval inputs are type-sensitive: declared counts remain whole numbers, continuous values can use the configured precision, and identifiers such as years and geography codes are never rounded.
 
 ## Runtime and resources
 

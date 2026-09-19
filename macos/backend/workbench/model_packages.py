@@ -6,12 +6,13 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .embedded_explanations import install_embedded_explanations, validate_embedded_explanations
 from .region_packages import RegionPackageService, SAFE_PACKAGE_ID, file_sha256, safe_package_path
 from .workspace import Workspace, WorkspaceError, fingerprint_tree, now_iso, read_json, write_json
 
 
 class ModelPackageService:
-    """Install a checked model template and InputLibrary as one optional package."""
+    """Install a checked model definition and Input Library as one optional package."""
 
     def __init__(self, workspace: Workspace):
         self.workspace = workspace
@@ -28,7 +29,7 @@ class ModelPackageService:
                 raise WorkspaceError(f"Model package {key} is required")
         library = manifest.get("inputLibrary") or {}
         template = manifest.get("modelTemplate") or {}
-        for label, record in (("InputLibrary", library), ("model template", template)):
+        for label, record in (("Input Library", library), ("model package", template)):
             if not str(record.get("id", "")).strip() or not str(record.get("path", "")).strip():
                 raise WorkspaceError(f"Model package {label} id and path are required")
         files = manifest.get("files")
@@ -55,10 +56,10 @@ class ModelPackageService:
         library_path = safe_package_path(root, str(library["path"]))
         template_path = safe_package_path(root, str(template["path"]))
         if not library_path.is_dir() or not any(library_path.glob("*.csv")):
-            raise WorkspaceError("Model package InputLibrary contains no CSV files")
+            raise WorkspaceError("Model package Input Library contains no CSV files")
         validation = self.workspace.validate_template(template_path)
         if not validation["valid"]:
-            raise WorkspaceError("Model package template is invalid: " + "; ".join(validation["errors"]))
+            raise WorkspaceError("Model package definition is invalid: " + "; ".join(validation["errors"]))
         map_record = manifest.get("comparisonMap") or {}
         if map_record:
             context_path = safe_package_path(root, str(map_record.get("path", "")))
@@ -69,6 +70,7 @@ class ModelPackageService:
                 or not context_manifest.get("comparisonMap", {}).get("enabled")
             ):
                 raise WorkspaceError("Model package map context is missing or invalid")
+        validate_embedded_explanations(root, manifest)
         return manifest
 
     def install(self, source: str | Path) -> dict[str, Any]:
@@ -86,6 +88,7 @@ class ModelPackageService:
             existing = [path.name for path in (library_target, template_target) if path.exists()]
             if existing:
                 raise WorkspaceError("PlanRVA assets are already installed: " + ", ".join(existing))
+            validate_embedded_explanations(package_root, manifest)
 
             library_stage = Path(tempfile.mkdtemp(prefix=f".{library_target.name}.", dir=library_target.parent))
             template_stage = Path(tempfile.mkdtemp(prefix=f".{template_target.name}.", dir=template_target.parent))
@@ -118,6 +121,9 @@ class ModelPackageService:
                 settings["defaultInputLibraryId"] = library["id"]
             if not settings.get("defaultTemplateId"):
                 settings["defaultTemplateId"] = template["id"]
+            explanation = install_embedded_explanations(self.workspace, package_root, manifest, source)
+            if explanation and not settings.get("defaultInputExplanationId"):
+                settings["defaultInputExplanationId"] = explanation["id"]
             write_json(self.workspace.settings_path, settings)
             installed_at = now_iso()
             self.workspace.record_asset_registration({
@@ -126,8 +132,9 @@ class ModelPackageService:
                 "version": manifest["version"],
                 "installedAt": installed_at,
                 "assets": [
-                    {"kind": "input-library", "id": library["id"]},
-                    {"kind": "model-template", "id": template["id"]},
+                    {"kind": "input-library", "id": library["id"], "name": library.get("name", library["id"])},
+                    {"kind": "model-template", "id": template["id"], "name": template.get("name", template["id"])},
+                    *([{"kind": "input-explanations", "id": explanation["id"]}] if explanation else []),
                 ],
             })
             return {
@@ -138,6 +145,7 @@ class ModelPackageService:
                 "fingerprint": fingerprint_tree(package_root),
                 "inputLibrary": {"id": library["id"], "name": library.get("name", library["id"])},
                 "modelTemplate": {"id": template["id"], "name": template.get("name", template["id"])},
+                "inputExplanations": ({"id": explanation["id"], "name": explanation["name"]} if explanation else None),
             }
         finally:
             if temp:

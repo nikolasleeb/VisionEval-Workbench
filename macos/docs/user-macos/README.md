@@ -1,6 +1,6 @@
 # VisionEval Workbench User Guide
 
-VisionEval Workbench 1.0.0 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, and comparing the resulting datastores. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
+VisionEval Workbench 1.1.0 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, and comparing the resulting datastores. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
 
 The normal workflow has four parts:
 
@@ -44,7 +44,7 @@ Explore, Create, workspace management, and viewing already registered comparison
 
 ## Current platform
 
-This guide covers Apple Silicon macOS with the Docker ARM64 runtime. Intel Mac is not supported. The unofficial Workbench runtime uses the official VisionEval `VE-40-RC6` source plus a Workbench household-ID prediction-ordering patch for `VETravelDemandMM::DoPredictions`. The patch matches complete household identifiers to preserve the original datastore order. It is not an official VisionEval distribution. See [Setup](setup.md) for the managed runtime install and verified local-build procedures.
+This guide covers Apple Silicon macOS with the Docker ARM64 runtime. The preferred Workbench runtime uses official VisionEval `VE-40-RC7`, whose upstream complete-household-ID correction requires no unofficial source patch. Workbench verifies and executes its architecture-specific immutable digest. See [Setup](setup.md) for installation, update, and auditing procedures.
 
 The PlanRVA and Virginia packages are installed separately from the application. The DMG and ARM64 runtime are specific to Apple Silicon macOS.
 

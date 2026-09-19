@@ -242,7 +242,7 @@ class Workspace:
             "defaultInputLibraryId": "",
             "defaultInputExplanationId": "",
             "retainFullExports": True,
-            "checkVisionEvalUpdates": False,
+            "updateChecks": {"automatic": False, "sources": {"visioneval": True, "runtimeImage": True, "workbench": True}, "lastCheckedAt": "", "statuses": {}},
             "numericPrecision": {
                 "default": 2,
                 "singleFile": None,
@@ -262,13 +262,27 @@ class Workspace:
             **defaults["numericPrecision"],
             **(stored_precision if isinstance(stored_precision, dict) else {}),
         }
+        stored_updates = (current if isinstance(current, dict) else {}).get("updateChecks")
+        stored_updates = stored_updates if isinstance(stored_updates, dict) else {}
+        legacy_enabled = bool((current if isinstance(current, dict) else {}).get("checkVisionEvalUpdates", False))
+        stored_sources = stored_updates.get("sources")
+        merged["updateChecks"] = {**defaults["updateChecks"], **stored_updates, "automatic": bool(stored_updates.get("automatic", legacy_enabled)), "sources": {**defaults["updateChecks"]["sources"], **(stored_sources if isinstance(stored_sources, dict) else {})}, "statuses": stored_updates.get("statuses") if isinstance(stored_updates.get("statuses"), dict) else {}}
+        merged.pop("checkVisionEvalUpdates", None)
         return merged
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         settings = self.settings()
-        for key in ("defaultTemplateId", "defaultInputLibraryId", "defaultInputExplanationId", "retainFullExports", "checkVisionEvalUpdates"):
+        for key in ("defaultTemplateId", "defaultInputLibraryId", "defaultInputExplanationId", "retainFullExports"):
             if key in payload:
                 settings[key] = payload[key]
+        if "updateChecks" in payload:
+            incoming = payload["updateChecks"]
+            if not isinstance(incoming, dict): raise WorkspaceError("Update check settings must be an object")
+            sources = incoming.get("sources", settings["updateChecks"]["sources"])
+            if not isinstance(sources, dict) or set(sources)-{"visioneval","runtimeImage","workbench"}: raise WorkspaceError("Unknown update check source")
+            settings["updateChecks"] = {**settings["updateChecks"], "automatic": bool(incoming.get("automatic", settings["updateChecks"]["automatic"])), "sources": {key: bool(sources.get(key, settings["updateChecks"]["sources"].get(key, True))) for key in ("visioneval","runtimeImage","workbench")}}
+        elif "checkVisionEvalUpdates" in payload:
+            settings["updateChecks"] = {**settings["updateChecks"], "automatic": bool(payload["checkVisionEvalUpdates"])}
         if "numericPrecision" in payload:
             incoming = payload["numericPrecision"]
             if not isinstance(incoming, dict):
@@ -291,9 +305,14 @@ class Workspace:
         if settings["defaultInputExplanationId"] and settings["defaultInputExplanationId"] not in explanation_ids:
             raise WorkspaceError("The default input explanations package is not installed in this workspace")
         settings["retainFullExports"] = bool(settings["retainFullExports"])
-        settings["checkVisionEvalUpdates"] = bool(settings["checkVisionEvalUpdates"])
+        settings.pop("checkVisionEvalUpdates", None)
         write_json(self.settings_path, settings)
         return settings
+
+    def update_check_cache(self, *, checked_at: str, statuses: dict[str, Any]) -> dict[str, Any]:
+        settings = self.settings(); update_checks = dict(settings["updateChecks"])
+        update_checks["lastCheckedAt"] = str(checked_at or ""); update_checks["statuses"] = statuses if isinstance(statuses, dict) else {}
+        settings["updateChecks"] = update_checks; settings.pop("checkVisionEvalUpdates", None); write_json(self.settings_path, settings); return settings
 
     def record_asset_registration(self, record: dict[str, Any]) -> dict[str, Any]:
         settings = self.settings()

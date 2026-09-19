@@ -1,11 +1,11 @@
 ﻿# Setup
 
-This page is the setup path for VisionEval Workbench 1.0.0 on Apple Silicon macOS. Intel Mac is not validated.
+This page is the setup path for VisionEval Workbench 1.1.0 on Apple Silicon macOS. Intel Mac uses the separate x64 build.
 
 ## What you need
 
 - An Apple Silicon Mac running macOS 12 or newer.
-- VisionEval Workbench 1.0.0.
+- VisionEval Workbench 1.1.0.
 - Docker Desktop for Apple silicon if you want to run models or read uncached RDA data.
 - The separately distributed PlanRVA package, or another VisionEval InputLibrary and complete runnable model folder for your own project.
 
@@ -13,9 +13,9 @@ Explore, Create, workspace management, and already cached comparisons work witho
 
 ## 1. Install VisionEval Workbench
 
-Download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg` from the v1.0.0 GitHub release. Open it and drag **VisionEval Workbench.app** to **Applications**.
+Download `VisionEval-Workbench-v1.1.0-macos-arm64.dmg` from the v1.1.0 GitHub release. Open it and drag **VisionEval Workbench.app** to **Applications**.
 
-The v1.0.0 application is ad-hoc signed for bundle integrity but is not Apple-notarized. If macOS says the downloaded application is damaged or cannot be opened, select **Cancel** and run this once in Terminal:
+The application is signed for bundle integrity. If macOS says the downloaded application cannot be opened, select **Cancel** and follow the release page's current installation guidance.
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/VisionEval Workbench.app"
@@ -47,33 +47,26 @@ Workbench installs the pinned runtime image and verifies it for you. The exact c
 1. Install Docker Desktop for Apple Silicon.
 2. Open Workbench.
 3. Select **Install runtime** in first-launch setup or **Settings → Runtime**.
-4. Wait while Workbench starts Docker Desktop if needed, pulls the immutable image digest, creates the local alias, and runs the complete verification.
+4. Wait while Workbench starts Docker Desktop if needed, pulls the architecture-specific immutable digest, and runs the complete verification.
 5. Confirm the screen reports that the runtime is installed, verified, and connected and that Run is available.
 
 The first download can take several minutes. macOS may ask whether Workbench can send notifications the first time it tries to notify you that the runtime is ready. Denying notifications does not prevent the runtime from installing.
 
-Verification automatically runs `doctor`, `verify-upstream-release`, and `verify-alignment-patch`. **Verify runtime** remains available to repeat those checks later without downloading the image again.
+Verification automatically runs `doctor`, `verify-upstream-release`, and `verify-household-id-alignment`. **Verify runtime** remains available to repeat those checks later without downloading the image again.
 
 ## Advanced: runtime image details
 
-Workbench 1.0.0 expects this local image name:
-
-`local/visioneval:1.0.0-arm64`
-
-The image starts from the official VisionEval `VE-40-RC6` source at commit `f7ef3389b5626daeba6c86eeda9d172a0f8cccc2`, built for ARM64 with R 4.5.1. It also contains the narrowly scoped, unofficial Workbench patch `2026-08-03-composite-household-id-alignment`. The patch restores predictions to datastore order by matching complete household IDs; it does not use RC6's ambiguous numeric-suffix ordering. The image is not an official VisionEval distribution.
+Workbench 1.1.0 reads the approved runtime profile from the signed release compatibility data and runs the image by immutable platform digest. The preferred image contains official VisionEval `VE-40-RC7` source at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad`, built for ARM64 with R 4.5.1. RC7 includes the official complete-household-ID correction and the Workbench image applies no unofficial VisionEval source patch.
 
 ### Recommended method: pull the published GHCR image
 
-Pull the v1 runtime package from GHCR:
+The readable tag is convenient for inspection:
 
 ```bash
-docker pull ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64
-docker tag \
-  ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64 \
-  local/visioneval:1.0.0-arm64
+docker pull ghcr.io/nikolasleeb/visioneval-workbench-runtime:VE-40-RC7
 ```
 
-The compatibility manifest records the immutable `@sha256:…` digest. Use that digest instead of the mutable tag when reproducing or auditing a release.
+`VE-40-RC7` and `latest` are multi-platform tags, so Docker selects the host architecture. The runtime index records the immutable ARM64 `@sha256:…` digest; use that digest for auditing. Activate and verify an update through **Settings → Updates → Install Runtime Update** rather than renaming it to an older local alias.
 
 ### Fallback method: build the image locally
 
@@ -82,10 +75,10 @@ From the root of the Workbench source folder, run:
 ```bash
 docker build \
   --platform linux/arm64 \
-  --build-arg VISIONEVAL_REF=VE-40-RC6 \
-  --build-arg VISIONEVAL_COMMIT=f7ef3389b5626daeba6c86eeda9d172a0f8cccc2 \
-  --tag local/visioneval:1.0.0-arm64 \
-  runtime
+  --build-arg VISIONEVAL_REF=VE-40-RC7 \
+  --build-arg VISIONEVAL_COMMIT=7852dc58fad460ff279f5eebf4dd55fe191470ad \
+  --tag visioneval-workbench-runtime:VE-40-RC7-arm64 \
+  macos/runtime
 ```
 
 The first build can take a long time because Docker must download the R base image, compile/install VisionEval packages, and build several large layers. Later builds can reuse Docker's cache.
@@ -94,13 +87,13 @@ Verify the finished image:
 
 ```bash
 docker run --rm --platform linux/arm64 \
-  local/visioneval:1.0.0-arm64 doctor
+  visioneval-workbench-runtime:VE-40-RC7-arm64 doctor
 
 docker run --rm --platform linux/arm64 \
-  local/visioneval:1.0.0-arm64 verify-upstream-release
+  visioneval-workbench-runtime:VE-40-RC7-arm64 verify-upstream-release
 
 docker run --rm --platform linux/arm64 \
-  local/visioneval:1.0.0-arm64 verify-alignment-patch
+  visioneval-workbench-runtime:VE-40-RC7-arm64 verify-household-id-alignment
 ```
 
 All three commands must succeed. The last command exercises shuffled composite county household IDs and rejects missing, duplicate, unexpected, and non-finite prediction results.
@@ -110,29 +103,24 @@ All three commands must succeed. The last command exercises shuffled composite c
 Load the archive, then confirm that it created the expected local tag:
 
 ```bash
-docker load --input visioneval-workbench-runtime-1.0.0-arm64.tar
-docker image inspect local/visioneval:1.0.0-arm64
+docker load --input visioneval-workbench-runtime-VE-40-RC7-arm64.tar
+docker image inspect visioneval-workbench-runtime:VE-40-RC7-arm64
 ```
 
 Do not rename an unknown image to the expected tag merely to bypass verification. Workbench also checks its embedded release, source commit, architecture, required packages, and digest.
 
 ## 5. Install PlanRVA or another model package
 
-The standard application starts without model assets. The optional `planrva-mm.zip` package contains the public **PlanRVA MM** InputLibrary, complete runnable model, and Virginia map context. It contains 52 input files: 51 CSVs plus `model_parameters.json`.
+The standard application starts without model assets. The optional `planrva-2.2.zip` package contains the public **PlanRVA** InputLibrary, complete runnable model, and Virginia map context. It contains 52 input files: 51 CSVs plus `model_parameters.json`.
 
 1. Open **Settings → Assets**.
-2. Select **Add package** and choose `planrva-mm.zip`.
-3. Confirm that **PlanRVA MM** appears under both InputLibraries and model templates.
-4. To use an unpackaged model, expand **Advanced imports → Unpackaged assets** and import an InputLibrary and a complete runnable VisionEval folder containing at least:
-   - `visioneval.cnf`
-   - `scripts/run_model.R`
-   - `defs/`
-   - `inputs/`
-5. Optionally choose defaults for new projects.
+2. Select **Install package…** and choose `planrva-2.2.zip`.
+3. Confirm that **PlanRVA** appears under both InputLibraries and model templates.
+4. Optionally choose the default InputLibrary for new projects. Its paired template is selected automatically.
 
-Workbench copies imported assets into its workspace and never edits the external source folders.
+Workbench installs verified package assets into its workspace and never edits the external package.
 
-Install `virginia-mpo-regions.zip` separately to enable Virginia MPO region building. MPO regions are the supported execution scope. Statewide geometry may appear as map context, but a runnable statewide Virginia region is not offered in this release. See [Virginia MPO package](virginia-package.md).
+The PlanRVA package itself enables Develop for viewing its eight contained localities and 749 Bzones or building a smaller PlanRVA subregion. Install `virginia-mpo-regions.zip` separately to build other Virginia MPOs or custom regions outside PlanRVA. Statewide geometry may appear as map context, but a runnable statewide Virginia region is not offered in this release. See [Virginia MPO package](virginia-package.md).
 
 ## 6. Confirm the installation
 
@@ -144,11 +132,11 @@ Before relying on the setup:
 4. Confirm live R output appears and the result is registered only after verification succeeds.
 5. Open **Compare** and load the completed datastore.
 
-The patched runtime was smoke-tested through the complete PlanRVA 2024 model year, including the two `VETravelDemandMM` modules that fail with the unpatched RC6 ordering implementation. A model-specific smoke test remains part of release validation because image verification cannot prove every custom model completes.
+The RC7 runtime is smoke-tested through the complete PlanRVA model and the numeric and nonnumeric multi-Azone household-ID regressions. A model-specific smoke test remains part of release validation because image verification cannot prove every custom model completes.
 
 ## Updating VisionEval later
 
-Do not overwrite the trusted runtime with a floating `latest` image. For a later official VisionEval release:
+Do not overwrite the trusted runtime with a floating `latest` image. Workbench 1.1.0 discovers approved updates through its validated runtime index, asks before downloading, verifies the immutable platform digest, and retains the previous verified image for rollback. For a later official VisionEval release:
 
 1. Review the upstream release and resolve its immutable source commit.
 2. Update the runtime Dockerfile, Workbench runtime constants, compatibility manifest, workflow tags, documentation, and verification test together.

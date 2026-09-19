@@ -20,7 +20,10 @@ class ExploreTests(unittest.TestCase):
         catalog.write_text(json.dumps({
             "variables": {"population": [{"table": "Azone", "display": "Population", "type": "double", "units": "persons", "description": "Number of residents"}]},
             "explanations": {"azone_people": {"document": "people.docx", "html": "<p>File 01_azone_people.csv</p>\n<p>May 21, 2026</p>\n<h3>Definition of the Input File</h3>\n<p>Long guide</p>"}},
-            "inputFields": {"azone_people.csv": {"population": {"field": "Population", "type": "people", "units": "PRSN", "description": "Household population", "module": "VESimHouseholds::CreateHouseholds"}}},
+            "inputFields": {
+                "azone_people.csv": {"population": {"field": "Population", "type": "people", "units": "PRSN", "description": "Household population", "module": "VESimHouseholds::CreateHouseholds"}},
+                "marea_missing.csv": {},
+            },
         }))
         self.service = ExploreService(self.workspace, catalog)
 
@@ -34,6 +37,7 @@ class ExploreTests(unittest.TestCase):
         self.assertTrue(result["files"][0]["hasExplanation"])
         self.assertTrue(result["files"][0]["installed"])
         self.assertTrue(result["files"][0]["columnsAvailable"])
+        self.assertEqual(result["files"][0]["availability"], "installed")
 
     def test_catalog_files_exist_without_an_installed_library(self):
         result = self.service.files("")
@@ -41,10 +45,36 @@ class ExploreTests(unittest.TestCase):
         self.assertEqual(entry["source"], "catalog")
         self.assertFalse(entry["installed"])
         self.assertFalse(entry["columnsAvailable"])
+        self.assertEqual(entry["availability"], "catalog_only")
         self.assertEqual(entry["columns"], [])
         detail = self.service.file("", "azone_people.csv")
         self.assertEqual(detail["fields"], [])
+        self.assertEqual(detail["availability"], "catalog_only")
         self.assertIn("Long guide", detail["explanationHtml"])
+
+    def test_selected_library_returns_known_missing_file_as_catalog_only(self):
+        detail = self.service.file("Example", "marea_missing.csv")
+        self.assertEqual(detail["libraryId"], "Example")
+        self.assertEqual(detail["availability"], "catalog_only")
+        self.assertFalse(detail["installed"])
+        self.assertFalse(detail["columnsAvailable"])
+        self.assertEqual(detail["fields"], [])
+        self.assertEqual(detail["explanationHtml"], "")
+
+    def test_file_removed_after_listing_falls_back_to_catalog_only(self):
+        listed = self.service.files("Example")
+        entry = next(item for item in listed["files"] if item["filename"] == "azone_people.csv")
+        self.assertEqual(entry["availability"], "installed")
+        (self.workspace.input_library / "Example" / "azone_people.csv").unlink()
+        detail = self.service.file("Example", "azone_people.csv")
+        self.assertEqual(detail["availability"], "catalog_only")
+        self.assertFalse(detail["installed"])
+        self.assertIn("Long guide", detail["explanationHtml"])
+
+    def test_unknown_missing_file_uses_a_safe_message(self):
+        with self.assertRaisesRegex(WorkspaceError, "not available in the selected Input Library") as raised:
+            self.service.file("Example", "unknown_input.csv")
+        self.assertNotIn(self.temp.name, str(raised.exception))
 
     def test_returns_fields_explanation_and_mapping_anchor(self):
         result = self.service.file("Example", "azone_people.csv")

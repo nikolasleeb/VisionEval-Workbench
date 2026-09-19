@@ -1,10 +1,10 @@
-name: Add Intel macOS assets to release 1.0.0
+name: Add Intel macOS assets to release 1.1.0
 
 on:
   workflow_dispatch:
     inputs:
       approved_publication:
-        description: Build verified Intel assets and add them to the public v1.0.0 release
+        description: Build verified Intel assets and add them to v1.1.0
         required: true
         type: boolean
         default: false
@@ -13,7 +13,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: workbench-release-1.0.0-intel
+  group: workbench-release-1.1.0-intel
   cancel-in-progress: false
 
 jobs:
@@ -49,8 +49,7 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
           test "$(uname -m)" = "x86_64"
-          test "$(python3 -c 'import json; print(json.load(open("docs/user-intel/documentation.json"))["documentationVersion"])')" = "1.0.0-macos-intel"
-          python3 packaging/update_runtime_publication.py --check
+          test "$(python3 -c 'import json; print(json.load(open("desktop/src-tauri/tauri.conf.json"))["version"])')" = "1.1.0"
           python3 packaging/build_bundled_assets.py --check
           python3 packaging/build_user_guide.py --check
           python3 packaging/check_documentation.py
@@ -84,9 +83,9 @@ jobs:
           DMG_ROOT="$(mktemp -d)"
           ditto "$SOURCE_APP" "$DMG_ROOT/VisionEval Workbench.app"
           ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname "VisionEval Workbench 1.0.0 Intel" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v1.0.0-macos-x64.dmg
+          hdiutil create -volname "VisionEval Workbench 1.1.0 Intel" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v1.1.0-macos-x64.dmg
           MOUNT_ROOT="$(mktemp -d)"
-          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" release-assets/VisionEval-Workbench-v1.0.0-macos-x64.dmg
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" release-assets/VisionEval-Workbench-v1.1.0-macos-x64.dmg
           test -d "$MOUNT_ROOT/VisionEval Workbench.app"
           test -L "$MOUNT_ROOT/Applications"
           codesign --verify --deep --strict "$MOUNT_ROOT/VisionEval Workbench.app"
@@ -94,15 +93,15 @@ jobs:
           hdiutil detach "$MOUNT_ROOT"
       - name: Package exact Intel source snapshot
         run: |
-          mkdir -p staging/VisionEval-Workbench-v1.0.0-intel-source
-          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist --exclude release-assets --exclude staging --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store ./ staging/VisionEval-Workbench-v1.0.0-intel-source/
-          ditto -c -k --keepParent staging/VisionEval-Workbench-v1.0.0-intel-source release-assets/VisionEval-Workbench-v1.0.0-intel-source.zip
+          mkdir -p staging/VisionEval-Workbench-v1.1.0-intel-source
+          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist --exclude release-assets --exclude staging --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store ./ staging/VisionEval-Workbench-v1.1.0-intel-source/
+          ditto -c -k --keepParent staging/VisionEval-Workbench-v1.1.0-intel-source release-assets/VisionEval-Workbench-v1.1.0-intel-source.zip
       - uses: actions/upload-artifact@v4
         with:
           name: intel-release
           path: |
-            intel/release-assets/VisionEval-Workbench-v1.0.0-macos-x64.dmg
-            intel/release-assets/VisionEval-Workbench-v1.0.0-intel-source.zip
+            intel/release-assets/VisionEval-Workbench-v1.1.0-macos-x64.dmg
+            intel/release-assets/VisionEval-Workbench-v1.1.0-intel-source.zip
           if-no-files-found: error
 
   attach-to-release:
@@ -118,7 +117,14 @@ jobs:
           path: release-assets
       - name: Verify additive release assets
         run: |
-          test -f release-assets/VisionEval-Workbench-v1.0.0-macos-x64.dmg
-          test -f release-assets/VisionEval-Workbench-v1.0.0-intel-source.zip
+          test -f release-assets/VisionEval-Workbench-v1.1.0-macos-x64.dmg
+          test -f release-assets/VisionEval-Workbench-v1.1.0-intel-source.zip
       - name: Replace Intel assets without changing other release files
-        run: gh release upload v1.0.0 release-assets/* --repo "${{ github.repository }}" --clobber
+        run: |
+          gh release upload v1.1.0 release-assets/* --repo "${{ github.repository }}" --clobber
+          gh release view v1.1.0 --repo "${{ github.repository }}" --json assets \
+            --jq '.assets[].name' > release-assets.txt
+          grep -Fx 'VisionEval-Workbench-v1.1.0-macos-arm64.dmg' release-assets.txt
+          grep -Fx 'VisionEval-Workbench-v1.1.0-macos-x64.dmg' release-assets.txt
+          grep -Fx 'update-manifest.json' release-assets.txt
+          gh release edit v1.1.0 --repo "${{ github.repository }}" --draft=false --latest

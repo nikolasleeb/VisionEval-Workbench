@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "releaseStatus": "public",
-  "applicationVersion": "1.0.0",
+  "applicationVersion": "1.1.0",
   "releaseDate": "August 14, 2026",
   "developedBy": "Nikolas Lee Bishop",
   "github": "https://github.com/nikolasleeb/VisionEval-Workbench",
@@ -22,6 +22,8 @@
   "visionEvalVersion": "VE-40-RC6",
   "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
   "rVersion": "4.5.1",
+  "supportedRuntimeApis": [1],
+  "preferredVisionEvalVersion": "VE-40-RC7",
   "runtimeImage": {
     "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-amd64",
     "localAlias": "local/visioneval:1.0.0-amd64",

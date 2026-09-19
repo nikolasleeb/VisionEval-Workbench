@@ -35,6 +35,14 @@
   --workbench-page-bottom-gutter: 96px;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
+.update-status-list { display:grid; gap:10px; }
+.update-status-card { display:grid; gap:8px; padding:13px; border:1px solid var(--line); border-left:4px solid var(--line); border-radius:9px; background:var(--surface-2); }
+.update-status-card.current { border-left-color:#15966f; }
+.update-status-card.update_available { border-left-color:#f59e0b; }
+.update-status-card.unavailable { border-left-color:#d14343; }
+.update-status-card p { margin:0; color:var(--muted); }
+.update-status-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.update-status-heading > div { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
 
 [hidden] { display: none !important; }
 

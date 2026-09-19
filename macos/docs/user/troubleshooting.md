@@ -28,7 +28,7 @@ Restore it if archived. Only verified successful runs appear in Compare; failed,
 
 ## A scenario change is missing
 
-Apply Preview is temporary. Return to the file and select **Save File Changes** or press **Ctrl+S** before Review and Run.
+Calculated operations save when **Apply and Save Change** succeeds. For direct table-cell edits, return to the file and select **Save Direct Edits** or press **Ctrl+S** before Review and Run.
 
 ## Map Visualization opens with empty selectors
 

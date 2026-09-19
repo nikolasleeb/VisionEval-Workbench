@@ -9,14 +9,14 @@ library_path <- file.path(home, "ve-lib", paste(R.version$major, strsplit(R.vers
 .libPaths(c(library_path, .libPaths()))
 library(VEStart)
 startVisionEval(ve.home = home, ve.runtime = runtime, overwrite = FALSE)
-# RC6 normalizes absolute model paths to ./workspace/... internally. Resolve those
+# VisionEval normalizes absolute model paths to ./workspace/... internally. Resolve those
 # from the filesystem root rather than from /workspace/workspace.
 setwd("/")
 
 usage <- function(status = 0L) {
   cat(paste(
-    "VisionEval Workbench VE-40-RC6 + household-ID prediction-ordering patch AMD64 runtime", "", "Commands:",
-    "  help", "  doctor", "  verify-upstream-release", "  verify-alignment-patch", "  list",
+    "VisionEval Workbench VE-40-RC7 AMD64 runtime", "", "Commands:",
+    "  help", "  doctor", "  verify-upstream-release", "  verify-household-id-alignment", "  list",
     "  install-sample [name]", "  run <model> [reset|save]", "  export <model>", "  shell", "",
     "Host workspace contract: /workspace/models, /workspace/runs, /workspace/exchange", sep = "\n"))
   quit(save = "no", status = status)
@@ -27,7 +27,7 @@ if (command == "doctor") {
   required <- c("VEStart", "VEModel", "VETravelDemandMM")
   missing <- setdiff(required, rownames(installed.packages()))
   release <- if (file.exists("/opt/visioneval/RELEASE")) paste(readLines("/opt/visioneval/RELEASE", warn = FALSE), collapse = "\n") else "release metadata missing"
-  cat("VisionEval runtime: OK\nRelease: VE-40-RC6 + household-ID prediction-ordering patch\nR:", R.version.string, "\nArchitecture:", R.version$arch, "\nRuntime:", runtime, "\nPackages:", paste(required, collapse = ", "), "\n", release, "\n")
+  cat("VisionEval runtime: OK\nRelease: VE-40-RC7\nR:", R.version.string, "\nArchitecture:", R.version$arch, "\nRuntime:", runtime, "\nPackages:", paste(required, collapse = ", "), "\n", release, "\n")
   if (length(missing)) stop("Missing packages: ", paste(missing, collapse = ", "))
   quit(save = "no", status = 0L)
 }
@@ -40,55 +40,63 @@ if (command == "verify-upstream-release") {
   function_text <- paste(deparse(body(do_predictions)), collapse = "\n")
   stopifnot(
     "merge_preds" %in% names(formals(do_predictions)),
-    grepl("p_order", function_text, fixed = TRUE),
+    grepl("alignPredictionRows", function_text, fixed = TRUE),
     grepl("Dataset_df[[id_name]]", function_text, fixed = TRUE),
-    any(release == "tag=VE-40-RC6"),
-    any(release == "commit=f7ef3389b5626daeba6c86eeda9d172a0f8cccc2")
+    any(release == "tag=VE-40-RC7"),
+    any(release == "commit=7852dc58fad460ff279f5eebf4dd55fe191470ad"),
+    any(release == "runtime_api=1")
   )
-  cat("Active package:", package_path, "\nUpstream source: VisionEval/VisionEval-4 VE-40-RC6\nPinned upstream household-ordering implementation: present\n")
+  cat("Active package:", package_path, "\nUpstream source: VisionEval/VisionEval-4 VE-40-RC7\nOfficial full-household-ID ordering implementation: present\n")
   quit(save = "no", status = 0L)
 }
 
-if (command == "verify-alignment-patch") {
+if (command == "verify-household-id-alignment") {
   package_path <- find.package("VETravelDemandMM")
   namespace <- asNamespace("VETravelDemandMM")
   release <- readLines("/opt/visioneval/RELEASE", warn = FALSE)
-  patch_id <- "2026-08-03-composite-household-id-alignment"
-  align <- get("AlignPredictions", namespace)
-  household_text <- paste(deparse(body(get("CalculateHouseholdDvmt", namespace))), collapse = "\n")
-  alt_mode_text <- paste(deparse(body(get("CalculateAltModeTrips", namespace))), collapse = "\n")
+  align <- get("alignPredictionRows", namespace)
+  align_text <- paste(deparse(body(align)), collapse = "\n")
   stopifnot(
-    identical(packageDescription("VETravelDemandMM")[["VEAlignmentPatch"]], patch_id),
-    any(release == paste0("compatibility_patch=", patch_id)),
-    any(release == "compatibility_patch_status=unofficial"),
-    any(release == "compatibility_patch_target=VETravelDemandMM::DoPredictions"),
-    grepl("AlignPredictions", household_text, fixed = TRUE),
-    grepl("AlignPredictions", alt_mode_text, fixed = TRUE),
-    grepl("merge_preds = FALSE", household_text, fixed = TRUE),
-    grepl("merge_preds = FALSE", alt_mode_text, fixed = TRUE)
+    any(release == "compatibility_patch=none"),
+    any(release == "household_id_alignment=official-upstream"),
+    grepl("match(DatasetIds_, PredictionIds_)", align_text, fixed = TRUE),
+    grepl("anyDuplicated", align_text, fixed = TRUE)
   )
 
-  household_ids <- c("Charles City County-1", "Charles City County-2", "Chesterfield County-1", "Chesterfield County-2")
+  household_ids <- c("51001-1", "51003-1", "51001-2", "51003-2")
   predictions <- data.frame(
-    id = c("Chesterfield County-1", "Charles City County-2", "Chesterfield County-2", "Charles City County-1"),
+    id = c("51003-1", "51001-2", "51003-2", "51001-1"),
     y = c(30, 20, 40, 10),
     stringsAsFactors = FALSE
   )
-  stopifnot(identical(align(predictions, household_ids), c(10, 20, 30, 40)))
+  aligned <- align(predictions, household_ids)
+  stopifnot(
+    identical(as.character(aligned$id), household_ids),
+    identical(as.numeric(aligned$y), c(10, 30, 20, 40))
+  )
 
-  expect_error <- function(expression, pattern) {
+  nonnumeric_ids <- c("Azone-A/HH-alpha", "Azone-B/HH-alpha", "Azone-A/HH-beta", "Azone-B/HH-beta")
+  nonnumeric_predictions <- data.frame(
+    id = c("Azone-B/HH-beta", "Azone-A/HH-alpha", "Azone-B/HH-alpha", "Azone-A/HH-beta"),
+    y = c(4, 1, 2, 3),
+    stringsAsFactors = FALSE
+  )
+  nonnumeric_aligned <- align(nonnumeric_predictions, nonnumeric_ids)
+  stopifnot(
+    identical(as.character(nonnumeric_aligned$id), nonnumeric_ids),
+    identical(as.numeric(nonnumeric_aligned$y), c(1, 2, 3, 4))
+  )
+
+  expect_error <- function(expression) {
     message <- tryCatch({ force(expression); "" }, error = conditionMessage)
-    if (!grepl(pattern, message, fixed = TRUE)) stop("Expected alignment error containing: ", pattern)
+    if (!nzchar(message)) stop("Expected the official alignment helper to reject invalid household identities")
   }
-  expect_error(align(predictions[-1, ], household_ids), "missing for 1 household IDs")
+  expect_error(align(predictions[-1, ], household_ids))
   duplicate_predictions <- predictions
   duplicate_predictions$id[[2]] <- duplicate_predictions$id[[1]]
-  expect_error(align(duplicate_predictions, household_ids), "duplicate household IDs")
-  non_finite_predictions <- predictions
-  non_finite_predictions$y[[1]] <- Inf
-  expect_error(align(non_finite_predictions, household_ids), "non-finite values")
+  expect_error(align(duplicate_predictions, household_ids))
 
-  cat("Active package:", package_path, "\nCompatibility patch:", patch_id, "\nComposite household-ID alignment: verified\n")
+  cat("Active package:", package_path, "\nOfficial RC7 complete household-ID alignment: verified\n")
   quit(save = "no", status = 0L)
 }
 

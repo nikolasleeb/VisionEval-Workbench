@@ -176,10 +176,10 @@ class ExploreService:
 
     def library(self, library_id: str) -> Path:
         if not library_id or Path(library_id).name != library_id:
-            raise WorkspaceError("Unknown InputLibrary")
+            raise WorkspaceError("Unknown Input Library")
         path = self.workspace.within(self.workspace.input_library / library_id, self.workspace.input_library)
         if not path.is_dir():
-            raise WorkspaceError("Unknown InputLibrary")
+            raise WorkspaceError("Unknown Input Library")
         return path
 
     def metadata_for(self, column: str, table: str, catalog: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -226,7 +226,8 @@ class ExploreService:
                 "level": self.table_for(filename) or "Other", "columns": [], "columnCount": 0,
                 "description": "Built-in VisionEval input definition.",
                 "hasExplanation": key in catalog.get("explanations", {}),
-                "source": "catalog", "installed": False, "columnsAvailable": False,
+                "source": "catalog", "availability": "catalog_only",
+                "installed": False, "columnsAvailable": False,
             }
         if library_id:
             root = self.library(library_id)
@@ -237,7 +238,8 @@ class ExploreService:
                     "id": f"input:{path.name}", "filename": path.name, "level": self.table_for(path.name) or "Other",
                     "columns": columns, "columnCount": len(columns), "description": self.summary(path.name, columns, catalog),
                     "hasExplanation": key in catalog.get("explanations", {}),
-                    "source": "installed", "installed": True, "columnsAvailable": True,
+                    "source": "installed", "availability": "installed",
+                    "installed": True, "columnsAvailable": True,
                 }
         files = sorted(by_name.values(), key=lambda item: str(item["filename"]).lower())
         return {"libraryId": library_id, "explanationPackage": catalog.get("package", {}), "files": files}
@@ -247,20 +249,25 @@ class ExploreService:
         safe_name = Path(filename).name
         if safe_name != filename or not safe_name.lower().endswith(".csv"):
             raise WorkspaceError("Invalid input filename")
-        columns: list[str] = []
-        if library_id:
-            path = self.workspace.within(self.library(library_id) / safe_name, self.workspace.input_library)
-            if not path.is_file():
-                raise WorkspaceError("Input file was not found")
-            columns = self.columns(path)
-        table = self.table_for(safe_name)
         catalog_names = {
             *(f"{key}.csv" for key in catalog.get("explanations", {})),
             *(Path(key).name for key in catalog.get("inputFields", {})),
             *(Path(key).name for key in self.spec_files),
         }
-        if not library_id and safe_name.lower() not in {name.lower() for name in catalog_names}:
+        known_catalog = safe_name.lower() in {name.lower() for name in catalog_names}
+        columns: list[str] = []
+        installed = False
+        if library_id:
+            library_root = self.library(library_id)
+            path = self.workspace.within(library_root / safe_name, self.workspace.input_library, must_exist=False)
+            installed = path.is_file()
+            if installed:
+                columns = self.columns(path)
+            elif not known_catalog:
+                raise WorkspaceError("This input file is not available in the selected Input Library.")
+        elif not known_catalog:
             raise WorkspaceError("Input definition was not found")
+        table = self.table_for(safe_name)
         fields = []
         for name in columns:
             item = self.input_metadata_for(safe_name, name, table, catalog)
@@ -285,8 +292,9 @@ class ExploreService:
         return {
             "id": f"input:{safe_name}", "libraryId": library_id, "filename": safe_name, "level": table or "Other",
             "description": self.summary(safe_name, columns, catalog), "fields": fields,
-            "source": "installed" if library_id else "catalog", "installed": bool(library_id),
-            "columnsAvailable": bool(library_id),
+            "source": "installed" if installed else "catalog",
+            "availability": "installed" if installed else "catalog_only",
+            "installed": installed, "columnsAvailable": installed,
             "explanationHtml": _strip_explanation_header(explanation.get("html", "")), "explanationDocument": explanation.get("document", ""),
             "templateId": template_id,
             "mapping": {"status": "available", "inputId": f"input:{safe_name}", "dependencyNodeId": f"file:{safe_name}"},

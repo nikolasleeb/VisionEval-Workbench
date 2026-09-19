@@ -29,7 +29,7 @@ All disagreements remain in [unit-conflicts.md](../unit-conflicts.md) and its JS
 
 ## Dependency extraction
 
-Each model template has a fingerprinted graph derived from `scripts/run_model.R` execution order plus VisionEval VE-40-RC6 Get/Set/input specifications. The closest valid preceding producer is connected to a later consumer by table and variable. Custom specifications are used when present; unsupported custom modules appear as unresolved nodes.
+Each model template has a fingerprinted graph derived from `scripts/run_model.R` execution order plus the bundled VisionEval VE-40-RC6 Get/Set/input specification catalog. The closest valid preceding producer is connected to a later consumer by table and variable. Custom specifications are used when present; unsupported custom modules appear as unresolved nodes.
 
 A datastore variable can be both an intermediary and stored output. Catalog-only variables absent from the selected execution path are excluded by default. The graph communicates declared possible effects—not guaranteed sensitivity or causality.
 

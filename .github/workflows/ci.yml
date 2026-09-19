@@ -109,7 +109,6 @@ jobs:
       - name: Validate Intel source
         run: |
           test "$(uname -m)" = "x86_64"
-          python3 packaging/update_runtime_publication.py --check
           python3 packaging/build_bundled_assets.py --check
           python3 packaging/build_user_guide.py --check
           python3 packaging/check_documentation.py

@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "resources/examples/planrva-mm"
-VERSION = "1.0.0"
+VERSION = "2.2"
 
 
 def sha256(path: Path) -> str:
@@ -27,14 +27,14 @@ def sha256(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--output", type=Path, default=ROOT / "dist/packages/planrva-mm.zip")
+    parser.add_argument("--output", type=Path, default=ROOT / f"dist/packages/planrva-{VERSION}.zip")
     args = parser.parse_args()
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
 
     source_manifest = json.loads((SOURCE / "manifest.json").read_text(encoding="utf-8"))
     with tempfile.TemporaryDirectory() as temporary:
-        package_root = Path(temporary) / f"planrva-mm-{VERSION}"
+        package_root = Path(temporary) / f"planrva-{VERSION}"
         data = package_root / "data"
         shutil.copytree(SOURCE / "input-library", data / "input-library")
         shutil.copytree(SOURCE / "model-template", data / "model-template")
@@ -51,12 +51,12 @@ def main() -> None:
             "schemaVersion": 1,
             "type": "model-bundle",
             "id": source_manifest["id"],
-            "name": "PlanRVA MM",
+            "name": "PlanRVA",
             "version": source_manifest["version"],
             "description": "PlanRVA multimodal VisionEval model template and matching InputLibrary.",
             "inputLibrary": {
                 "id": source_manifest["inputLibrary"]["id"],
-                "name": "PlanRVA MM",
+                "name": "PlanRVA",
                 "path": "data/input-library",
             },
             "modelTemplate": {

@@ -20,24 +20,24 @@ Choose **Skip for Now** if you want to explore inputs, create scenarios, or insp
 
 ## Install assets
 
-New workspaces intentionally contain no model or input data.
+New workspaces intentionally contain no model or input data. Install a verified model or regional package from **Settings → Assets → Install package…**. A package supplies a matched InputLibrary and runnable model template; Workbench selects the template automatically when you choose its InputLibrary.
 
 - An **InputLibrary** is a folder of scenario input CSV files.
 - A **model template** is a complete runnable VisionEval model folder.
 
-Open **Settings → Assets** or **Create → Setup** to import them. A runnable model must contain:
+Package authors should include a runnable model containing:
 
 - `visioneval.cnf`
 - `scripts/run_model.R`
 - `defs/`
 - `inputs/`
 
-Workbench copies imported assets into the workspace. It never edits the original folders.
+Workbench copies verified package assets into the workspace. It never edits the original package.
 
 ## Create your first project
 
 1. Open **Create → Setup**.
-2. Choose a project name, model template, and InputLibrary.
+2. Choose a project name and InputLibrary. Workbench uses that library's verified paired model template.
 3. Choose an untouched baseline or a compatible completed baseline.
 4. Create the project. Workbench opens the Editor.
 5. Select **New Scenario**, then **New File** to edit one input CSV or **Batch Change** to apply the same operation across several files.

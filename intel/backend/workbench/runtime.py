@@ -60,9 +60,18 @@ def docker_host_supported() -> bool:
 LOCAL_IMAGE = local_runtime_image()
 DEFAULT_ADAPTER = "native" if platform.system() == "Windows" else "docker"
 DEFAULT_IMAGE = os.environ.get("VISIONEVAL_IMAGE", LOCAL_IMAGE)
-CURRENT_RELEASE_TAG = "VE-40-RC6"
-CURRENT_RELEASE_COMMIT = "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2"
+CURRENT_RELEASE_TAG = "VE-40-RC7"
+CURRENT_RELEASE_COMMIT = "7852dc58fad460ff279f5eebf4dd55fe191470ad"
 COMPATIBILITY_PATCH = "2026-08-03-composite-household-id-alignment"
+SUPPORTED_RUNTIME_API = 1
+LEGACY_RUNTIME_PROFILE = {
+    "runtimeApi": 0, "visionEvalVersion": "VE-40-RC6", "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
+    "digest": PINNED_AMD64_RUNTIME_DIGEST, "reference": PINNED_AMD64_RUNTIME_REFERENCE,
+    "platform": "macos", "architecture": "x86_64",
+    "capabilities": ["doctor", "verify-upstream-release", "verify-alignment-patch", "run", "export"],
+    "verificationCommands": ["doctor", "verify-upstream-release", "verify-alignment-patch"],
+    "compatibilityPatch": COMPATIBILITY_PATCH,
+}
 RELEASES_API = "https://api.github.com/repos/VisionEval/VisionEval-4/releases?per_page=20"
 RELEASE_CHECK_TTL_SECONDS = 24 * 60 * 60
 TERMINAL_STATES = {"succeeded", "failed", "cancelled", "cleanup_failed"}
@@ -252,6 +261,10 @@ class RuntimeManager:
         self.workers: dict[str, threading.Thread] = {}
         self.cancelled: set[str] = set()
         self.queue_state_path = self.workspace.runs / "queue.json"
+        self.runtime_profile_path = self.workspace.exchange / "system" / "runtime-profile.json"
+        self.active_runtime_profile = dict(LEGACY_RUNTIME_PROFILE)
+        self.previous_runtime_profile: dict[str, Any] | None = None
+        self._load_runtime_profiles()
         self._prefer_installed_image()
         recovered = self._recover_jobs()
         with self.lock:
@@ -273,6 +286,43 @@ class RuntimeManager:
             "-v", f"{self.workspace.runs}:/workspace/runs",
             "-v", f"{self.workspace.exchange}:/workspace/exchange",
         ]
+
+    def _load_runtime_profiles(self) -> None:
+        state = read_json(self.runtime_profile_path, {})
+        has_saved_active = isinstance(state, dict) and isinstance(state.get("active"), dict)
+        for key, attribute in (("active", "active_runtime_profile"), ("previous", "previous_runtime_profile")):
+            value = state.get(key) if isinstance(state, dict) else None
+            if isinstance(value, dict):
+                try:
+                    setattr(self, attribute, self._validate_runtime_profile(value, allow_legacy=True))
+                except WorkspaceError:
+                    if key == "previous": self.previous_runtime_profile = None
+        if has_saved_active and not os.environ.get("VISIONEVAL_IMAGE"):
+            self.image = str(self.active_runtime_profile["reference"])
+            self.expected_digest = str(self.active_runtime_profile["digest"])
+        elif not os.environ.get("VISIONEVAL_EXPECTED_DIGEST"):
+            self.expected_digest = PINNED_AMD64_RUNTIME_DIGEST
+
+    def _save_runtime_profiles(self) -> None:
+        write_json(self.runtime_profile_path, {"schemaVersion": 1, "active": self.active_runtime_profile, "previous": self.previous_runtime_profile, "updatedAt": now_iso()})
+
+    def _validate_runtime_profile(self, profile: dict[str, Any], *, allow_legacy: bool = False) -> dict[str, Any]:
+        value = dict(profile); runtime_api = int(value.get("runtimeApi") or 0)
+        digest, reference = str(value.get("digest") or ""), str(value.get("reference") or "")
+        if runtime_api == 0 and allow_legacy and digest == PINNED_AMD64_RUNTIME_DIGEST:
+            return {**LEGACY_RUNTIME_PROFILE, **value}
+        required = {"doctor", "verify-upstream-release", "verify-household-id-alignment", "run", "export"}
+        if runtime_api != SUPPORTED_RUNTIME_API: raise WorkspaceError(f"Runtime API {runtime_api} is not supported by this Workbench release.")
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", digest) or reference != f"{RUNTIME_REPOSITORY}@{digest}": raise WorkspaceError("The runtime profile does not contain a trusted immutable image digest.")
+        if value.get("platform") != "macos" or value.get("architecture") != "x86_64": raise WorkspaceError("The runtime profile does not match this Intel Mac.")
+        if not re.fullmatch(r"VE-\d+-RC\d+", str(value.get("visionEvalVersion") or "")) or not re.fullmatch(r"[0-9a-f]{40}", str(value.get("visionEvalCommit") or "")): raise WorkspaceError("The runtime profile has invalid VisionEval provenance.")
+        if not required.issubset(set(map(str, value.get("capabilities") or []))): raise WorkspaceError("The runtime profile is missing required Workbench capabilities.")
+        value["verificationCommands"] = ["doctor", "verify-upstream-release", "verify-household-id-alignment"]
+        value["compatibilityPatch"] = "none"
+        return value
+
+    def runtime_profiles(self) -> dict[str, Any]:
+        return {"active": dict(self.active_runtime_profile), "previous": dict(self.previous_runtime_profile) if self.previous_runtime_profile else None}
 
     def _native_environment(self) -> dict[str, str]:
         if not self.native_runtime or not self.native_home:
@@ -757,6 +807,7 @@ class RuntimeManager:
             "memoryLimitGb": self.memory_limit_gb,
             "remoteStatus": "local" if self.image.startswith("local/") else "configured-remote",
             "profileEnabled": self.runtime_enabled,
+            "runtimeProfiles": self.runtime_profiles(),
             "error": "",
         }
         if not executable:
@@ -831,14 +882,12 @@ class RuntimeManager:
             raise WorkspaceError((result.stderr or result.stdout).strip() or "Docker image pull failed")
         return {"ok": True, "image": self.image, "digest": self.image_digest(), "output": result.stdout.strip()}
 
-    def install_or_update_runtime(self) -> dict[str, Any]:
-        """Install the immutable Intel runtime and verify it before use."""
+    def install_or_update_runtime(self, profile: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Atomically install and activate a manifest-approved Intel runtime."""
         if self.adapter == "native":
             raise WorkspaceError("Managed Docker runtime installation is available only on macOS.")
         if platform.system() != "Darwin" or self.container_platform != "linux/amd64" or not docker_host_supported():
             raise WorkspaceError("The managed runtime installer supports Intel macOS only.")
-        if PINNED_AMD64_RUNTIME_DIGEST == PENDING_AMD64_RUNTIME_DIGEST:
-            raise WorkspaceError("The Intel AMD64 runtime has not been published and pinned yet.")
         executable = find_docker_executable()
         if not executable:
             raise WorkspaceError("Docker CLI was not found. Install Docker Desktop, then choose Install runtime again.")
@@ -852,37 +901,49 @@ class RuntimeManager:
         )
         if info.returncode:
             raise WorkspaceError("Docker Desktop is not running. Start Docker Desktop, then choose Install runtime again.")
+        with self.lock:
+            if self._unfinished_jobs_locked():
+                raise WorkspaceError("Finish or stop all active and waiting runs before changing the runtime.")
+        target = self._validate_runtime_profile(profile, allow_legacy=True) if profile else dict(LEGACY_RUNTIME_PROFILE)
+        target_reference = str(target["reference"])
         pull = self.runner(
-            [executable, "pull", "--platform", "linux/amd64", PINNED_AMD64_RUNTIME_REFERENCE],
+            [executable, "pull", "--platform", "linux/amd64", target_reference],
             capture_output=True,
             text=True,
             env=environment,
         )
         if pull.returncode:
             raise WorkspaceError((pull.stderr or pull.stdout).strip() or "Runtime image download failed")
-        tag = self.runner(
-            [executable, "tag", PINNED_AMD64_RUNTIME_REFERENCE, AMD64_LOCAL_IMAGE],
-            capture_output=True,
-            text=True,
-            timeout=60,
-            env=environment,
-        )
-        if tag.returncode:
-            raise WorkspaceError((tag.stderr or tag.stdout).strip() or "Runtime image tagging failed")
-        self.image = AMD64_LOCAL_IMAGE
-        verification = self.verify_runtime()
-        if verification.get("digest") != PINNED_AMD64_RUNTIME_DIGEST:
-            with self.condition:
-                self.expected_digest = ""
-                self.runtime_enabled = False
-            raise WorkspaceError("The downloaded runtime digest does not match this Workbench release.")
+        old_active, old_previous = dict(self.active_runtime_profile), dict(self.previous_runtime_profile) if self.previous_runtime_profile else None
+        old_image, old_digest = self.image, self.expected_digest
+        self.image, self.expected_digest, self.active_runtime_profile = target_reference, str(target["digest"]), target
+        try: verification = self.verify_runtime()
+        except Exception:
+            self.image, self.expected_digest, self.active_runtime_profile, self.previous_runtime_profile = old_image, old_digest, old_active, old_previous
+            raise
+        if verification.get("digest") != target["digest"]:
+            self.image, self.expected_digest, self.active_runtime_profile, self.previous_runtime_profile = old_image, old_digest, old_active, old_previous
+            raise WorkspaceError("The downloaded runtime digest does not match the approved runtime profile.")
+        if old_active.get("digest") != target.get("digest"): self.previous_runtime_profile = old_active
+        self._save_runtime_profiles()
         return {
             **verification,
-            "source": PINNED_AMD64_RUNTIME_REFERENCE,
-            "sourceTag": PINNED_AMD64_RUNTIME_REFERENCE,
-            "localAlias": AMD64_LOCAL_IMAGE,
+            "source": target_reference,
+            "sourceTag": target_reference,
+            "activeProfile": target,
+            "previousProfile": self.previous_runtime_profile,
             "pullOutput": ((pull.stdout or "") + (pull.stderr or "")).strip(),
         }
+
+    def restore_previous_runtime(self) -> dict[str, Any]:
+        if self.adapter == "native" or not self.previous_runtime_profile: raise WorkspaceError("No previous verified Docker runtime is available.")
+        with self.lock:
+            if self._unfinished_jobs_locked(): raise WorkspaceError("Finish or stop all active and waiting runs before restoring the previous runtime.")
+        target, current = dict(self.previous_runtime_profile), dict(self.active_runtime_profile)
+        self.image, self.expected_digest, self.active_runtime_profile = str(target["reference"]), str(target["digest"]), target
+        verification = self.verify_runtime()
+        self.previous_runtime_profile = current; self._save_runtime_profiles()
+        return {**verification, "activeProfile": target, "previousProfile": current, "restored": True}
 
     def image_digest(self) -> str:
         if self.adapter == "native":
@@ -924,12 +985,16 @@ class RuntimeManager:
         revision = str(labels.get("com.visioneval.upstream.revision") or "")
         compatibility_patch = str(labels.get("com.visioneval.workbench.compatibility-patch") or "")
         architecture = str(labels.get("org.opencontainers.image.architecture") or "")
+        try: runtime_api = int(labels.get("com.visioneval.workbench.runtime-api") or 0)
+        except (TypeError, ValueError): runtime_api = -1
+        expected = self.active_runtime_profile
         return {
             "releaseTag": release_tag,
             "revision": revision,
             "compatibilityPatch": compatibility_patch,
             "architecture": architecture,
-            "matches": release_tag == CURRENT_RELEASE_TAG and revision == CURRENT_RELEASE_COMMIT and compatibility_patch == COMPATIBILITY_PATCH and architecture == "amd64",
+            "runtimeApi": runtime_api,
+            "matches": release_tag == expected.get("visionEvalVersion") and revision == expected.get("visionEvalCommit") and compatibility_patch == expected.get("compatibilityPatch", "none") and architecture == "amd64" and (runtime_api == expected.get("runtimeApi") or expected.get("runtimeApi") == 0),
         }
 
     def _container_resource_args(self) -> list[str]:
@@ -944,12 +1009,12 @@ class RuntimeManager:
         provenance = self.image_provenance()
         if not provenance["matches"]:
             raise WorkspaceError(
-                f"Runtime provenance mismatch. Expected {CURRENT_RELEASE_TAG} at {CURRENT_RELEASE_COMMIT}; "
+                f"Runtime provenance mismatch. Expected {self.active_runtime_profile.get('visionEvalVersion')} at {self.active_runtime_profile.get('visionEvalCommit')}; "
                 f"found {provenance['releaseTag'] or 'no release label'} at {provenance['revision'] or 'no revision label'} "
                 f"for {provenance['architecture'] or 'an unlabeled architecture'}."
             )
         outputs = {}
-        for command in ("doctor", "verify-upstream-release", "verify-alignment-patch"):
+        for command in self.active_runtime_profile.get("verificationCommands") or ("doctor", "verify-upstream-release"):
             result = self.runner(
                 [executable, "run", "--rm", "--platform", self.container_platform, *self._container_resource_args(), *self._workspace_mount_args(), self.image, command],
                 capture_output=True,
@@ -966,7 +1031,7 @@ class RuntimeManager:
             self.expected_digest = digest
             self.runtime_enabled = True
             self.condition.notify_all()
-        return {"ok": True, "adapter": self.adapter, "platform": platform.system().lower(), "architecture": platform.machine(), "image": self.image, "digest": digest, "runtimeVersion": "VisionEval VE-40-RC6 / R 4.5.1", "releaseTag": provenance["releaseTag"], "revision": provenance["revision"], "compatibilityPatch": provenance["compatibilityPatch"], "imageArchitecture": provenance["architecture"], "verifiedAt": now_iso(), "checks": outputs}
+        return {"ok": True, "adapter": self.adapter, "platform": platform.system().lower(), "architecture": platform.machine(), "image": self.image, "digest": digest, "runtimeVersion": f"VisionEval {provenance['releaseTag']} / R 4.5.1", "releaseTag": provenance["releaseTag"], "revision": provenance["revision"], "runtimeApi": provenance.get("runtimeApi", 0), "compatibilityPatch": provenance["compatibilityPatch"], "imageArchitecture": provenance["architecture"], "verifiedAt": now_iso(), "checks": outputs}
 
     def _verify_native_runtime(self) -> dict[str, Any]:
         outputs = {}

@@ -16,7 +16,7 @@ Use the PlanRVA multimodal model only as a controlled integration fixture. Unit 
 
 No public release is permitted until:
 
-1. The official upstream release and unofficial Workbench `DoPredictions` compatibility patch are both verified, clearly labelled, and exercised by the representative PlanRVA smoke model.
+1. The official upstream RC7 release, runtime API, immutable platform digest, and complete household-ID behavior are verified and exercised by the representative PlanRVA smoke model.
 2. The exact runtime artifact that passed verification is published and pinned by immutable digest.
 3. Outstanding unit conflicts are resolved or intentionally shipped with approved warnings.
 4. The AMD64 DMG is clearly labelled ad-hoc signed/not notarized and tested on a clean Intel Mac using the documented Gatekeeper workaround. Developer ID signing and notarization remain future release work.

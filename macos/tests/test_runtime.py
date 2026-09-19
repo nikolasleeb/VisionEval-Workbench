@@ -7,7 +7,7 @@ from pathlib import Path
 
 from unittest.mock import patch
 
-from backend.workbench.runtime import AMD64_LOCAL_IMAGE, ARM64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LOCAL_IMAGE, PINNED_ARM64_RUNTIME_DIGEST, PINNED_ARM64_RUNTIME_REFERENCE, RuntimeManager, discover_native_installation, docker_platform, find_native_runtime, local_runtime_image, read_renviron
+from backend.workbench.runtime import AMD64_LOCAL_IMAGE, ARM64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LEGACY_RUNTIME_PROFILE, LOCAL_IMAGE, PINNED_ARM64_RUNTIME_DIGEST, PINNED_ARM64_RUNTIME_REFERENCE, RuntimeManager, discover_native_installation, docker_platform, find_native_runtime, local_runtime_image, read_renviron
 from backend.workbench.workspace import Workspace, WorkspaceError, write_json
 
 
@@ -22,11 +22,12 @@ class FakeRunner:
             return subprocess.CompletedProcess(command, 1, "", "not found")
         if "image" in command and "inspect" in command and "--format" in command and "{{json .Config.Labels}}" in command:
             labels = {
-                "org.opencontainers.image.version": "1.0.0-ve-40-rc6-household-id-ordering-arm64",
+                "org.opencontainers.image.version": "1.1.0-ve-40-rc7-arm64",
                 "org.opencontainers.image.revision": "workbench-build-revision",
                 "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
                 "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,
-                "com.visioneval.workbench.compatibility-patch": COMPATIBILITY_PATCH,
+                "com.visioneval.workbench.runtime-api": "1",
+                "com.visioneval.workbench.compatibility-patch": "none",
             }
             return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
         return subprocess.CompletedProcess(command, 0, "{}", "")
@@ -53,7 +54,19 @@ class RuntimeTests(unittest.TestCase):
             "template": {"id": "template-test", "fingerprint": "fixture"},
             "inputLibrary": {"id": "library-test"},
             "variations": [{"id": "scenario", "name": "Scenario", "overlays": []}],
-            "runIds": [],
+            "runIds": [], "datastoreIds": [], "baseline": {"strategy": "fresh"},
+        })
+        _, project = workspace.project(project_id)
+        result_path = workspace.models / f"fixture-baseline-{project_id}" / "Datastore"
+        result_path.mkdir(parents=True)
+        (result_path / "DatastoreListing.Rda").write_text("baseline", encoding="utf-8")
+        input_fingerprint = workspace.scenario_input_fingerprint(project, "baseline")
+        runtime_digest = "sha256:fixture"
+        workspace.register_datastore({
+            "id": f"fixture-baseline-{project_id}", "path": str(result_path), "projectId": project_id,
+            "variationId": "", "role": "baseline", "verification": "verified",
+            "inputStateFingerprint": input_fingerprint, "runtimeImageDigest": runtime_digest,
+            "executionFingerprint": workspace.execution_fingerprint(input_fingerprint, runtime_digest),
         })
 
     def test_windows_forces_native_even_when_environment_requests_docker(self):
@@ -109,7 +122,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(result["veRuntime"], str(runtime_path.resolve()))
 
     def test_optional_memory_cap_uses_docker_argument_array(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"VISIONEVAL_MEMORY_GB": "6"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"VISIONEVAL_MEMORY_GB": "6"}), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             runtime = RuntimeManager(Workspace(directory), runner=FakeRunner())
             self.assertEqual(runtime._container_resource_args(), ["--memory", "6g"])
 
@@ -118,12 +131,12 @@ class RuntimeTests(unittest.TestCase):
             installed = command[-1] == LOCAL_IMAGE
             return subprocess.CompletedProcess(command, 0 if installed else 1, "{}" if installed else "", "")
 
-        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             runtime = RuntimeManager(Workspace(directory), runner=image_runner)
             self.assertEqual(runtime.image, LOCAL_IMAGE)
 
     def test_status_uses_argument_arrays(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
             runner = FakeRunner()
             runtime = RuntimeManager(workspace, runner=runner)
@@ -131,19 +144,26 @@ class RuntimeTests(unittest.TestCase):
             if result["installed"]:
                 self.assertTrue(all(isinstance(call, list) for call in runner.calls))
 
-    def test_verification_uses_rc6_and_alignment_checks(self):
+    def test_verification_uses_profile_specific_alignment_checks(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None), patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"), patch("backend.workbench.runtime.platform.machine", return_value="AMD64"):
             runner = FakeRunner()
             runtime = RuntimeManager(Workspace(directory), runner=runner)
+            runtime.active_runtime_profile = {
+                "runtimeApi": 1, "visionEvalVersion": CURRENT_RELEASE_TAG, "visionEvalCommit": CURRENT_RELEASE_COMMIT,
+                "digest": PINNED_ARM64_RUNTIME_DIGEST, "reference": PINNED_ARM64_RUNTIME_REFERENCE,
+                "platform": "macos", "architecture": "arm64", "compatibilityPatch": "none",
+                "capabilities": ["doctor", "verify-upstream-release", "verify-household-id-alignment", "run", "export"],
+                "verificationCommands": ["doctor", "verify-upstream-release", "verify-household-id-alignment"],
+            }
             result = runtime.verify_runtime()
             docker_runs = [call for call in runner.calls if "run" in call]
             self.assertTrue(any(call[-1] == "doctor" for call in docker_runs))
             self.assertTrue(any(call[-1] == "verify-upstream-release" for call in docker_runs))
-            self.assertTrue(any(call[-1] == "verify-alignment-patch" for call in docker_runs))
+            self.assertTrue(any(call[-1] == "verify-household-id-alignment" for call in docker_runs))
             self.assertTrue(all(call[call.index("--platform") + 1] == "linux/amd64" for call in docker_runs))
-            self.assertEqual(result["runtimeVersion"], "VisionEval VE-40-RC6 / R 4.5.1")
+            self.assertEqual(result["runtimeVersion"], "VisionEval VE-40-RC7 / R 4.5.1")
             self.assertEqual(result["revision"], CURRENT_RELEASE_COMMIT)
-            self.assertEqual(result["compatibilityPatch"], COMPATIBILITY_PATCH)
+            self.assertEqual(result["compatibilityPatch"], "none")
             self.assertEqual(runtime.expected_digest, result["digest"])
 
     def test_verification_rejects_image_with_wrong_release_hash(self):
@@ -188,9 +208,10 @@ class RuntimeTests(unittest.TestCase):
                 self.calls.append(command)
                 if "image" in command and "inspect" in command and "{{json .Config.Labels}}" in command:
                     labels = {
-                        "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
-                        "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,
+                        "com.visioneval.upstream.release": LEGACY_RUNTIME_PROFILE["visionEvalVersion"],
+                        "com.visioneval.upstream.revision": LEGACY_RUNTIME_PROFILE["visionEvalCommit"],
                         "com.visioneval.workbench.compatibility-patch": COMPATIBILITY_PATCH,
+                        "com.visioneval.workbench.runtime-api": "0",
                     }
                     return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
                 if "image" in command and "inspect" in command and "RepoDigests" in " ".join(command):
@@ -206,9 +227,7 @@ class RuntimeTests(unittest.TestCase):
             runtime = RuntimeManager(Workspace(directory), runner=runner)
             result = runtime.install_or_update_runtime()
             self.assertIn(["/docker", "pull", "--platform", "linux/arm64", PINNED_ARM64_RUNTIME_REFERENCE], runner.calls)
-            self.assertIn(["/docker", "tag", PINNED_ARM64_RUNTIME_REFERENCE, ARM64_LOCAL_IMAGE], runner.calls)
             self.assertEqual(result["digest"], PINNED_ARM64_RUNTIME_DIGEST)
-            self.assertEqual(result["localAlias"], ARM64_LOCAL_IMAGE)
             self.assertEqual(result["source"], PINNED_ARM64_RUNTIME_REFERENCE)
 
     def test_managed_runtime_install_is_rejected_outside_apple_silicon_macos(self):
@@ -225,7 +244,7 @@ class RuntimeTests(unittest.TestCase):
             runtime.release_check_supported = True
             runtime.release_check_enabled = True
             runtime._fetch_public_releases = lambda: [
-                {"tag_name": "VE-40-RC7", "name": "RC7", "published_at": "2026-08-01T00:00:00Z", "html_url": "https://example.test/rc7"},
+                {"tag_name": "VE-40-RC8", "name": "RC8", "published_at": "2026-08-01T00:00:00Z", "html_url": "https://example.test/rc8"},
                 {"tag_name": CURRENT_RELEASE_TAG},
             ]
             runtime._refresh_release_status()
@@ -376,6 +395,17 @@ class RuntimeTests(unittest.TestCase):
             workspace = Workspace(directory)
             self.write_runnable_project(workspace, "project-one", "Project one")
             runtime = RuntimeManager(workspace, runner=FakeRunner())
+            _, project = workspace.project("project-one")
+            prior_result = workspace.models / "prior-scenario-result" / "Datastore"
+            prior_result.mkdir(parents=True)
+            (prior_result / "DatastoreListing.Rda").write_text("prior", encoding="utf-8")
+            input_fingerprint = workspace.scenario_input_fingerprint(project, "scenario")
+            workspace.register_datastore({
+                "id": "prior-scenario-result", "path": str(prior_result), "projectId": "project-one",
+                "variationId": "scenario", "role": "scenario", "verification": "verified",
+                "inputStateFingerprint": input_fingerprint, "runtimeImageDigest": "sha256:fixture",
+                "executionFingerprint": workspace.execution_fingerprint(input_fingerprint, "sha256:fixture"),
+            })
             run_dir = workspace.runs / "failed-parallel"
             run_dir.mkdir()
             write_json(run_dir / "job.json", {
@@ -566,11 +596,39 @@ class RuntimeTests(unittest.TestCase):
                 "runIds": [],
             })
             runtime = RuntimeManager(workspace, runner=FakeRunner())
-            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
+            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value="sha256:fixture"), patch.object(workspace, "current_result", side_effect=lambda _project, variation_id, _digest: {"id": "baseline"} if variation_id == "baseline" else None):
                 batch = runtime.create_batch(project_id, ["variation-two", "variation-four"], False, "parallel")
 
             self.assertEqual([job["variationId"] for job in batch["jobs"]], ["variation-two", "variation-four"])
             self.assertEqual(len(runtime.queue()["jobs"]), 2)
+
+    def test_create_batch_reuses_exact_results_unless_force_rerun_is_requested(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            project_id = "project-reuse"
+            self.write_runnable_project(workspace, project_id, "Reuse test")
+            _, project = workspace.project(project_id)
+            runtime_digest = "sha256:fixture"
+            for variation_id, role in (("baseline", "baseline"), ("scenario", "scenario")):
+                result_path = workspace.models / f"result-{variation_id}" / "Datastore"
+                result_path.mkdir(parents=True)
+                (result_path / "DatastoreListing.Rda").write_text("result", encoding="utf-8")
+                input_fingerprint = workspace.scenario_input_fingerprint(project, variation_id)
+                workspace.register_datastore({
+                    "id": f"datastore-{variation_id}", "path": str(result_path), "projectId": project_id,
+                    "variationId": "" if role == "baseline" else variation_id, "role": role,
+                    "verification": "verified", "inputStateFingerprint": input_fingerprint,
+                    "runtimeImageDigest": runtime_digest,
+                    "executionFingerprint": workspace.execution_fingerprint(input_fingerprint, runtime_digest),
+                })
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value=runtime_digest):
+                reused = runtime.create_batch(project_id, ["scenario"], True, "parallel")
+                forced = runtime.create_batch(project_id, ["scenario"], True, "parallel", ["scenario"])
+            self.assertEqual(reused["jobs"], [])
+            self.assertEqual({item["variationId"] for item in reused["reusedResults"]}, {"baseline", "scenario"})
+            self.assertEqual([item["variationId"] for item in forced["jobs"]], ["scenario"])
+            self.assertEqual([item["variationId"] for item in forced["reusedResults"]], ["baseline"])
 
     def test_remove_history_deletes_record_and_log_but_preserves_completed_results(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
@@ -648,6 +706,46 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(complete_datastore.exists())
             self.assertIn("datastore-complete", {item["id"] for item in workspace.catalog()["datastores"]})
 
+    def test_stop_all_removes_queue_before_stopping_active_runs(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            active_run = workspace.runs / "run-active"; active_run.mkdir()
+            waiting_run = workspace.runs / "run-waiting"; waiting_run.mkdir()
+            waiting_model = workspace.models / "run-waiting"; waiting_model.mkdir(parents=True)
+            write_json(active_run / "job.json", {
+                "id": "run-active", "state": "running", "containerName": "",
+                "modelPath": str(workspace.models / "run-active"), "logPath": str(active_run / "run.log"),
+            })
+            write_json(waiting_run / "job.json", {
+                "id": "run-waiting", "state": "waiting", "queuePosition": 1,
+                "modelPath": str(waiting_model), "logPath": str(waiting_run / "run.log"),
+            })
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            job = json.loads((active_run / "job.json").read_text()); job["state"] = "running"; write_json(active_run / "job.json", job)
+            original_cancel = runtime.cancel
+            queue_was_empty = []
+
+            def observed_cancel(job_id):
+                queue_was_empty.append(not waiting_run.exists() and not runtime.queue()["jobs"])
+                return original_cancel(job_id)
+
+            with patch.object(runtime, "cancel", side_effect=observed_cancel):
+                result = runtime.stop_all()
+
+            self.assertEqual(result["removed"], 1)
+            self.assertEqual(result["stopped"], 1)
+            self.assertEqual(queue_was_empty, [True])
+
+    def test_stop_all_barrier_rejects_new_batches(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            self.write_runnable_project(workspace, "project-one", "Project one")
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            runtime.stop_all_in_progress = True
+            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
+                with self.assertRaisesRegex(WorkspaceError, "Stop All"):
+                    runtime.create_batch("project-one", ["scenario"], False, "parallel")
+
     def test_shutdown_requires_confirmation_for_active_jobs(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
@@ -670,6 +768,43 @@ class RuntimeTests(unittest.TestCase):
             runtime = RuntimeManager(Workspace(directory), runner=runner)
             self.assertTrue(runtime._container_owned({"id":"run-owned","containerName":"ve-run-owned"}))
             self.assertFalse(runtime._container_owned({"id":"run-other","containerName":"ve-run-other"}))
+
+    def test_confirmed_docker_oom_has_human_readable_failure_metadata(self):
+        failure = RuntimeManager._execution_failure(137, {"OOMKilled": True, "ExitCode": 137})
+        fields = RuntimeManager._failure_fields(failure)
+        self.assertEqual(fields["failureKind"], "memory")
+        self.assertEqual(fields["exitCode"], 137)
+        self.assertTrue(fields["oomKilled"])
+        self.assertIn("ran out of available memory", fields["message"])
+        self.assertNotIn("exited with code", fields["message"])
+        self.assertIn("exited with code 137", fields["technicalDetail"])
+
+    def test_exit_137_without_docker_oom_is_marked_as_suspected_memory_pressure(self):
+        failure = RuntimeManager._execution_failure(137, {"OOMKilled": False, "ExitCode": 137})
+        fields = RuntimeManager._failure_fields(failure)
+        self.assertEqual(fields["failureKind"], "memory_suspected")
+        self.assertFalse(fields["oomKilled"])
+        self.assertIn("most common cause", fields["message"])
+
+    def test_owned_container_state_is_inspected_then_removed(self):
+        calls = []
+
+        def runner(command, **kwargs):
+            calls.append(command)
+            if "inspect" in command and "{{json .Config.Labels}}" in command:
+                return subprocess.CompletedProcess(command, 0, json.dumps({
+                    "com.visioneval.workbench": "true", "com.visioneval.job": "run-owned",
+                }), "")
+            if "inspect" in command and "{{json .State}}" in command:
+                return subprocess.CompletedProcess(command, 0, json.dumps({"OOMKilled": True, "ExitCode": 137}), "")
+            return subprocess.CompletedProcess(command, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None), patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"):
+            runtime = RuntimeManager(Workspace(directory), runner=runner)
+            job = {"id": "run-owned", "containerName": "ve-run-owned"}
+            self.assertTrue(runtime._container_state(job)["OOMKilled"])
+            self.assertTrue(runtime._remove_owned_container(job))
+        self.assertIn(["/docker", "rm", "-f", "ve-run-owned"], calls)
 
 
 if __name__ == "__main__":

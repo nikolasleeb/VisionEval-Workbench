@@ -1,29 +1,37 @@
-name: Publish ARM64 runtime 1.0.0
+name: Publish VisionEval RC7 runtime
 
 on:
   workflow_dispatch:
     inputs:
       approved_publication:
-        description: Publish the verified unofficial ARM64 runtime
+        description: Publish the verified VE-40-RC7 multi-architecture runtime
+        required: true
+        type: boolean
+        default: false
+      promote_latest:
+        description: Promote RC7 to latest after both Workbench 1.1.0 DMGs are published
         required: true
         type: boolean
         default: false
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 concurrency:
-  group: runtime-publication-1.0.0-arm64
+  group: runtime-publication-ve-40-rc7
   cancel-in-progress: false
 
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/visioneval-workbench-runtime
+  VISIONEVAL_REF: VE-40-RC7
+  VISIONEVAL_COMMIT: 7852dc58fad460ff279f5eebf4dd55fe191470ad
+  WORKBENCH_VERSION: 1.1.0
+
 jobs:
-  build-test-publish:
+  application-contracts:
     if: inputs.approved_publication == true
-    runs-on: ubuntu-24.04-arm
-    defaults:
-      run:
-        working-directory: macos
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,23 +40,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-      - name: Test source and bundled example
+      - name: Install backend test dependencies
         run: |
-          python3 -m pip install -r packaging/requirements-backend.txt
-          python3 packaging/build_bundled_assets.py --check
-          python3 packaging/build_user_guide.py --check
-          python3 packaging/check_documentation.py
-          python3 -m unittest discover -s tests
-          node --check public/app.js
+          python3 -m pip install -r macos/packaging/requirements-backend.txt
+          python3 -m pip install -r intel/packaging/requirements-backend.txt
+      - name: Validate Workbench 1.1 runtime contracts
+        run: |
+          python3 -m unittest discover -s macos/tests
+          python3 -m unittest discover -s intel/tests
+          node --check macos/public/app.js
+          node --check intel/public/app.js
+          python3 macos/packaging/check_documentation.py
+          python3 intel/packaging/check_documentation.py
+
+  arm64:
+    if: inputs.approved_publication == true
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
-      - name: Resolve publication names
-        id: names
-        shell: bash
-        working-directory: .
-        run: |
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/visioneval-workbench-runtime" >> "$GITHUB_OUTPUT"
-          echo "immutable=1.0.0-arm64-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-      - name: Build the candidate once
+      - name: Build ARM64 candidate
         uses: docker/build-push-action@v6
         with:
           context: macos/runtime
@@ -56,49 +68,187 @@ jobs:
           platforms: linux/arm64
           load: true
           push: false
-          tags: visioneval-workbench-runtime:candidate
+          tags: visioneval-workbench-runtime:rc7-arm64-candidate
           build-args: |
-            VISIONEVAL_REF=VE-40-RC6
-            VISIONEVAL_COMMIT=f7ef3389b5626daeba6c86eeda9d172a0f8cccc2
-            WORKBENCH_VERSION=1.0.0
+            VISIONEVAL_REF=${{ env.VISIONEVAL_REF }}
+            VISIONEVAL_COMMIT=${{ env.VISIONEVAL_COMMIT }}
+            WORKBENCH_VERSION=${{ env.WORKBENCH_VERSION }}
             BUILD_REVISION=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-      - name: Verify runtime and provenance
-        working-directory: .
+          cache-from: type=gha,scope=rc7-arm64
+          cache-to: type=gha,mode=max,scope=rc7-arm64
+      - name: Verify ARM64 runtime and PlanRVA
         run: |
-          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:candidate doctor
-          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:candidate verify-upstream-release
-          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:candidate verify-alignment-patch
-          test "$(docker image inspect visioneval-workbench-runtime:candidate --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" = "$GITHUB_SHA"
-      - name: Run PlanRVA smoke model
-        run: |
+          test "$(docker image inspect visioneval-workbench-runtime:rc7-arm64-candidate --format '{{ index .Config.Labels "org.opencontainers.image.architecture" }}')" = "arm64"
+          test "$(docker image inspect visioneval-workbench-runtime:rc7-arm64-candidate --format '{{ index .Config.Labels "com.visioneval.workbench.runtime-api" }}')" = "1"
+          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:rc7-arm64-candidate doctor
+          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:rc7-arm64-candidate verify-upstream-release
+          docker run --rm --platform linux/arm64 visioneval-workbench-runtime:rc7-arm64-candidate verify-household-id-alignment
           mkdir -p /tmp/ve-workspace/models
-          cp -R resources/examples/planrva-mm/model-template /tmp/ve-workspace/models/planrva-smoke
-          docker run --rm --platform linux/arm64 -v /tmp/ve-workspace:/workspace visioneval-workbench-runtime:candidate run planrva-smoke reset
+          cp -R macos/resources/examples/planrva-mm/model-template /tmp/ve-workspace/models/planrva-smoke
+          docker run --rm --platform linux/arm64 -v /tmp/ve-workspace:/workspace visioneval-workbench-runtime:rc7-arm64-candidate run planrva-smoke reset
           test -d /tmp/ve-workspace/models/planrva-smoke/results/Datastore
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Push verified image
-        id: publish
-        working-directory: .
-        env:
-          IMAGE: ${{ steps.names.outputs.image }}
-          IMMUTABLE_TAG: ${{ steps.names.outputs.immutable }}
+      - name: Push immutable ARM64 candidate
         run: |
-          for tag in 1.0.0-arm64 "$IMMUTABLE_TAG"; do
-            docker tag visioneval-workbench-runtime:candidate "$IMAGE:$tag"
-            docker push "$IMAGE:$tag"
-          done
-          DIGEST_REF="$(docker image inspect "$IMAGE:1.0.0-arm64" --format '{{ index .RepoDigests 0 }}')"
-          test -n "$DIGEST_REF"
-          echo "digest_ref=$DIGEST_REF" >> "$GITHUB_OUTPUT"
-          printf '{\n  "image": "%s",\n  "tag": "1.0.0-arm64",\n  "digestReference": "%s",\n  "architecture": "linux/arm64",\n  "revision": "%s"\n}\n' "$IMAGE" "$DIGEST_REF" "$GITHUB_SHA" > runtime-publication.json
+          TAG="VE-40-RC7-arm64-${GITHUB_SHA::12}"
+          docker tag visioneval-workbench-runtime:rc7-arm64-candidate "$IMAGE:$TAG"
+          docker push "$IMAGE:$TAG"
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          DOWNLOAD_BYTES="$(docker buildx imagetools inspect "$IMAGE:$TAG" --raw | jq '[.layers[].size] | add // 0')"
+          STORAGE_BYTES="$(docker image inspect visioneval-workbench-runtime:rc7-arm64-candidate --format '{{.Size}}')"
+          test -n "$DIGEST"
+          printf '{"architecture":"arm64","platform":"macos","digest":"%s","reference":"%s@%s","immutableTag":"%s","downloadSizeBytes":%s,"storageSizeBytes":%s}\n' "$DIGEST" "$IMAGE" "$DIGEST" "$TAG" "$DOWNLOAD_BYTES" "$STORAGE_BYTES" > runtime-arm64.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-arm64
+          path: runtime-arm64.json
+          if-no-files-found: error
+
+  amd64:
+    if: inputs.approved_publication == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build AMD64 candidate
+        uses: docker/build-push-action@v6
+        with:
+          context: intel/runtime
+          file: intel/runtime/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: visioneval-workbench-runtime:rc7-amd64-candidate
+          build-args: |
+            VISIONEVAL_REF=${{ env.VISIONEVAL_REF }}
+            VISIONEVAL_COMMIT=${{ env.VISIONEVAL_COMMIT }}
+            WORKBENCH_VERSION=${{ env.WORKBENCH_VERSION }}
+            BUILD_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=rc7-amd64
+          cache-to: type=gha,mode=max,scope=rc7-amd64
+      - name: Verify AMD64 runtime and PlanRVA
+        run: |
+          test "$(docker image inspect visioneval-workbench-runtime:rc7-amd64-candidate --format '{{ index .Config.Labels "org.opencontainers.image.architecture" }}')" = "amd64"
+          test "$(docker image inspect visioneval-workbench-runtime:rc7-amd64-candidate --format '{{ index .Config.Labels "com.visioneval.workbench.runtime-api" }}')" = "1"
+          docker run --rm --platform linux/amd64 visioneval-workbench-runtime:rc7-amd64-candidate doctor
+          docker run --rm --platform linux/amd64 visioneval-workbench-runtime:rc7-amd64-candidate verify-upstream-release
+          docker run --rm --platform linux/amd64 visioneval-workbench-runtime:rc7-amd64-candidate verify-household-id-alignment
+          mkdir -p /tmp/ve-workspace/models
+          cp -R intel/resources/examples/planrva-mm/model-template /tmp/ve-workspace/models/planrva-smoke
+          docker run --rm --platform linux/amd64 -v /tmp/ve-workspace:/workspace visioneval-workbench-runtime:rc7-amd64-candidate run planrva-smoke reset
+          test -d /tmp/ve-workspace/models/planrva-smoke/results/Datastore
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push immutable AMD64 candidate
+        run: |
+          TAG="VE-40-RC7-amd64-${GITHUB_SHA::12}"
+          docker tag visioneval-workbench-runtime:rc7-amd64-candidate "$IMAGE:$TAG"
+          docker push "$IMAGE:$TAG"
+          DIGEST="$(docker buildx imagetools inspect "$IMAGE:$TAG" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          DOWNLOAD_BYTES="$(docker buildx imagetools inspect "$IMAGE:$TAG" --raw | jq '[.layers[].size] | add // 0')"
+          STORAGE_BYTES="$(docker image inspect visioneval-workbench-runtime:rc7-amd64-candidate --format '{{.Size}}')"
+          test -n "$DIGEST"
+          printf '{"architecture":"x86_64","platform":"macos","digest":"%s","reference":"%s@%s","immutableTag":"%s","downloadSizeBytes":%s,"storageSizeBytes":%s}\n' "$DIGEST" "$IMAGE" "$DIGEST" "$TAG" "$DOWNLOAD_BYTES" "$STORAGE_BYTES" > runtime-amd64.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-amd64
+          path: runtime-amd64.json
+          if-no-files-found: error
+
+  publish:
+    if: inputs.approved_publication == true
+    needs: [application-contracts, arm64, amd64]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: runtime-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Publish verified multi-platform tags
+        run: |
+          ARM_DIGEST="$(jq -r .digest runtime-arm64.json)"
+          AMD_DIGEST="$(jq -r .digest runtime-amd64.json)"
+          docker buildx imagetools create \
+            --tag "$IMAGE:VE-40-RC7" \
+            "$IMAGE@$ARM_DIGEST" "$IMAGE@$AMD_DIGEST"
+          docker buildx imagetools inspect "$IMAGE:VE-40-RC7"
+      - name: Build runtime index
+        run: |
+          jq -s '{
+            schemaVersion: 1,
+            preferredVisionEvalVersion: "VE-40-RC7",
+            visionEvalCommit: "7852dc58fad460ff279f5eebf4dd55fe191470ad",
+            releaseUrl: "https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/runtime-VE-40-RC7",
+            upstreamReleaseUrl: "https://github.com/VisionEval/VisionEval-4/releases/tag/VE-40-RC7",
+            publishedAt: (now | todateiso8601),
+            runtimeApi: 1,
+            minimumWorkbenchVersion: "1.1.0",
+            capabilities: ["doctor","verify-upstream-release","verify-household-id-alignment","run","export"],
+            images: .
+          }' runtime-arm64.json runtime-amd64.json > runtime-index.json
+          jq empty runtime-index.json
+      - name: Publish runtime index release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view runtime-VE-40-RC7 >/dev/null 2>&1; then
+            gh release upload runtime-VE-40-RC7 runtime-index.json --clobber
+          else
+            gh release create runtime-VE-40-RC7 runtime-index.json \
+              --title "VisionEval Workbench Runtime VE-40-RC7" \
+              --notes "Verified multi-architecture Workbench runtime built from official VisionEval VE-40-RC7." \
+              --latest=false
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: runtime-publication
-          path: macos/runtime-publication.json
+          path: |
+            runtime-index.json
+            runtime-arm64.json
+            runtime-amd64.json
           if-no-files-found: error
+
+  promote-latest:
+    if: inputs.approved_publication == true && inputs.promote_latest == true
+    needs: publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: runtime-publication
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Confirm both Workbench 1.1.0 Mac applications are published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view v1.1.0 --repo "$GITHUB_REPOSITORY" --json assets \
+            --jq '.assets[].name' > release-assets.txt
+          grep -Fx 'VisionEval-Workbench-v1.1.0-macos-arm64.dmg' release-assets.txt
+          grep -Fx 'VisionEval-Workbench-v1.1.0-macos-x64.dmg' release-assets.txt
+          grep -Fx 'update-manifest.json' release-assets.txt
+      - name: Promote the tested multi-platform runtime
+        run: |
+          ARM_DIGEST="$(jq -r '.images[] | select(.architecture == "arm64") | .digest' runtime-index.json)"
+          AMD_DIGEST="$(jq -r '.images[] | select(.architecture == "x86_64") | .digest' runtime-index.json)"
+          docker buildx imagetools create --tag "$IMAGE:latest" "$IMAGE@$ARM_DIGEST" "$IMAGE@$AMD_DIGEST"
+          docker buildx imagetools inspect "$IMAGE:latest"

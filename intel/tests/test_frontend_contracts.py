@@ -631,19 +631,19 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn(".download_dir()", rust)
         self.assertNotIn("start_docker_desktop_if_requested", rust)
 
-    def test_runtime_is_pinned_to_official_rc6_with_unofficial_workbench_patch(self):
+    def test_runtime_is_pinned_to_official_rc7_with_runtime_api_contract(self):
         dockerfile = (ROOT / "runtime" / "Dockerfile").read_text(encoding="utf-8")
         cli = (ROOT / "runtime" / "scripts" / "ve-cli.R").read_text(encoding="utf-8")
-        self.assertIn("VISIONEVAL_REF=VE-40-RC6", dockerfile)
-        self.assertIn("f7ef3389b5626daeba6c86eeda9d172a0f8cccc2", dockerfile)
-        self.assertIn('com.visioneval.upstream.release="VE-40-RC6"', dockerfile)
-        self.assertIn('com.visioneval.workbench.compatibility-patch-status="unofficial"', dockerfile)
-        self.assertIn("apply-household-id-prediction-ordering-patch.R", dockerfile)
-        self.assertIn("household-ID prediction-ordering compatibility patch", dockerfile)
+        self.assertIn("VISIONEVAL_REF=VE-40-RC7", dockerfile)
+        self.assertIn("7852dc58fad460ff279f5eebf4dd55fe191470ad", dockerfile)
+        self.assertIn('com.visioneval.upstream.release="VE-40-RC7"', dockerfile)
+        self.assertIn('com.visioneval.workbench.runtime-api="1"', dockerfile)
+        self.assertIn('com.visioneval.workbench.compatibility-patch="none"', dockerfile)
+        self.assertNotIn("apply-household-id-prediction-ordering-patch.R", dockerfile)
         self.assertNotIn("PlanRVA", dockerfile)
         self.assertNotIn("PlanRVA", cli)
         self.assertIn('verify-upstream-release', cli)
-        self.assertIn('verify-alignment-patch', cli)
+        self.assertIn('verify-household-id-alignment', cli)
         self.assertFalse((ROOT / "runtime" / "patches" / "AlignPredictions.R").exists())
         self.assertFalse((ROOT / "runtime" / "scripts" / "apply-household-alignment-patch.R").exists())
 

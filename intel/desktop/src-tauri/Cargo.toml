@@ -1,6 +1,6 @@
 [package]
 name = "visioneval-workbench"
-version = "1.0.0"
+version = "1.1.0"
 description = "Unified VisionEval scenario editor, runtime, and comparison desktop app"
 edition = "2021"
 
