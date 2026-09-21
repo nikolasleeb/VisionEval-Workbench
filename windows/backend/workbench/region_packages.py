@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import tempfile
 import zipfile
 from pathlib import Path, PurePosixPath
@@ -15,6 +16,26 @@ from .workspace import Workspace, WorkspaceError, fingerprint_tree, now_iso, rea
 
 
 SAFE_PACKAGE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
+
+
+def package_root(source: str | Path) -> Path:
+    """Resolve an unpacked package root without accepting ambiguous trees."""
+    root = Path(source).expanduser().resolve()
+    if not root.is_dir():
+        raise WorkspaceError("Choose a Workbench package folder or .zip file")
+    manifests = [item for item in root.rglob("workbench-package.json") if item.is_file()]
+    if len(manifests) > 1:
+        raise WorkspaceError("Package folder must contain exactly one workbench-package.json; multiple files were found")
+    if not manifests:
+        raise WorkspaceError("Package folder must contain exactly one workbench-package.json")
+    manifest = manifests[0]
+    try:
+        relative = manifest.relative_to(root)
+    except ValueError as exc:
+        raise WorkspaceError("Package folder contains an unsafe manifest path") from exc
+    if manifest.is_symlink() or len(relative.parts) > 2:
+        raise WorkspaceError("Package manifest must be at the selected folder root or in one wrapper folder")
+    return manifest.parent
 
 
 def file_sha256(path: Path) -> str:
@@ -37,43 +58,29 @@ def safe_package_path(root: Path, value: str) -> Path:
     return path
 
 
-def _is_unsafe_link(path: Path) -> bool:
-    """Reject links and Windows junctions before package content is trusted."""
-    if path.is_symlink():
-        return True
-    isjunction = getattr(os.path, "isjunction", None)
-    return bool(isjunction and isjunction(path))
-
-
-def package_root(source_root: Path) -> Path:
-    """Accept a manifest at the root or in exactly one wrapper directory."""
-    root = source_root.resolve()
-    if _is_unsafe_link(root):
-        raise WorkspaceError("Package folder cannot be a symbolic link or junction")
-    manifests: list[Path] = []
-    for current, directory_names, file_names in os.walk(root, followlinks=False):
-        current_path = Path(current)
-        safe_directories: list[str] = []
-        for directory_name in directory_names:
-            directory = current_path / directory_name
-            if _is_unsafe_link(directory):
-                raise WorkspaceError("Package contains a symbolic link or junction")
-            safe_directories.append(directory_name)
-        directory_names[:] = safe_directories
-        for file_name in file_names:
-            item = current_path / file_name
-            if _is_unsafe_link(item):
-                raise WorkspaceError("Package contains a symbolic link or junction")
-            if file_name == "workbench-package.json":
-                manifests.append(item)
-    if len(manifests) > 1:
-        raise WorkspaceError("Package contains multiple workbench-package.json manifests")
-    if not manifests:
-        raise WorkspaceError("Package must contain workbench-package.json at its root or in one wrapper directory")
-    relative_manifest = manifests[0].relative_to(root)
-    if len(relative_manifest.parts) not in (1, 2):
-        raise WorkspaceError("Package manifest must be at the package root or in one wrapper directory")
-    return manifests[0].parent
+def validated_zip_manifest(archive: zipfile.ZipFile) -> str:
+    """Validate every member before reading or extracting a package archive."""
+    manifests: list[str] = []
+    for info in archive.infolist():
+        name = info.filename
+        pure = PurePosixPath(name)
+        mode = (info.external_attr >> 16) & 0xFFFF
+        if (
+            not name
+            or "\\" in name
+            or pure.is_absolute()
+            or ".." in pure.parts
+            or (mode and stat.S_ISLNK(mode))
+        ):
+            detail = "symbolic link" if mode and stat.S_ISLNK(mode) else "unsafe file path"
+            raise WorkspaceError(f"Package zip contains a {detail}")
+        if pure.name == "workbench-package.json":
+            manifests.append(name)
+    if len(manifests) != 1:
+        raise WorkspaceError("Package zip must contain one workbench-package.json")
+    if len(PurePosixPath(manifests[0]).parts) > 2:
+        raise WorkspaceError("Package manifest must be at the zip root or in one wrapper folder")
+    return manifests[0]
 
 
 def package_manifest_type(source: str | Path) -> str:
@@ -82,21 +89,8 @@ def package_manifest_type(source: str | Path) -> str:
         return str(read_json(package_root(path) / "workbench-package.json", {}).get("type", ""))
     if path.is_file() and path.suffix.lower() == ".zip":
         with zipfile.ZipFile(path) as archive:
-            manifests: list[str] = []
-            for info in archive.infolist():
-                pure = PurePosixPath(info.filename)
-                if pure.is_absolute() or ".." in pure.parts or "\\" in info.filename or (pure.parts and ":" in pure.parts[0]):
-                    raise WorkspaceError("Package zip contains an unsafe file path")
-                if ((info.external_attr >> 16) & 0o170000) == 0o120000:
-                    raise WorkspaceError("Package zip contains a symbolic link")
-                if pure.name == "workbench-package.json":
-                    manifests.append(info.filename)
-            if len(manifests) != 1:
-                raise WorkspaceError("Package zip must contain one workbench-package.json")
-            pure = PurePosixPath(manifests[0])
-            if len(pure.parts) not in (1, 2):
-                raise WorkspaceError("Package manifest must be at the zip root or in one wrapper directory")
-            return str(json.loads(archive.read(manifests[0])).get("type", ""))
+            manifest = validated_zip_manifest(archive)
+            return str(json.loads(archive.read(manifest)).get("type", ""))
     raise WorkspaceError("Choose a Workbench package folder or .zip file")
 
 
@@ -125,23 +119,13 @@ class RegionPackageService:
     def _package_source(source: str | Path) -> tuple[Path, tempfile.TemporaryDirectory[str] | None]:
         path = Path(source).expanduser().resolve()
         if path.is_dir():
-            root = package_root(path)
-            return root, None
+            return package_root(path), None
         if path.is_file() and path.suffix.lower() == ".zip":
             temp = tempfile.TemporaryDirectory()
-            try:
-                with zipfile.ZipFile(path) as archive:
-                    for info in archive.infolist():
-                        pure = PurePosixPath(info.filename)
-                        if pure.is_absolute() or ".." in pure.parts or "\\" in info.filename or (pure.parts and ":" in pure.parts[0]):
-                            raise WorkspaceError("Package zip contains an unsafe file path")
-                        if ((info.external_attr >> 16) & 0o170000) == 0o120000:
-                            raise WorkspaceError("Package zip contains a symbolic link")
-                    archive.extractall(temp.name)
-                return package_root(Path(temp.name)), temp
-            except Exception:
-                temp.cleanup()
-                raise
+            with zipfile.ZipFile(path) as archive:
+                validated_zip_manifest(archive)
+                archive.extractall(temp.name)
+            return package_root(Path(temp.name)), temp
         raise WorkspaceError("Choose a regional package folder or .zip file")
 
     def _manifest(self, root: Path) -> dict[str, Any]:
@@ -167,7 +151,7 @@ class RegionPackageService:
         if model_template_path:
             required.add(model_template_path)
         if "" in required:
-            raise WorkspaceError("Regional package must define its InputLibrary, regions, crosswalk, and sources document")
+            raise WorkspaceError("Regional package must define its Input Library, regions, crosswalk, and sources document")
         files = manifest.get("files")
         if not isinstance(files, list) or not files:
             raise WorkspaceError("Regional package must contain a checked file inventory")
@@ -191,12 +175,12 @@ class RegionPackageService:
         input_path = safe_package_path(root, str(manifest["inputLibrary"]["path"]))
         for filename in manifest["inputLibrary"].get("requiredFiles", []):
             if not (input_path / str(filename)).is_file():
-                raise WorkspaceError(f"Regional package InputLibrary is missing {filename}")
+                raise WorkspaceError(f"Regional package Input Library is missing {filename}")
         if model_template_path:
             template_path = safe_package_path(root, model_template_path)
             for relative in ("visioneval.cnf", "scripts/run_model.R", "defs/units.csv", "defs/deflators.csv"):
                 if not (template_path / relative).is_file():
-                    raise WorkspaceError(f"Regional package model template is missing {relative}")
+                    raise WorkspaceError(f"Regional model package is missing {relative}")
         validate_embedded_explanations(root, manifest)
         return manifest
 

@@ -5,70 +5,6 @@ function syncWorkbenchViewport() {
   // or short on Windows display scaling changes.
   const height = Math.max(320, Math.floor(visualHeight));
   document.documentElement.style.setProperty('--workbench-viewport-height', `${height}px`);
-  applySettingsDialogPreferredSize();
-}
-
-const SETTINGS_DIALOG_SIZE_KEY = "visioneval-settings-dialog-size-v1";
-const SETTINGS_DIALOG_DEFAULT_SIZE = Object.freeze({width:880,height:720});
-const SETTINGS_DIALOG_SAFE_MARGIN = Object.freeze({horizontal:20,vertical:28});
-function loadSettingsDialogPreferredSize() {
-  try {
-    const value=JSON.parse(localStorage.getItem(SETTINGS_DIALOG_SIZE_KEY)||"null");
-    if(Number.isFinite(value?.width)&&Number.isFinite(value?.height)&&value.width>0&&value.height>0&&value.width<=10000&&value.height<=10000)return{width:value.width,height:value.height};
-  } catch (_) {}
-  return {...SETTINGS_DIALOG_DEFAULT_SIZE};
-}
-let settingsDialogPreferredSize=loadSettingsDialogPreferredSize();
-let settingsDialogScrollPosition=null;
-function settingsVisualViewport() {
-  const viewport=window.visualViewport;
-  return{left:viewport?.offsetLeft||0,top:viewport?.offsetTop||0,width:viewport?.width||window.innerWidth||document.documentElement.clientWidth||SETTINGS_DIALOG_DEFAULT_SIZE.width,height:viewport?.height||window.innerHeight||document.documentElement.clientHeight||SETTINGS_DIALOG_DEFAULT_SIZE.height};
-}
-function settingsDialogSizeLimits() {
-  const viewport=settingsVisualViewport();
-  const maxWidth=Math.max(1,Math.floor(viewport.width-(2*SETTINGS_DIALOG_SAFE_MARGIN.horizontal)));
-  const maxHeight=Math.max(1,Math.floor(viewport.height-(2*SETTINGS_DIALOG_SAFE_MARGIN.vertical)));
-  return{minWidth:Math.min(520,maxWidth),minHeight:Math.min(420,maxHeight),maxWidth,maxHeight};
-}
-function clampedSettingsDialogSize(size=settingsDialogPreferredSize) {
-  const limits=settingsDialogSizeLimits();
-  return{width:Math.round(Math.max(limits.minWidth,Math.min(limits.maxWidth,size.width))),height:Math.round(Math.max(limits.minHeight,Math.min(limits.maxHeight,size.height)))};
-}
-function applySettingsDialogPreferredSize() {
-  const dialog=document.getElementById("settingsDialog");
-  if(!dialog)return;
-  const viewport=settingsVisualViewport(),size=clampedSettingsDialogSize();
-  dialog.style.width=`${size.width}px`;
-  dialog.style.height=`${size.height}px`;
-  dialog.style.left=`${Math.round(viewport.left+(viewport.width-size.width)/2)}px`;
-  dialog.style.top=`${Math.round(viewport.top+(viewport.height-size.height)/2)}px`;
-  const handle=document.getElementById("settingsDialogResizer");
-  handle?.setAttribute("aria-valuetext",`${size.width} by ${size.height} pixels`);
-}
-function setSettingsDialogPreferredSize(width,height,{persist=true}={}) {
-  if(!Number.isFinite(width)||!Number.isFinite(height))return;
-  settingsDialogPreferredSize={width:Math.max(1,Math.round(width)),height:Math.max(1,Math.round(height))};
-  if(persist)localStorage.setItem(SETTINGS_DIALOG_SIZE_KEY,JSON.stringify(settingsDialogPreferredSize));
-  applySettingsDialogPreferredSize();
-}
-function resetSettingsDialogSize() {
-  settingsDialogPreferredSize={...SETTINGS_DIALOG_DEFAULT_SIZE};
-  localStorage.removeItem(SETTINGS_DIALOG_SIZE_KEY);
-  applySettingsDialogPreferredSize();
-}
-function lockSettingsBackgroundScroll() {
-  if(settingsDialogScrollPosition)return;
-  settingsDialogScrollPosition={left:window.scrollX,top:window.scrollY};
-  document.documentElement.classList.add("settings-dialog-open");
-  document.body.classList.add("settings-dialog-open");
-}
-function unlockSettingsBackgroundScroll() {
-  if(!settingsDialogScrollPosition)return;
-  const position=settingsDialogScrollPosition;
-  settingsDialogScrollPosition=null;
-  document.documentElement.classList.remove("settings-dialog-open");
-  document.body.classList.remove("settings-dialog-open");
-  window.scrollTo(position.left,position.top);
 }
 syncWorkbenchViewport();
 window.visualViewport?.addEventListener('resize', syncWorkbenchViewport);
@@ -77,6 +13,7 @@ window.addEventListener('resize', syncWorkbenchViewport);
 
 const state = {
   data: null,
+  updateNotificationKey: "",
   selectedProject: null,
   csv: null,
   selectedJob: null,
@@ -91,7 +28,11 @@ const state = {
   editorOriginalRows: [],
   editorUndo: [],
   editorRedo: [],
+  editorPendingOperations: [],
+  editorSavedOperations: [],
+  editorManualEdit: false,
   batchFiles: {},
+  batchBaselineFiles: {},
   batchSelectedFiles: new Set(),
   batchSelectedColumns: new Map(),
   batchScenarioId: "",
@@ -101,16 +42,68 @@ const state = {
   editorGeography: null,
   batchGeographies: {},
   editorDirty: false,
-  editorSavedNotes: "",
+  noteAutosave: {
+    scenario: {timer:null, inFlight:null, dirty:false, revision:0, context:"", value:""},
+    file: {timer:null, inFlight:null, dirty:false, revision:0, context:"", value:""},
+  },
   editorSelectedLocations: new Set(),
   batchSelectedLocations: new Set(),
+  editorMixedScopes: [],
+  editorScopeUnavailable: false,
+  batchMixedScopes: [],
+  batchDraftGeographyType: "",
+  batchDraftScopeUnavailable: false,
   logFollowTail: true,
   review: null,
   reviewedScenarioIds: [],
+  reviewHypercubeId: "",
   reviewExpandedScenarioIds: new Set(),
+  activePrimaryPage: "explorePage",
+  activeExploreSubpage: "exploreLibraryPage",
+  activeCreateSubpage: "createSetup",
+  activeCompareSubpage: "compareData",
+  comparisonSelectionInitialized: false,
+  mapSelectionInitialized: false,
+  dashboardSelectionInitialized: false,
+  recentComparisonPair: [],
+  dashboardIds: [],
+  dashboardVariables: [],
+  transientDatastoreIds: new Set(),
+  comparisonOptionsCache: new Map(),
+  comparisonOptionControllers: {compare:null,map:null,dashboard:null},
+  comparisonOptionRequestKeys: {compare:"",map:"",dashboard:""},
+  comparisonMapLayerPreferences: new Map(),
+  comparisonMapFitMode: "project",
+  activeHypercubeSubpage: "hypercubeBuildPage",
+  primaryPageScroll: new Map([["explorePage", {left:0,top:0}], ["createPage", {left:0,top:0}], ["runPage", {left:0,top:0}], ["comparePage", {left:0,top:0}], ["hypercubePage", {left:0,top:0}]]),
+  pageNavigationToken: 0,
+  expandedProjectIds: new Set(),
+  projectScenarioSelections: new Map(),
+  hypercubeAxes: [],
+  hypercubeProjectId: "",
+  hypercubeAxisSequence: 0,
+  hypercubeFiles: new Map(),
+  hypercubePreview: null,
+  hypercubeSelectedLocations: new Set(),
+  hypercubeLocationSearch: "",
+  hypercubeLocationPopoverOpen: false,
+  hypercubeOperationId: "",
+  hypercubeSafetyAcknowledged: false,
+  hypercubeDirty: false,
+  hypercubeSavedRevision: "",
+  hypercubeSavedComplete: false,
+  hypercubePreviewRevision: "",
+  hypercubePreviewToken: "",
+  hypercubeHydratedProjectId: "",
+  hypercubeScopeDraft: {year:null,geographyType:"all"},
+  hypercubeFileLoadSequence: 0,
+  hypercubeAutosave: {timer:null,inFlight:null,changeRevision:0,lastError:""},
+  hypercubeResourceReport: null,
+  hypercubeResourceReportPromise: null,
   compareActivity: null,
   compareActivityTimer: null,
   compareActivityCollapseTimer: null,
+  copyOperationId: "",
   logBuffers: {},
   logOffsets: {},
   logUnread: new Set(),
@@ -148,6 +141,8 @@ const state = {
   dashboardVariablesExpanded: true,
   dashboardVariableQuery: "",
   mapOptions: [],
+  hypercubeAnalysis: {projects:[],options:null,matrix:null,storage:null,selectedCases:[],view:"matrix",sort:"magnitude",sliceValues:new Map(),matrixOperationId:"",discoveryOperationId:"",operationKind:"",operationStartedAt:0,pollTimer:null,discoveryResult:null,discoveryView:"outputs",rankingOutput:null,rankingOrigin:null,pendingSelectedCase:"",requestSnapshot:null},
+  hypercubeCaseExport: {projectId:"",items:[],selected:new Set(),query:"",operationId:"",operationStartedAt:0,batchIndex:0,batchTotal:0},
   mapPayload: null,
   mapDirty: true,
   mapInputSignature: "",
@@ -170,6 +165,9 @@ const state = {
   comparisonMapOptionsInflight: new Map(),
   comparisonMapOptionsController: null,
   comparisonMapOptionsRequest: "",
+  exportQueue: [],
+  exportRunning: false,
+  exportCurrent: "",
   runHistoryHidden: false,
   pendingProjectSetup: null,
   changedVariableQuery: "",
@@ -189,8 +187,6 @@ const state = {
   regionBuilderSourceLibraryId: "",
   regionBuilderRegionId: "",
   regionBuilderGeographyMode: "official",
-  regionBuilderOfficialIdentity: null,
-  regionBuilderCustomIdentity: {name:"", code:""},
   regionBuilderGeographyOptions: null,
   regionBuilderGeographyKey: "",
   regionBuilderSelectedBzones: new Set(),
@@ -199,6 +195,11 @@ const state = {
   regionBuilderGeographyQuery: "",
   regionBuilderGeographyView: {x: 0, y: 0, width: 1000, height: 620},
   regionBuilderGeographyPan: null,
+  regionBuilderGeographyFrame: null,
+  regionBuilderIdentityKey: "",
+  regionBuilderIdentityDrafts: {official: null, custom: null},
+  packageInstallButton: null,
+  packageInstallRegionBuilder: false,
   regionMapData: null,
   regionMapKey: "",
   regionMapView: null,
@@ -221,11 +222,17 @@ const state = {
   queueRevision: 0,
   draggedJobId: "",
   stopAllPending: false,
+  hypercubeStopPendingProject: "",
   desktop: null,
   onboardingShown: false,
+  upgradeNoticeShown: false,
+  runtimeSetupPhase: "idle",
+  runtimeSetupMessage: "",
   jobStateSnapshot: null,
+  hypercubeNotificationSnapshot: null,
   runSelectionProjectId: "",
   runSelectedVariationIds: new Set(),
+  runForceRerunIds: new Set(),
   runBaselineSelected: false,
   pendingJobActions: new Set(),
   consoleBatchId: "",
@@ -235,10 +242,59 @@ const state = {
   consoleManualSelection: false,
   comparisonMap3dDefaultCamera: null,
   comparisonMap3dElevationDirection: "all",
-  settingsSnapshot: null,
 };
 
 const $ = (id) => document.getElementById(id);
+const EDITOR_DRAFT_STORAGE_KEY = "visioneval-editor-drafts-v1";
+const EDITOR_DRAFT_VERSION = 1;
+const MIXED_EDITOR_VALUE = "__mixed__";
+
+function readEditorDraftStore() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(EDITOR_DRAFT_STORAGE_KEY) || "{}");
+    return parsed?.version === EDITOR_DRAFT_VERSION && parsed.entries && typeof parsed.entries === "object" ? parsed : {version:EDITOR_DRAFT_VERSION,entries:{}};
+  } catch (_) { return {version:EDITOR_DRAFT_VERSION,entries:{}}; }
+}
+function writeEditorDraftStore(store) {
+  try { localStorage.setItem(EDITOR_DRAFT_STORAGE_KEY, JSON.stringify(store)); } catch (_) { /* Draft persistence must never block editing. */ }
+}
+function editorDraftKey(mode, projectId = state.selectedProject?.id || "", scenarioId = state.editorVariationId || "", filename = "") {
+  return [mode, projectId, scenarioId, mode === "file" ? filename : ""].map((part) => encodeURIComponent(part)).join("|");
+}
+function loadEditorDraft(mode, filename = "") {
+  const draft = readEditorDraftStore().entries[editorDraftKey(mode, state.selectedProject?.id, state.editorVariationId, filename)];
+  return draft?.version === EDITOR_DRAFT_VERSION ? structuredClone(draft) : null;
+}
+function storeEditorDraft(mode, draft, filename = "") {
+  if (!state.selectedProject?.id || !state.editorVariationId) return;
+  const store = readEditorDraftStore();
+  store.entries[editorDraftKey(mode, state.selectedProject.id, state.editorVariationId, filename)] = {...structuredClone(draft),version:EDITOR_DRAFT_VERSION,projectId:state.selectedProject.id,scenarioId:state.editorVariationId,mode,filename:mode === "file" ? filename : ""};
+  writeEditorDraftStore(store);
+}
+function removeEditorDrafts({projectId = "", scenarioId = "", filename = ""} = {}) {
+  const store = readEditorDraftStore(); let changed = false;
+  Object.entries(store.entries).forEach(([key,draft]) => {
+    if (projectId && draft.projectId !== projectId) return;
+    if (scenarioId && draft.scenarioId !== scenarioId) return;
+    if (filename && draft.mode === "batch") {
+      draft.files = (draft.files || []).filter((item) => item !== filename);
+      if (draft.columns) delete draft.columns[filename];
+      changed = true; return;
+    }
+    if (filename && !(draft.mode === "file" && draft.filename === filename)) return;
+    delete store.entries[key]; changed = true;
+  });
+  if (changed) writeEditorDraftStore(store);
+}
+function pruneEditorDrafts() {
+  if (!state.data) return;
+  const projects = [...(state.data.projects || []), ...(state.data.archivedProjects || [])], scenarios = new Map(projects.map((project) => [project.id,new Set((project.variations || []).map((scenario) => scenario.id))]));
+  const store = readEditorDraftStore(); let changed = false;
+  Object.entries(store.entries).forEach(([key,draft]) => {
+    if (!scenarios.get(draft.projectId)?.has(draft.scenarioId)) { delete store.entries[key]; changed = true; }
+  });
+  if (changed) writeEditorDraftStore(store);
+}
 const shortcutDefinitions = Object.freeze({
   "new-scenario": {mac: "⌘N", other: "Ctrl+N", ariaMac: "Meta+N", ariaOther: "Control+N"},
   "new-file": {mac: "⇧⌘N", other: "Ctrl+Shift+N", ariaMac: "Meta+Shift+N", ariaOther: "Control+Shift+N"},
@@ -246,7 +302,7 @@ const shortcutDefinitions = Object.freeze({
   save: {mac: "⌘S", other: "Ctrl+S", ariaMac: "Meta+S", ariaOther: "Control+S"},
   "run-selected": {mac: "⇧⌘R", other: "Ctrl+Shift+R", ariaMac: "Meta+Shift+R", ariaOther: "Control+Shift+R"},
   "stop-selected": {mac: "⌘.", other: "Ctrl+.", ariaMac: "Meta+.", ariaOther: "Control+."},
-  "primary-tabs": {mac: "⌘1–4", other: "Ctrl+1–4", ariaMac: "Meta+1", ariaOther: "Control+1"},
+  "primary-tabs": {mac: "⌘1–5", other: "Ctrl+1–5", ariaMac: "Meta+1", ariaOther: "Control+1"},
   refresh: {mac: "⌘R", other: "Ctrl+R", ariaMac: "Meta+R", ariaOther: "Control+R"},
   settings: {mac: "⌘,", other: "Ctrl+,", ariaMac: "Meta+,", ariaOther: "Control+,"},
 });
@@ -267,24 +323,127 @@ function renderPlatformShortcuts() {
     if (definition) node.setAttribute("aria-keyshortcuts", mac ? definition.ariaMac : definition.ariaOther);
   });
 }
+
+function prunePlatformSpecificContent() {
+  const platform = frontendPlatform();
+  document.querySelectorAll("[data-runtime-platform]").forEach((node) => {
+    if (node.dataset.runtimePlatform !== platform) node.remove();
+  });
+}
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const terminalJobStates = new Set(["succeeded", "failed", "cancelled", "cleanup_failed"]);
 const activeJobStates = new Set(["preparing", "running", "exporting", "stopping"]);
+const scenarioCopyBlockingStates = new Set(["waiting", "preparing", "running", "exporting", "stopping"]);
 const stopRunTooltip = "Stops only the selected active run and deletes that run's partial files.";
 const stopAllRunsTooltip = "Stops every active run and removes all waiting queue items in the current workspace.";
 
-function confirmWorkbench(message, { title = "Confirm action", confirmLabel = "Continue", danger = true } = {}) {
+function confirmWorkbench(message, { title = "Confirm action", confirmLabel = "Continue", cancelLabel = "Cancel", danger = true, requiredPhrase = "" } = {}) {
   const dialog = $("confirmationDialog");
   if (dialog.open) dialog.close("cancel");
   $("confirmationDialogTitle").textContent = title;
   $("confirmationDialogMessage").textContent = message;
   const accept = $("confirmationDialogAccept");
+  $("confirmationDialogCancel").textContent = cancelLabel;
+  const alternative = $("confirmationDialogAlternative");
+  const phraseLabel = $("confirmationDialogPhraseLabel");
+  const phraseHint = $("confirmationDialogPhraseHint");
+  const phraseInput = $("confirmationDialogPhrase");
+  alternative.value = "baseline";
   accept.textContent = confirmLabel;
   accept.classList.toggle("danger", danger);
+  alternative.hidden = true;
+  phraseLabel.hidden = !requiredPhrase;
+  phraseHint.textContent = requiredPhrase ? `Type ${requiredPhrase} to continue.` : "";
+  phraseInput.value = "";
+  accept.disabled = Boolean(requiredPhrase);
   return new Promise((resolve) => {
-    dialog.addEventListener("close", () => resolve(dialog.returnValue === "confirm"), { once: true });
+    const update = () => { accept.disabled = Boolean(requiredPhrase) && phraseInput.value !== requiredPhrase; };
+    const close = () => {
+      phraseInput.removeEventListener("input", update);
+      resolve(dialog.returnValue === "confirm" && (!requiredPhrase || phraseInput.value === requiredPhrase));
+    };
+    phraseInput.addEventListener("input", update);
+    dialog.addEventListener("close", close, { once: true });
+    dialog.showModal();
+    if (requiredPhrase) requestAnimationFrame(() => phraseInput.focus());
+  });
+}
+
+function chooseOverlappingOperation(overlapCount) {
+  if (!overlapCount) return Promise.resolve("current");
+  const dialog = $("confirmationDialog");
+  if (dialog.open) dialog.close("cancel");
+  $("confirmationDialogTitle").textContent = "Apply an additional operation?";
+  $("confirmationDialogMessage").textContent = `This operation affects ${Number(overlapCount).toLocaleString()} cell${overlapCount === 1 ? "" : "s"} already adjusted from baseline. Apply from the untouched baseline to replace the prior effect on those cells, or apply an additional operation using their current scenario values.`;
+  const accept = $("confirmationDialogAccept"), alternative = $("confirmationDialogAlternative");
+  $("confirmationDialogPhraseLabel").hidden = true;
+  $("confirmationDialogPhrase").value = "";
+  accept.disabled = false; accept.textContent = "Apply additional operation"; accept.classList.remove("danger");
+  alternative.hidden = false; alternative.value = "baseline"; alternative.textContent = "From baseline";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      const result = dialog.returnValue === "baseline" ? "baseline" : dialog.returnValue === "confirm" ? "current" : "cancel";
+      alternative.hidden = true;
+      resolve(result);
+    }, {once:true});
     dialog.showModal();
   });
+}
+
+function jobFailureKind(job) {
+  if (job?.failureKind) return job.failureKind;
+  if (Number(job?.exitCode) === 137 || /(?:exit(?:ed)?(?: with)? code|code)\s+137\b/i.test(job?.message || "")) return "memory_suspected";
+  return "";
+}
+
+function memoryFailure(job) {
+  return ["memory", "memory_suspected"].includes(jobFailureKind(job));
+}
+
+function jobDisplayMessage(job) {
+  if (jobFailureKind(job) === "memory") return "Docker stopped this run because it ran out of available memory. Reduce parallel runs or increase Docker’s memory allocation, then retry.";
+  if (jobFailureKind(job) === "memory_suspected") return "This run was forcibly stopped. Memory pressure is the most common cause of exit code 137; check Resources and the run log before retrying.";
+  return job?.message || "";
+}
+
+function chooseMemoryRetry(job) {
+  const dialog = $("confirmationDialog");
+  if (dialog.open) dialog.close("cancel");
+  const allocation = Number(state.data?.runtime?.dockerMemoryBytes || 0);
+  const concurrency = Number(state.desktop?.resources?.maxConcurrentRuns || state.data?.queue?.maxActive || 1);
+  const cap = Number(state.desktop?.resources?.memoryLimitGb || 0);
+  const details = [`Current concurrency: ${concurrency}`];
+  if (allocation) details.push(`Docker Desktop allocation: ${humanBytes(allocation)}`);
+  details.push(`Per-run Workbench limit: ${cap ? `${cap.toLocaleString()} GB` : "none"}`);
+  $("confirmationDialogTitle").textContent = "Retry memory-related failure?";
+  $("confirmationDialogMessage").textContent = `${jobDisplayMessage(job)}\n\n${details.join(" · ")}\n\nRetrying without changing resources may produce the same failure.`;
+  $("confirmationDialogPhraseLabel").hidden = true;
+  $("confirmationDialogPhrase").value = "";
+  const accept = $("confirmationDialogAccept"), alternative = $("confirmationDialogAlternative");
+  accept.disabled = false; accept.textContent = "Retry Anyway"; accept.classList.remove("danger");
+  alternative.hidden = false; alternative.value = "settings"; alternative.textContent = "Open Resource Settings";
+  return new Promise((resolve) => {
+    dialog.addEventListener("close", () => {
+      const result = dialog.returnValue === "settings" ? "settings" : dialog.returnValue === "confirm" ? "retry" : "cancel";
+      alternative.hidden = true;
+      alternative.value = "baseline";
+      resolve(result);
+    }, {once:true});
+    dialog.showModal();
+  });
+}
+
+async function retryRun(job) {
+  if (!job || job.state !== "failed" || job.retryable === false) return;
+  if (memoryFailure(job)) {
+    const choice = await chooseMemoryRetry(job);
+    if (choice === "settings") {
+      await openSettings("settingsResources");
+      return;
+    }
+    if (choice !== "retry") return;
+  }
+  await jobAction("/api/runs/retry", job.id);
 }
 
 function baselineDisplayName(project = state.selectedProject) {
@@ -305,12 +464,41 @@ function runnableJobs() {
 function unresolvedRunQueueJobs() {
   return (state.data?.jobs || []).filter((job) => activeJobStates.has(job.state) || job.state === "waiting");
 }
+function activeScenarioCopyJobs(projectId, variationIds) {
+  const selected = new Set(variationIds || []);
+  return (state.data?.jobs || []).filter((job) =>
+    job.projectId === projectId && selected.has(job.variationId) && scenarioCopyBlockingStates.has(job.state)
+  );
+}
+function activeProjectCopyJobs(projectId) {
+  return (state.data?.jobs || []).filter((job) => job.projectId === projectId && scenarioCopyBlockingStates.has(job.state));
+}
+function destinationCopyBlockedMessage(projectId) {
+  if(!projectId)return"";
+  const project=state.data?.projects?.find((item)=>item.id===projectId),jobs=activeProjectCopyJobs(projectId);
+  if(!jobs.length)return"";
+  const states=[...new Set(jobs.map((job)=>job.state))].sort().join(", ");
+  return `${project?.name||"This project"} has unfinished runs (${states}). Please wait until every run in this project has finished or been stopped.`;
+}
+function scenarioCopyBlockedMessage(projectId, variationIds) {
+  const source = state.data?.projects?.find((item) => item.id === projectId);
+  const names = new Map((source?.variations || []).map((item) => [item.id, item.name]));
+  const blocked = activeScenarioCopyJobs(projectId, variationIds);
+  if (!blocked.length) return "";
+  const grouped = new Map();
+  blocked.forEach((job) => {
+    const entry = grouped.get(job.variationId) || {name:names.get(job.variationId) || job.variationName || job.variationId,states:new Set()};
+    entry.states.add(job.state);grouped.set(job.variationId,entry);
+  });
+  const descriptions = [...grouped.values()].map((entry) => `${entry.name} (${[...entry.states].sort().join(", ")})`);
+  return `Wait for or stop active scenario runs before copying: ${descriptions.join(", ")}`;
+}
 
 function resolvedTheme(theme) {
   return theme === "system" ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark") : theme === "light" ? "light" : "dark";
 }
 function applyTheme(theme, persist = true) {
-  const preference = ["system", "light", "dark"].includes(theme) ? theme : "light";
+  const preference = ["system", "light", "dark"].includes(theme) ? theme : "system";
   const selected = resolvedTheme(preference);
   document.documentElement.dataset.theme = selected;
   document.documentElement.dataset.themePreference = preference;
@@ -329,7 +517,7 @@ function storedComparisonPalettes(){return {table:{...comparisonPaletteDefaults.
 function masterComparisonPalette(){return {...masterComparisonPaletteDefault,...state.desktop?.masterComparisonPalette}}
 function comparisonPalettes(){const palettes=storedComparisonPalettes();if(!state.desktop?.useMasterComparisonPalette)return palettes;const master=masterComparisonPalette();return {table:{...master},map:{...master},chart:{...master}}}
 function comparisonPaletteColor(kind,direction){return comparisonPalettes()[kind]?.[direction]||comparisonPaletteDefaults[kind][direction]}
-function applyComparisonPalettes(){for(const [kind,palette] of Object.entries(comparisonPalettes()))for(const [direction,color] of Object.entries(palette))document.documentElement.style.setProperty(`--comparison-${kind}-${direction}`,color)}
+function applyComparisonPalettes(){for(const [kind,palette] of Object.entries(comparisonPalettes()))for(const [direction,color] of Object.entries(palette))document.documentElement.style.setProperty(`--comparison-${kind}-${direction}`,color);if(state.comparisonMapScene){applyComparisonMapPresentation();if(state.comparisonMapMode==='3d')renderComparisonMap3d()}}
 function renderComparisonPaletteSettings(){
   const root=$("comparisonPaletteSettings");if(!root)return;
   const labels={table:'Result-table deltas',map:'Comparison maps',chart:'Diverging charts'};
@@ -366,6 +554,28 @@ function post(path, payload) {
   return request(path, { method: "POST", body: JSON.stringify(payload) });
 }
 
+async function waitForRuntimeInstallation(operationId) {
+  const deadline = Date.now() + (20 * 60 * 1000);
+  let transientFailures = 0;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    let operation;
+    try {
+      operation = await request(`/api/runtime/install/status?id=${encodeURIComponent(operationId)}`);
+      transientFailures = 0;
+    } catch (error) {
+      transientFailures += 1;
+      if (transientFailures < 5) continue;
+      throw error;
+    }
+    state.runtimeSetupMessage = operation.message || "Downloading and verifying the pinned runtime…";
+    renderRuntimeSetupControls();
+    if (operation.state === "succeeded") return operation.result;
+    if (operation.state === "failed") throw new Error(operation.message || "Runtime installation failed");
+  }
+  throw new Error("Runtime installation did not finish within 20 minutes.");
+}
+
 async function chooseFolder(targetId) {
   const invoke = window.__TAURI_INTERNALS__?.invoke;
   if (!invoke) return notify("Folder selection is available in the VisionEval Workbench desktop app. You can also enter the path manually.", "error");
@@ -384,55 +594,48 @@ async function chooseFolder(targetId) {
 document.querySelectorAll("[data-folder-target]").forEach((button) => button.addEventListener("click", () => chooseFolder(button.dataset.folderTarget)));
 
 let noticeTimer;
-function showSettingsNotice(message, type = "", action = null) {
-  const notice = $("settingsNotice"), text = $("settingsNoticeText"), button = $("settingsRefreshWorkbench");
-  if (!notice || !text || !button) return;
-  text.textContent = message;
-  notice.className = `settings-notice ${type}`;
-  notice.setAttribute("role", type === "error" ? "alert" : "status");
-  notice.hidden = false;
-  button.hidden = !action;
-  button.onclick = action?.handler || null;
-  if (action) {
-    button.textContent = action.label || "Refresh Workbench";
-    setButtonAvailability(button, !action.disabled, action.disabledReason || "");
+function notify(message, type = "", action = null) {
+  const settingsOpen = Boolean($("settingsDialog")?.open);
+  const notice = settingsOpen ? $("settingsNotice") : $("notice");
+  if (settingsOpen) {
+    $("settingsNoticeText").textContent = message;
+    const button = $("settingsNoticeAction");
+    button.hidden = !action;
+    button.disabled = false;
+    button.textContent = action?.label || "";
+    button.onclick = action ? () => action.onClick() : null;
+  } else {
+    notice.textContent = message;
   }
-}
-
-function clearSettingsNotice() {
-  const notice = $("settingsNotice"), button = $("settingsRefreshWorkbench");
-  if (!notice || !button) return;
-  notice.hidden = true;
-  notice.className = "settings-notice";
-  notice.setAttribute("role", "status");
-  $("settingsNoticeText").textContent = "";
-  button.hidden = true;
-  button.onclick = null;
-}
-
-function notify(message, type = "") {
-  const settingsDialog = $("settingsDialog"), settingsNotice = $("settingsNotice");
-  if (settingsDialog?.open && settingsNotice) {
-    showSettingsNotice(message, type);
-    return;
-  }
-  const notice = $("notice");
-  notice.textContent = message;
   notice.className = `notice ${type}`;
   notice.hidden = false;
   clearTimeout(noticeTimer);
+  if (action) return;
   noticeTimer = setTimeout(() => { notice.hidden = true; }, type === "error" ? 9000 : 4500);
 }
 
+function settingsRefreshAction(){return{label:"Refresh Workbench",onClick:refreshWorkbenchAfterSettingsSave}}
+async function refreshWorkbenchAfterSettingsSave(){
+  const unfinished=(state.data?.jobs||[]).filter(job=>!terminalJobStates.has(job.state));
+  if(unfinished.length)return notify(`Finish or stop ${unfinished.length} active or waiting run${unfinished.length===1?"":"s"} before refreshing Workbench.`,"error",settingsRefreshAction());
+  notify("Refreshing Workbench to apply the resource change…","success");
+  try{const url=await window.__TAURI_INTERNALS__.invoke("restart_backend");window.location.replace(url)}catch(error){notify(`Workbench could not refresh: ${error}`,"error",settingsRefreshAction())}
+}
+
 function nativeNotification(title, body, {outcome="succeeded", elapsedSeconds=null, force=false}={}) {
-  if (!state.desktop?.notificationsEnabled || !window.__TAURI_INTERNALS__?.invoke) return;
-  window.__TAURI_INTERNALS__.invoke("send_workbench_notification", {title, body, outcome, elapsedSeconds, force}).catch(() => {});
+  if (!state.desktop?.notificationsEnabled || !window.__TAURI_INTERNALS__?.invoke) return Promise.resolve({shown:false,reason:"disabled"});
+  return window.__TAURI_INTERNALS__.invoke("send_workbench_notification", {title, body, outcome, elapsedSeconds, force}).catch((error) => {
+    console.warn("Could not send Workbench notification", error);
+    return {shown:false,reason:String(error)};
+  });
 }
 
 function observeJobStates(jobs) {
   const next = new Map((jobs || []).map((job) => [job.id, job.state]));
+  const hypercubeProjects=new Map((state.data?.projects||[]).filter(isHypercubeProject).map((project)=>[project.id,project]));
   if (state.jobStateSnapshot) {
     for (const job of jobs || []) {
+      if(hypercubeProjects.has(job.projectId))continue;
       const previous = state.jobStateSnapshot.get(job.id);
       if (!previous || terminalJobStates.has(previous) || !terminalJobStates.has(job.state)) continue;
       const label = jobDisplayName(job), duration = jobRuntime(job), elapsedMilliseconds = jobRuntimeMilliseconds(job), elapsedSeconds = Number.isFinite(elapsedMilliseconds) ? Math.floor(elapsedMilliseconds / 1000) : null;
@@ -440,7 +643,21 @@ function observeJobStates(jobs) {
       else if (job.state === "failed" || job.state === "cleanup_failed") nativeNotification(`${label} failed`, job.message || `${job.projectName || "VisionEval"} needs attention.`, {outcome:"failed", elapsedSeconds});
     }
   }
+  const nextHypercubes=new Map();
+  for(const [projectId,project] of hypercubeProjects){
+    const projectJobs=(jobs||[]).filter((job)=>job.projectId===projectId),unresolved=projectJobs.filter((job)=>job.state==='waiting'||activeJobStates.has(job.state)),batchIds=[...new Set(unresolved.map((job)=>job.batchId).filter(Boolean))];
+    const previous=state.hypercubeNotificationSnapshot?.get(projectId);
+    nextHypercubes.set(projectId,{unresolved:unresolved.length,batchIds:batchIds.length?batchIds:(previous?.batchIds||[])});
+    if(!previous?.unresolved||unresolved.length)continue;
+    const plan=hypercubeRunPlan(project),successful=plan.counts.successful||0,failed=plan.counts.failed||0,total=plan.entries.length,completed=successful===total;
+    const cycleJobs=previous.batchIds?.length?projectJobs.filter((job)=>previous.batchIds.includes(job.batchId)):projectJobs;
+    const started=cycleJobs.map((job)=>new Date(job.startedAt||'').getTime()).filter(Number.isFinite),finished=cycleJobs.map((job)=>new Date(job.finishedAt||'').getTime()).filter(Number.isFinite),elapsedMilliseconds=started.length&&finished.length?Math.max(...finished)-Math.min(...started):NaN,elapsedSeconds=Number.isFinite(elapsedMilliseconds)?Math.max(0,Math.floor(elapsedMilliseconds/1000)):null,duration=Number.isFinite(elapsedMilliseconds)?` in ${formatDuration(elapsedMilliseconds)}`:'';
+    if(completed)nativeNotification(`${project.name} Hypercube completed`,`${total} runs finished${duration}.`,{outcome:'succeeded',elapsedSeconds});
+    else if(failed)nativeNotification(`${project.name} Hypercube finished with issues`,`${successful} of ${total} runs completed; ${failed} failed.`,{outcome:'failed',elapsedSeconds});
+    else nativeNotification(`${project.name} Hypercube stopped`,`${successful} of ${total} runs are complete.`,{outcome:'cancelled',elapsedSeconds});
+  }
   state.jobStateSnapshot = next;
+  state.hypercubeNotificationSnapshot=nextHypercubes;
 }
 
 function setBusy(button, busy, label = "Working…") {
@@ -473,7 +690,7 @@ const DISABLED_BUTTON_REASONS = {
   saveOverlay: "Load a file and make a change before saving.",
   undoEditorChange: "There is no editor change to undo.",
   redoEditorChange: "There is no editor change to redo.",
-  duplicateEditorScenario: "Create a scenario before duplicating one.",
+  duplicateEditorScenario: "Create a scenario before copying one.",
   applyBatchChanges: "Complete the batch selections and operation first.",
   continueToRun: "Resolve the project validation errors before continuing.",
   runComparison: "Load comparison data and complete the comparison filters first.",
@@ -485,7 +702,7 @@ const DISABLED_BUTTON_REASONS = {
   generateMap: "Load compatible results, variables, and map geometry first.",
   fitComparisonMap: "Choose an MPO before fitting the map.",
   toggleMapExport: "Generate a current comparison map before exporting.",
-  generateDashboard: "Load at least two results and choose chart inputs first.",
+  generateDashboard: "Choose two different results with compatible numeric outputs first.",
 };
 
 function disabledReasonFor(button) {
@@ -592,10 +809,13 @@ async function refreshState({ quiet = false } = {}) {
     applyComparisonPalettes();
     renderPlatformShortcuts();
     state.data = await request("/api/state");
+    state.hypercubeResourceReport=null;
+    pruneEditorDrafts();
     if (state.stopAllPending && !unresolvedRunQueueJobs().length) state.stopAllPending = false;
     observeJobStates(state.data.jobs || []);
     renderAll();
     followActiveConsoleJob();
+    maybeShowUpgradeNotice();
     maybeShowOnboarding();
     if (!quiet) notify("Workspace refreshed.", "success");
   } catch (error) {
@@ -612,10 +832,24 @@ function renderAll() {
   renderProjects();
   renderArchivedProjects();
   renderEditorProjectSelect();
+  renderHypercubeSetup();
   renderRunProjects();
   renderJobs();
   renderDatastores();
+  renderUpdateIndicator();
   syncMenuContext();
+}
+
+const updateSourceLabels={visioneval:"VisionEval",runtimeImage:"Workbench runtime image",workbench:"VisionEval Workbench"};
+function availableUpdateStatuses(payload=state.data?.updates){return Object.values(payload?.statuses||{}).filter(item=>["update_available","install_required"].includes(item?.status))}
+function renderUpdateIndicator(payload=state.data?.updates){
+  const available=availableUpdateStatuses(payload),show=available.length>0;
+  if($("settingsUpdateIndicator"))$("settingsUpdateIndicator").hidden=!show;
+  if($("settingsUpdatesNavIndicator"))$("settingsUpdatesNavIndicator").hidden=!show;
+  if(show){
+    const key=available.map(item=>`${item.source}:${item.availableVersion||item.requiresWorkbenchVersion||"available"}`).sort().join("|");
+    if(state.updateNotificationKey!==key){state.updateNotificationKey=key;notify(`${available.length} update or runtime setup action${available.length===1?" is":"s are"} available. Review Settings → Updates.`,"success")}
+  }
 }
 
 function renderDocumentationStatus() {
@@ -627,14 +861,29 @@ function renderDocumentationStatus() {
   warning.textContent = show ? `${status.message} Restart Workbench to retry; files in Documentation/User Notes are safe.` : "";
 }
 
+function renderExploreExplanationNotice(packageMetadata = null) {
+  const notice = $("exploreExplanationNotice");
+  if (!notice) return;
+  const selected = (state.data?.inputExplanations || []).find((item) => item.id === state.exploreExplanationId);
+  const appliesTo = packageMetadata?.appliesTo || selected?.appliesTo || {};
+  const familyId = selected?.familyId || packageMetadata?.familyId || "";
+  const isVirginiaPackage = Boolean(state.exploreExplanationId)
+    && (String(appliesTo.state || "").toUpperCase() === "VA" || familyId === "virginia-visioneval-input-explanations");
+  notice.hidden = !isVirginiaPackage;
+  notice.textContent = isVirginiaPackage
+    ? "Input explanations were developed for a Virginia dataset. They can still help interpret other VisionEval input files, but locally customized inputs may differ."
+    : "";
+}
+
 function renderExploreLibraries() {
   const libraries = state.data?.inputLibraries || [];
   const explanations = state.data?.inputExplanations || [];
   const select = $("exploreExplanations");
   const previous = state.exploreExplanationId || state.data?.workspaceSettings?.defaultInputExplanationId || select.value;
-  select.innerHTML = `<option value="">Built-in module metadata</option>${explanations.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` · ${item.fileCount} guides` : ""}</option>`).join("")}`;
+  select.innerHTML = `<option value="">Built-in module metadata</option>${explanations.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` · ${item.fileCount} guides` : ""}${item.familyConflict?" · ⚠ different catalog":""}</option>`).join("")}`;
   selectedOption(select, previous);
   state.exploreExplanationId = select.value;
+  renderExploreExplanationNotice();
   const libraryIds = new Set(libraries.map((item) => item.id));
   const preferredLibrary = state.exploreLibraryId || state.data?.workspaceSettings?.defaultInputLibraryId || "";
   const nextLibrary = libraryIds.has(preferredLibrary) ? preferredLibrary : libraries[0]?.id || "";
@@ -683,27 +932,50 @@ async function loadRegionBuilderPackage(packageId) {
   }
 }
 
-async function installRegionalPackage(button, picker = "choose_package") {
+function openPackageSourceDialog(button, regionBuilder = false) {
+  state.packageInstallButton = button;
+  state.packageInstallRegionBuilder = regionBuilder;
+  $("packageSourceDialog").showModal();
+}
+
+async function installSelectedPackage(command) {
+  const button = state.packageInstallButton;
   try {
-    const source = await window.__TAURI_INTERNALS__.invoke(picker);
+    $("packageSourceDialog").close();
+    const source = await window.__TAURI_INTERNALS__.invoke(command);
     if (!source) return;
+    setBusy(button, true, "Validating…");
+    const preview=await post('/api/packages/preview',{source});
+    const warning=$('packagePreviewWarning');warning.hidden=!(preview.warnings||[]).length;warning.innerHTML=(preview.warnings||[]).map((item)=>`<strong>${escapeHtml(item)}</strong>`).join('<br>');
+    $('packagePreviewName').textContent=`${preview.name}${preview.version?` ${preview.version}`:''}`;
+    $('packagePreviewDescription').textContent=preview.description||'No package description was provided.';
+    $('packagePreviewContents').textContent=`${preview.fileCount} files · ${humanBytes(preview.size)}`;
+    const details=[['Type',preview.type],['Compatibility',preview.compatibility],['Source',preview.provenance],['Intended use',preview.intendedUse],['Execution support',preview.executionSupport],['Capabilities',(preview.capabilities||[]).join(', ')||'Not declared'],['File verification',preview.checksumStatus]];
+    $('packagePreviewDetails').innerHTML=details.map(([label,value])=>`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('');
+    const approved=await new Promise((resolve)=>{const dialog=$('packagePreviewDialog');dialog.addEventListener('close',function done(){dialog.removeEventListener('close',done);resolve(dialog.returnValue==='install')});dialog.showModal()});
+    if(!approved)return;
     setBusy(button, true, "Installing…");
-    const result = await post("/api/packages/install", {source});
-    state.regionBuilderPackageId = result.id || "";
-    state.regionBuilderReference = null;
-    state.regionBuilderSources = null;
-    state.regionBuilderRegions = null;
+    const result = await post("/api/packages/install", {source,token:preview.token});
+    if (state.packageInstallRegionBuilder) {
+      state.regionBuilderPackageId = result.id || "";
+      state.regionBuilderReference = null;
+      state.regionBuilderSources = null;
+      state.regionBuilderRegions = null;
+    }
     await refreshState({quiet:true});
+    if (!state.packageInstallRegionBuilder) await openSettings("settingsAssets");
     notify(`Installed ${result.name}.`, "success");
   } catch (error) {
     notify(error.message || String(error), "error");
   } finally {
     setBusy(button, false);
+    state.packageInstallButton = null;
+    state.packageInstallRegionBuilder = false;
   }
 }
 
 function renderRegionBuilder() {
-  const packages = state.data?.regionPackages || [];
+  const packages = state.data?.developSources || [];
   const packageSelect = $("regionPackage");
   const sourceSelect = $("regionSourceLibrary");
   const regionSelect = $("regionDefinition");
@@ -718,7 +990,7 @@ function renderRegionBuilder() {
   if (!packages.length) {
     state.regionBuilderPackageId = "";
     state.regionBuilderPreview = null;
-    $("regionBuilderDescription").textContent = "Install a regional data package to create a runnable VisionEval region.";
+    $("regionBuilderDescription").textContent = "Install a compatible model or regional package to create a runnable VisionEval region.";
     return;
   }
   const priorPackage = state.regionBuilderPackageId || packageSelect.value || packages[0].id;
@@ -734,7 +1006,7 @@ function renderRegionBuilder() {
   const regions = state.regionBuilderRegions?.regions || [];
   const previousSource = state.regionBuilderSourceLibraryId || sourceSelect.value || "";
   const previousRegion = state.regionBuilderRegionId || regionSelect.value || "";
-  sourceSelect.innerHTML = sources.length ? sources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible InputLibrary</option>`;
+  sourceSelect.innerHTML = sources.length ? sources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible Input Library</option>`;
   if (regions.length) {
     const regional = regions.filter((item) => item.regionType !== "statewide");
     regionSelect.innerHTML = regional.length ? `<optgroup label="MPO study areas">${regional.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</optgroup>` : `<option value="">No supported MPO definitions</option>`;
@@ -744,11 +1016,8 @@ function renderRegionBuilder() {
   state.regionBuilderSourceLibraryId = sourceSelect.value;
   state.regionBuilderRegionId = regionSelect.value;
   const selectedRegion = regions.find((item) => item.id === state.regionBuilderRegionId);
-  if (selectedRegion && (packageChanged || !state.regionBuilderOfficialIdentity)) {
-    state.regionBuilderOfficialIdentity={name:selectedRegion.name||"",code:selectedRegion.defaultRegionCode||"",state:selectedRegion.state||state.regionBuilderReference?.package?.state||""};
-    if(state.regionBuilderGeographyMode!=="custom")applyRegionIdentity(state.regionBuilderOfficialIdentity);
-  }
-  $("previewRegionBuild").disabled = !sources.length || !regions.length || (state.regionBuilderGeographyMode==="custom"&&(!state.regionBuilderSelectedBzones.size||!customRegionIdentityValid()));
+  initializeRegionBuilderIdentity(selectedRegion, packageChanged);
+  updateRegionBuilderAvailability(sources, regions);
   renderRegionMapLoadStatus();
   $("customizeRegionGeography").disabled = selectedRegion?.regionType === "statewide";
   $("customizeRegionGeography").title = selectedRegion?.regionType === "statewide" ? "The statewide build includes every packaged Bzone." : "Include or exclude individual Azones and Bzones.";
@@ -756,9 +1025,47 @@ function renderRegionBuilder() {
   $("regionSelectorLabel").textContent = terminology.regionSelector || terminology.regionSingular || "Region";
   const activePackage = packages.find((item) => item.id === state.regionBuilderPackageId);
   $("regionBuilderDescription").textContent = activePackage?.description || `Build a region using ${activePackage?.name || "the installed package"}.`;
+  const modelBacked = activePackage?.sourceKind === "model-bundle";
+  $("useOfficialRegionGeography").textContent = modelBacked ? "Installed scope" : "Official MPO";
+  document.querySelector("#officialRegionGeographyView .muted").textContent = modelBacked
+    ? "Use all geography contained in the installed model, or choose a smaller subregion."
+    : "Use the regional package's official MPO boundary rule.";
   renderRegionBuilderReference();
   renderRegionGeographySummary();
-  renderRegionBuilderPreview();
+  renderRegionBuilderMode();
+}
+
+function regionBuilderModelBacked() {
+  return (state.regionBuilderPackages || []).find((item) => item.id === state.regionBuilderPackageId)?.sourceKind === "model-bundle";
+}
+
+function regionBuilderInstalledScope() {
+  return regionBuilderModelBacked() && state.regionBuilderGeographyMode !== "custom";
+}
+
+function renderRegionBuilderMode() {
+  const installed = regionBuilderInstalledScope();
+  $("regionOutputOptions").hidden = installed;
+  $("previewRegionBuild").hidden = installed;
+  $("buildRegionAssets").hidden = installed;
+  $("regionSourceLibrary").disabled = installed;
+  $("regionDefinition").disabled = installed;
+  if (installed) renderInstalledScopeSummary(); else renderRegionBuilderPreview();
+  renderRegionMapLoadStatus();
+}
+
+function renderInstalledScopeSummary() {
+  const box = $("regionBuilderPreview");
+  const region = (state.regionBuilderRegions?.regions || []).find((item) => item.id === state.regionBuilderRegionId);
+  const activePackage = (state.regionBuilderPackages || []).find((item) => item.id === state.regionBuilderPackageId);
+  if (!box || !region) return;
+  const azones = region.azones || [];
+  box.className = "panel region-builder-preview";
+  box.innerHTML = `
+    <div class="section-title"><div><p class="step">Installed model scope</p><h3>${escapeHtml(region.name || `${activePackage?.name || "Installed model"} installed scope`)}</h3><p class="muted">Already installed from ${escapeHtml(activePackage?.name || region.shortName || "model package")}</p></div></div>
+    <div class="region-preview-summary"><div><strong>${Number(region.selectedCount || 0).toLocaleString()}</strong><span>Included Bzones</span></div><div><strong>${azones.length.toLocaleString()}</strong><span>Azones / localities</span></div></div>
+    ${azones.length ? `<p class="region-preview-localities"><strong>Included localities:</strong> ${azones.map(escapeHtml).join(", ")}</p>` : ""}
+    <div class="region-preview-advisory"><p><strong>Installed model scope:</strong> Every displayed Azone and Bzone is contained in the model package.</p><button type="button" class="secondary" data-open-region-map>View map</button></div>`;
 }
 
 function renderRegionBuilderReference() {
@@ -773,8 +1080,10 @@ function renderRegionBuilderReference() {
   }
   const links = (reference.sources || []).map((source) => `<a href="${escapeHtml(source.url)}" target="_blank" rel="noreferrer">${escapeHtml(source.label)}</a>`).join("");
   const checked = reference.package?.retrievedAt ? ` · checked ${escapeHtml(reference.package.retrievedAt)}` : "";
+  const activePackage = (state.regionBuilderPackages || []).find((item) => item.id === state.regionBuilderPackageId);
+  const modelBacked = activePackage?.sourceKind === "model-bundle";
   box.className = "region-builder-provenance";
-  box.innerHTML = `<details><summary>Data sources${checked}</summary><div class="region-builder-provenance-body"><p><strong>Boundary:</strong> Official VDOT MPO Study Areas</p><p><strong>Model geography:</strong> VisionEval Virginia Azone/Bzone geography</p><p><strong>Selection rule:</strong> A Bzone is included when its center is inside the MPO or at least half of its area overlaps the MPO.</p><div class="region-builder-sources">${links}</div></div></details>`;
+  box.innerHTML = `<details><summary>Data sources${checked}</summary><div class="region-builder-provenance-body"><p><strong>Boundary:</strong> ${modelBacked ? "Geography contained in the installed model" : "Official VDOT MPO Study Areas"}</p><p><strong>Model geography:</strong> VisionEval Virginia Azone/Bzone geography</p><p><strong>Selection rule:</strong> ${modelBacked ? "Only Bzones present in the paired model package can be selected." : "A Bzone is included according to the installed regional package's boundary crosswalk."}</p><div class="region-builder-sources">${links}</div></div></details>`;
 }
 
 function regionBuilderPayload() {
@@ -783,25 +1092,58 @@ function regionBuilderPayload() {
     sourceLibraryId: $("regionSourceLibrary").value,
     regionId: $("regionDefinition").value,
     regionName: $("regionName").value,
-    regionCode: $("regionCode").value,
     stateAbbr: $("regionState").value,
     geographyMode: state.regionBuilderGeographyMode,
     selectedBzones: state.regionBuilderGeographyMode === "custom" ? [...state.regionBuilderSelectedBzones] : [],
   };
 }
 
-function currentRegionIdentity(){return {name:$("regionName").value,code:$("regionCode").value,state:$("regionState").value}}
-function applyRegionIdentity(identity){$("regionName").value=identity?.name||"";$("regionCode").value=identity?.code||"";if(identity?.state)$("regionState").value=identity.state}
-function customRegionIdentityValid(){return Boolean($("regionName").value.trim()&&$("regionCode").value.trim())}
-function switchRegionGeographyMode(mode){
-  if(mode==="custom"){
-    if(state.regionBuilderGeographyMode!=="custom")state.regionBuilderOfficialIdentity=currentRegionIdentity();
-    applyRegionIdentity({...state.regionBuilderCustomIdentity,state:state.regionBuilderOfficialIdentity?.state||$("regionState").value});
-  }else{
-    if(state.regionBuilderGeographyMode==="custom")state.regionBuilderCustomIdentity={name:$("regionName").value,code:$("regionCode").value};
-    applyRegionIdentity(state.regionBuilderOfficialIdentity);
+function currentRegionBuilderIdentity() {
+  return {name: $("regionName").value, state: $("regionState").value};
+}
+
+function applyRegionBuilderIdentity(mode) {
+  const draft = state.regionBuilderIdentityDrafts[mode];
+  if (!draft) return;
+  $("regionName").value = draft.name || "";
+  $("regionState").value = draft.state || "";
+}
+
+function initializeRegionBuilderIdentity(selectedRegion, force = false) {
+  if (!selectedRegion) return;
+  const key = `${state.regionBuilderPackageId}|${selectedRegion.id}`;
+  if (force || state.regionBuilderIdentityKey !== key) {
+    state.regionBuilderIdentityKey = key;
+    state.regionBuilderIdentityDrafts = {
+      official: {name: selectedRegion.name || "", state: selectedRegion.state || state.regionBuilderReference?.package?.state || ""},
+      custom: null,
+    };
   }
-  state.regionBuilderGeographyMode=mode;state.regionBuilderPreview=null;renderRegionGeographySummary();renderRegionBuilderPreview();renderRegionBuilder();
+  applyRegionBuilderIdentity(state.regionBuilderGeographyMode);
+}
+
+function switchRegionBuilderIdentity(mode) {
+  state.regionBuilderIdentityDrafts[state.regionBuilderGeographyMode] = currentRegionBuilderIdentity();
+  if (mode === "custom" && !state.regionBuilderIdentityDrafts.custom) {
+    state.regionBuilderIdentityDrafts.custom = {name: "", state: state.regionBuilderIdentityDrafts.official?.state || $("regionState").value};
+  }
+  state.regionBuilderGeographyMode = mode;
+  applyRegionBuilderIdentity(mode);
+  state.regionBuilderPreview = null;
+  renderRegionGeographySummary();
+  renderRegionBuilderMode();
+  updateRegionBuilderAvailability();
+}
+
+function updateRegionBuilderAvailability(sources = state.regionBuilderSources?.sources || [], regions = state.regionBuilderRegions?.regions || []) {
+  const custom = state.regionBuilderGeographyMode === "custom";
+  const requiresCustom = regionBuilderModelBacked();
+  const identityReady = Boolean($("regionName").value.trim());
+  const geographyReady = !custom || state.regionBuilderSelectedBzones.size > 0;
+  const ready = Boolean((!requiresCustom || custom) && sources.length && regions.length && identityReady && geographyReady);
+  const reason = !identityReady ? "Enter a region name before previewing." : !geographyReady ? "Choose at least one Bzone before previewing." : "Choose an installed regional package and region first.";
+  setButtonAvailability($("previewRegionBuild"), ready, reason);
+  if (!ready) setButtonAvailability($("buildRegionAssets"), false, reason);
 }
 
 function resetRegionBuilderGeography() {
@@ -812,6 +1154,7 @@ function resetRegionBuilderGeography() {
   state.regionBuilderDraftBzones = new Set();
   state.regionBuilderDraftInitialized = false;
   state.regionBuilderGeographyQuery = "";
+  applyRegionBuilderIdentity("official");
   renderRegionGeographySummary();
 }
 
@@ -837,6 +1180,7 @@ function renderRegionGeographySummary() {
   summary.textContent = selected.size ? `${selected.size.toLocaleString()} planner-selected Bzones` : "No custom geography selected";
   detail.textContent = selected.size ? `${representedAzones.toLocaleString()} ${representedAzones === 1 ? "Azone" : "Azones"} represented in the custom geography.` : "Choose Azones and Bzones, then apply and preview the exact selection.";
   $("editCustomRegionGeography").textContent = selected.size ? "Edit geography…" : "Choose geography…";
+  updateRegionBuilderAvailability();
 }
 
 async function loadRegionGeographyOptions() {
@@ -873,95 +1217,85 @@ function renderRegionGeographyDialog() {
   const representedAzones = (options.azones || []).filter((item) => regionGeographyAzoneBzones(item).some((id) => selected.has(id))).length;
   $("regionGeographyStatus").textContent = `${representedAzones.toLocaleString()} ${representedAzones === 1 ? "Azone" : "Azones"} represented · ${selected.size.toLocaleString()} ${selected.size === 1 ? "Bzone" : "Bzones"} selected`;
   $("regionGeographyFooterCount").textContent = `${selected.size.toLocaleString()} ${selected.size === 1 ? "Bzone" : "Bzones"} selected`;
-  $("applyRegionGeography").disabled = selected.size === 0 || !customRegionIdentityValid();
-  $("applyRegionGeography").title = customRegionIdentityValid() ? "Save this exact Bzone selection and generate its preview." : "Enter a custom region name and code in Develop before applying this geography.";
+  $("applyRegionGeography").disabled = selected.size === 0;
   renderRegionGeographySelectionMap();
 }
 
-function renderRegionGeographySelectionMap() {
+function updateCustomRegionMapView() {
+  if (state.regionBuilderGeographyFrame) return;
+  state.regionBuilderGeographyFrame = requestAnimationFrame(() => {
+    state.regionBuilderGeographyFrame = null;
+    const svg = $("regionGeographyMap")?.querySelector("[data-custom-region-svg]");
+    const view = state.regionBuilderGeographyView;
+    if (svg) svg.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
+  });
+}
+
+function renderRegionGeographySelectionMap({rebuild = false, relabel = true} = {}) {
   const canvas = $("regionGeographyMap"), data = state.regionMapData, options = state.regionBuilderGeographyOptions;
   if (!canvas || !data || !options) return;
   const bounds = regionMapBounds([data.azones, data.bzones]);
   if (!bounds) { canvas.innerHTML = '<p class="empty-state">Virginia geography is unavailable.</p>'; return; }
   const projection = regionMapProjection(bounds), selected = state.regionBuilderDraftBzones;
   const known = new Set((options.bzones || []).map((item) => String(item.id)));
-  const sceneKey = `${state.regionBuilderGeographyKey}|${state.regionMapKey}|${(data.azones?.features || []).length}|${(data.bzones?.features || []).length}`;
-  const rebuild = canvas.dataset.sceneKey !== sceneKey;
-  const view = state.regionBuilderGeographyView;
-  if (rebuild) {
+  const azoneBzones = new Map();
+  (options.bzones || []).forEach((item) => { const id=String(item.fips); if(!azoneBzones.has(id))azoneBzones.set(id,[]); azoneBzones.get(id).push(String(item.id)); });
+  const sceneKey = `${state.regionMapKey}|${state.regionBuilderGeographyKey}`;
+  let svg = canvas.querySelector("[data-custom-region-svg]");
+  if (rebuild || !svg || canvas.dataset.sceneKey !== sceneKey) {
     const azonePaths = (data.azones?.features || []).map((feature) => {
-      const id = String(feature.properties?.azoneId || feature.properties?.Azones || ""), ids = (options.bzones || []).filter((item) => item.fips === id).map((item) => String(item.id));
-      const count = ids.filter((value) => selected.has(value)).length;
-      return `<path class="custom-region-azone${count ? ' selected' : ''}" data-custom-region-azone="${escapeHtml(id)}" d="${regionMapPath(feature, projection)}"><title>${escapeHtml(feature.properties?.localityName || feature.properties?.name || id)} · ${count}/${ids.length} Bzones selected</title></path>`;
+      const id = String(feature.properties?.azoneId || feature.properties?.Azones || ""), ids = azoneBzones.get(id) || [];
+      return `<path class="custom-region-azone" data-custom-region-azone="${escapeHtml(id)}" d="${regionMapPath(feature, projection)}"><title>${escapeHtml(feature.properties?.localityName || feature.properties?.name || id)} · 0/${ids.length} Bzones selected</title></path>`;
     }).join("");
     const bzonePaths = (data.bzones?.features || []).map((feature) => {
       const id = String(feature.properties?.bzoneId || feature.properties?.GEOID || "");
-      if (!known.has(id)) return "";
-      return `<path class="custom-region-bzone${selected.has(id) ? ' selected' : ''}" data-custom-region-bzone="${escapeHtml(id)}" d="${regionMapPath(feature, projection)}"><title>${escapeHtml(feature.properties?.localityName || '')} · ${escapeHtml(id)}</title></path>`;
+      return known.has(id) ? `<path class="custom-region-bzone" data-custom-region-bzone="${escapeHtml(id)}" d="${regionMapPath(feature, projection)}"><title>${escapeHtml(feature.properties?.localityName || '')} · ${escapeHtml(id)}</title></path>` : "";
     }).join("");
     const mpoPaths = (data.mpos?.features || []).map((feature) => `<path class="custom-region-mpo" d="${regionMapPath(feature, projection)}"></path>`).join("");
-    canvas.innerHTML = `<svg viewBox="${view.x} ${view.y} ${view.width} ${view.height}" role="img" aria-label="Select custom Virginia Azones and Bzones"><g data-custom-region-azones>${azonePaths}</g><g data-custom-region-bzones>${bzonePaths}</g><g data-custom-region-mpos>${mpoPaths}</g><g data-custom-region-labels></g></svg>`;
+    const view = state.regionBuilderGeographyView;
+    canvas.innerHTML = `<svg data-custom-region-svg viewBox="${view.x} ${view.y} ${view.width} ${view.height}" role="img" aria-label="Select custom Virginia Azones and Bzones"><g data-custom-region-azones>${azonePaths}</g><g data-custom-region-bzones>${bzonePaths}</g><g data-custom-region-labels></g><g data-custom-region-mpos>${mpoPaths}</g></svg>`;
     canvas.dataset.sceneKey = sceneKey;
-  } else {
-    canvas.querySelector("svg")?.setAttribute("viewBox", `${view.x} ${view.y} ${view.width} ${view.height}`);
-    canvas.querySelectorAll("[data-custom-region-azone]").forEach((path) => {
-      const ids = (options.bzones || []).filter((item) => item.fips === path.dataset.customRegionAzone).map((item) => String(item.id));
-      const count = ids.filter((id) => selected.has(id)).length;
-      path.classList.toggle("selected", count > 0);
-      const feature = (data.azones?.features || []).find((item) => String(item.properties?.azoneId || item.properties?.Azones || "") === path.dataset.customRegionAzone);
-      const title = path.querySelector("title");
-      if (title) title.textContent = `${feature?.properties?.localityName || feature?.properties?.name || path.dataset.customRegionAzone} · ${count}/${ids.length} Bzones selected`;
+    svg = canvas.querySelector("[data-custom-region-svg]");
+    canvas.querySelectorAll("[data-custom-region-azone]").forEach((path) => path.addEventListener("click", () => {
+      const ids = azoneBzones.get(path.dataset.customRegionAzone) || [], add = ids.some((id) => !state.regionBuilderDraftBzones.has(id));
+      ids.forEach((id) => add ? state.regionBuilderDraftBzones.add(id) : state.regionBuilderDraftBzones.delete(id)); renderRegionGeographyDialog();
+    }));
+    canvas.querySelectorAll("[data-custom-region-bzone]").forEach((path) => path.addEventListener("click", () => {
+      const id = path.dataset.customRegionBzone; if (state.regionBuilderDraftBzones.has(id)) state.regionBuilderDraftBzones.delete(id); else state.regionBuilderDraftBzones.add(id); renderRegionGeographyDialog();
+    }));
+    canvas.onwheel = (event) => { event.preventDefault(); zoomCustomRegionMap(event.deltaY < 0 ? .8 : 1.25); };
+    svg?.addEventListener("pointerdown",(event)=>{
+      if(event.button!==0||event.target!==svg)return;
+      event.preventDefault();
+      state.regionBuilderGeographyPan={startX:event.clientX,startY:event.clientY,rect:svg.getBoundingClientRect(),view:{...state.regionBuilderGeographyView}};
+      canvas.classList.add("is-panning");
     });
-    canvas.querySelectorAll("[data-custom-region-bzone]").forEach((path) => path.classList.toggle("selected", selected.has(path.dataset.customRegionBzone)));
   }
-  const setSvgLayerVisible = (selector, visible) => {
-    const group = canvas.querySelector(selector);
-    if (!group) return;
-    group.toggleAttribute("hidden", !visible);
-    group.style.pointerEvents = visible ? "" : "none";
-  };
-  setSvgLayerVisible("[data-custom-region-azones]", Boolean($("customRegionAzoneLayer")?.checked));
-  setSvgLayerVisible("[data-custom-region-bzones]", Boolean($("customRegionBzoneLayer")?.checked));
-  setSvgLayerVisible("[data-custom-region-mpos]", Boolean($("customRegionMpoLayer")?.checked));
-  const labelEntries = [];
-  const showAzoneNames = $("customRegionAzoneLabels")?.checked, showAzoneIds = $("customRegionAzoneIdLabels")?.checked;
-  if (showAzoneNames || showAzoneIds) (data.azones?.features || []).forEach((feature) => {
-    const id = String(feature.properties?.azoneId || feature.properties?.Azones || ""), ids = (options.bzones || []).filter((item) => item.fips === id).map((item) => String(item.id));
-    const name = feature.properties?.localityName || feature.properties?.name || id, shortName = WorkbenchPolygonLabels.shortenLocality(name);
-    const candidates = showAzoneNames && showAzoneIds
-      ? [[name, id], ...(shortName && shortName !== name ? [[shortName, id]] : []), [id]]
-      : showAzoneNames ? [[name], ...(shortName && shortName !== name ? [[shortName]] : [])] : [[id]];
-    labelEntries.push({feature, priority: ids.some((value) => selected.has(value)) ? 35 : 0, candidates, className: showAzoneNames ? "custom-region-azone-label" : "custom-region-azone-id-label"});
+  canvas.querySelector("[data-custom-region-mpos]")?.toggleAttribute("hidden", !$("customRegionMpoLayer")?.checked);
+  canvas.querySelector("[data-custom-region-azones]")?.toggleAttribute("hidden", !$("customRegionAzoneLayer")?.checked);
+  canvas.querySelector("[data-custom-region-bzones]")?.toggleAttribute("hidden", !$("customRegionBzoneLayer")?.checked);
+  canvas.querySelectorAll("[data-custom-region-bzone]").forEach((path) => path.classList.toggle("selected", selected.has(path.dataset.customRegionBzone)));
+  canvas.querySelectorAll("[data-custom-region-azone]").forEach((path) => {
+    const ids=azoneBzones.get(path.dataset.customRegionAzone)||[], count=ids.filter((id)=>selected.has(id)).length;
+    path.classList.toggle("selected", count>0); const title=path.querySelector("title"); if(title)title.textContent=`${title.textContent.split(" · ")[0]} · ${count}/${ids.length} Bzones selected`;
   });
-  if ($("customRegionBzoneLabels")?.checked) (data.bzones?.features || []).forEach((feature) => {
-    const id = String(feature.properties?.bzoneId || feature.properties?.GEOID || "");
-    if (known.has(id)) labelEntries.push({feature, priority: selected.has(id) ? 40 : 0, candidates: [[id]], className: "custom-region-bzone-label"});
+  updateCustomRegionMapView();
+  if (!relabel) return;
+  const labelEntries = [], showAzoneNames = $("customRegionAzoneLabels")?.checked, showAzoneIds = $("customRegionAzoneIdLabels")?.checked;
+  if ((showAzoneNames || showAzoneIds) && $("customRegionAzoneLayer")?.checked) (data.azones?.features || []).forEach((feature) => {
+    const id=String(feature.properties?.azoneId||feature.properties?.Azones||""),ids=azoneBzones.get(id)||[],name=feature.properties?.localityName||feature.properties?.name||id,shortName=WorkbenchPolygonLabels.shortenLocality(name);
+    const candidates = showAzoneNames && showAzoneIds ? [[name, id], ...(shortName && shortName !== name ? [[shortName, id]] : []), [id]] : showAzoneNames ? [[name], ...(shortName && shortName !== name ? [[shortName]] : [])] : [[id]];
+    labelEntries.push({feature,priority:ids.some((value)=>selected.has(value))?35:0,candidates,className:showAzoneNames?"custom-region-azone-label":"custom-region-azone-id-label"});
   });
-  WorkbenchPolygonLabels.layout({group: canvas.querySelector("[data-custom-region-labels]"), entries: labelEntries, view, viewport: {width: Math.max(1, canvas.clientWidth), height: Math.max(1, canvas.clientHeight)}, project: projection.point, pathFor: (feature) => regionMapPath(feature, projection), maxLabels: 250});
-  canvas.querySelectorAll("[data-custom-region-azone]").forEach((path) => path.onclick = () => {
-    const item = options.azones.find((value) => value.fips === path.dataset.customRegionAzone), ids = item ? regionGeographyAzoneBzones(item) : [];
-    const add = ids.some((id) => !selected.has(id)); ids.forEach((id) => add ? selected.add(id) : selected.delete(id)); renderRegionGeographyDialog();
-  });
-  canvas.querySelectorAll("[data-custom-region-bzone]").forEach((path) => path.onclick = () => {
-    const id = path.dataset.customRegionBzone; if (selected.has(id)) selected.delete(id); else selected.add(id); renderRegionGeographyDialog();
-  });
-  canvas.onwheel = (event) => { event.preventDefault(); zoomCustomRegionMap(event.deltaY < 0 ? .8 : 1.25); };
-  const svg=canvas.querySelector("svg");
-  if(svg)svg.onpointerdown=(event)=>{
-    if(event.button!==0||event.target!==svg)return;
-    event.preventDefault();
-    const rect=svg.getBoundingClientRect();
-    state.regionBuilderGeographyPan={startX:event.clientX,startY:event.clientY,rect,view:{...state.regionBuilderGeographyView}};
-    canvas.classList.add("is-panning");
-  };
+  if ($("customRegionBzoneLabels")?.checked && $("customRegionBzoneLayer")?.checked) (data.bzones?.features || []).forEach((feature) => { const id=String(feature.properties?.bzoneId||feature.properties?.GEOID||""); if(known.has(id))labelEntries.push({feature,priority:selected.has(id)?40:0,candidates:[[id]],className:"custom-region-bzone-label"}); });
+  WorkbenchPolygonLabels.layout({group:canvas.querySelector("[data-custom-region-labels]"),entries:labelEntries,view:state.regionBuilderGeographyView,viewport:{width:Math.max(1,canvas.clientWidth),height:Math.max(1,canvas.clientHeight)},project:projection.point,pathFor:(feature)=>regionMapPath(feature,projection),maxLabels:250});
 }
 
-function scheduleRegionGeographyMapRender(){if(state.regionBuilderGeographyFrame)return;state.regionBuilderGeographyFrame=requestAnimationFrame(()=>{state.regionBuilderGeographyFrame=null;renderRegionGeographySelectionMap()})}
 window.addEventListener("pointermove",(event)=>{
   const pan=state.regionBuilderGeographyPan;if(!pan)return;
   const dx=(event.clientX-pan.startX)/Math.max(1,pan.rect.width)*pan.view.width,dy=(event.clientY-pan.startY)/Math.max(1,pan.rect.height)*pan.view.height;
   state.regionBuilderGeographyView={...pan.view,x:pan.view.x-dx,y:pan.view.y-dy};
-  scheduleRegionGeographyMapRender();
+  updateCustomRegionMapView();
   $("regionGeographyMap")?.classList.add("is-panning");
 });
 window.addEventListener("pointerup",()=>{state.regionBuilderGeographyPan=null;$("regionGeographyMap")?.classList.remove("is-panning");});
@@ -970,7 +1304,7 @@ window.addEventListener("pointercancel",()=>{state.regionBuilderGeographyPan=nul
 function zoomCustomRegionMap(factor) {
   const view = state.regionBuilderGeographyView, width = Math.max(80, Math.min(1000, view.width * factor)), height = width * .62;
   state.regionBuilderGeographyView = {x: view.x + (view.width-width)/2, y: view.y + (view.height-height)/2, width, height};
-  scheduleRegionGeographyMapRender();
+  updateCustomRegionMapView();
 }
 
 async function openRegionGeographyDialog() {
@@ -1030,10 +1364,13 @@ function renderRegionBuilderPreview() {
   const azones = (selection.azones || []).map((item) => escapeHtml(item)).join(", ");
   const boundary = selection.boundary || {};
   const sourceName = preview.sourceLibrary?.name || preview.sourceTemplate?.name || "source";
-  const title = preview.region?.name || "Selected region";
+  const title = state.regionBuilderGeographyMode === "custom"
+    ? ($("regionName").value.trim() || "Selected region")
+    : (preview.region?.name || "Selected region");
   const selectedCount = boundary.selectedCount || (selection.bzones || []).length;
   const includedBoundary = boundary.boundaryCount || 0;
   const customized = selection.method === "custom-bzone-selection";
+  const installedScope = selection.method === "installed-model-scope";
   const added = (boundary.addedBzones || []).length, removed = (boundary.removedBzones || []).length;
   const copiedFiles = (preview.files || []).length;
   const warnings = (preview.warnings || []).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -1041,8 +1378,8 @@ function renderRegionBuilderPreview() {
     <div class="section-title"><div><p class="step">Region preview</p><h3>${escapeHtml(title)}</h3><p class="muted">Prepared from ${escapeHtml(sourceName)}</p></div></div>
     <div class="region-preview-summary"><div><strong>${selectedCount.toLocaleString()}</strong><span>Included Bzones</span></div><div><strong>${(selection.azones || []).length.toLocaleString()}</strong><span>Azones / localities</span></div><div><strong>${(customized ? added : includedBoundary).toLocaleString()}</strong><span>${customized ? "Added vs. official" : "Boundary overlaps included"}</span></div>${customized ? `<div><strong>${removed.toLocaleString()}</strong><span>Removed vs. official</span></div>` : ""}</div>
     ${azones ? `<p class="region-preview-localities"><strong>Included localities:</strong> ${azones}</p>` : ""}
-    <div class="region-preview-advisory"><p><strong>${customized ? "Planner-defined geography" : "Boundary review"}:</strong> ${customized ? `${added} Bzones added and ${removed} removed from the official MPO selection.` : `${includedBoundary} boundary-crossing ${includedBoundary === 1 ? "Bzone is" : "Bzones are"} included. Every Bzone with at least 1% of its area inside the MPO is used.`}</p><button type="button" class="secondary" data-open-region-map>View map</button></div>
-    <div class="region-preview-build"><strong>Ready to build</strong><p class="muted">Workbench will create a filtered InputLibrary and runnable model template from ${copiedFiles} input files. Azone and Marea values remain whole-locality values.</p></div>
+    <div class="region-preview-advisory"><p><strong>${customized ? "Planner-defined geography" : installedScope ? "Installed model scope" : "Boundary review"}:</strong> ${customized ? `${removed} Bzones are excluded from the installed model scope.` : installedScope ? "Every displayed Azone and Bzone is contained in the model package." : `${includedBoundary} boundary-crossing ${includedBoundary === 1 ? "Bzone is" : "Bzones are"} included according to the installed regional package.`}</p><button type="button" class="secondary" data-open-region-map>View map</button></div>
+    <div class="region-preview-build"><strong>Ready to build</strong><p class="muted">Workbench will create a filtered Input Library and runnable model package from ${copiedFiles} input files. Azone and Marea values remain whole-locality values.</p></div>
     <details class="region-preview-technical"><summary>Technical details</summary>${warnings ? `<ul>${warnings}</ul>` : ""}<table><thead><tr><th>File</th><th>Action</th><th>Level</th><th>Rows before</th><th>Rows after</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
@@ -1056,10 +1393,6 @@ function renderRegionBuilderPreviewError() {
 }
 
 async function previewRegionBuild(button = $("previewRegionBuild")) {
-  if (state.regionBuilderGeographyMode === "custom" && !customRegionIdentityValid()) {
-    notify("Enter a custom region name and code before previewing.", "error");
-    return null;
-  }
   setBusy(button, true, "Previewing…");
   state.regionBuilderPreviewError = "";
   renderRegionBuilderPreviewError();
@@ -1238,14 +1571,60 @@ function zoomRegionMap(factor, anchor) {
 function applyRegionMapLayers() {
   document.querySelectorAll("[data-region-map-layer]").forEach((input) => {
     const group = $("regionMapCanvas").querySelector(`[data-map-group="${input.dataset.regionMapLayer}"]`);
-    if (group) group.style.display = input.checked ? "" : "none";
+    if (group) group.style.display = regionMapLayerVisible(input.dataset.regionMapLayer) ? "" : "none";
   });
   updateRegionMapNameLabels();
   updateRegionMapIdLabels();
+  if (state.regionMapSelectedFeature && !regionMapSelectedFeatureVisible()) clearRegionMapInspector();
+}
+
+function configureRegionMapControls() {
+  const modelScoped = regionBuilderModelBacked();
+  const modelName = (state.regionBuilderPackages || []).find((item) => item.id === state.regionBuilderPackageId)?.name || "Model";
+  document.querySelector("#regionMapDialog .region-map-shell")?.classList.toggle("model-scope", modelScoped);
+  $("regionMapFocus").hidden = modelScoped;
+  $("regionMapSelectedLayerWrapper").hidden = modelScoped;
+  $("regionMapBoundaryLayerWrapper").hidden = modelScoped;
+  $("regionMapNameLabelsWrapper").hidden = modelScoped;
+  $("regionMapSelectedLegend").hidden = modelScoped;
+  $("regionMapBoundaryLegend").hidden = modelScoped;
+  $("regionMapMpoLayerWrapper").querySelector("span").textContent = modelScoped ? `${modelName} boundary` : "All MPO boundaries";
+  $("regionMapAzoneLayerWrapper").querySelector("span").textContent = modelScoped ? "Azones" : "All Azones";
+  $("regionMapBzoneLayerWrapper").querySelector("span").textContent = modelScoped ? "Bzones" : "All Bzones";
+  $("regionMapMpoLegend").querySelector("span").textContent = modelScoped ? `${modelName} boundary` : "All MPO boundaries";
+  $("regionMapAzoneLegend").querySelector("span").textContent = modelScoped ? "Azones" : "All Azones";
+  $("regionMapBzoneLegend").querySelector("span").textContent = modelScoped ? "Bzones" : "All Bzones";
+  $("fitRegionMap").textContent = modelScoped ? "Fit scope" : "Fit MPO";
+  $("resetRegionMap").textContent = modelScoped ? "Full scope" : "Virginia";
 }
 
 function regionMapLayerVisible(name) {
-  return document.querySelector(`[data-region-map-layer="${name}"]`)?.checked !== false;
+  const input = document.querySelector(`[data-region-map-layer="${name}"]`);
+  return Boolean(input?.checked && !input.closest("[hidden]"));
+}
+
+function regionMapVisibleBzoneIds() {
+  const scene = state.regionMapScene;
+  if (!scene) return new Set();
+  if (regionMapLayerVisible("all-bzones")) return null;
+  const selected = new Set((scene.currentRegion?.selectedBzones || []).map(String));
+  const included = new Set((scene.currentRegion?.includedBoundaryBzones || []).map(String));
+  const visible = new Set();
+  if (regionMapLayerVisible("selected-bzones")) {
+    selected.forEach((id) => { if (!included.has(id)) visible.add(id); });
+  }
+  if (regionMapLayerVisible("included-boundary")) included.forEach((id) => visible.add(id));
+  return visible;
+}
+
+function regionMapSelectedFeatureVisible() {
+  const selected = state.regionMapSelectedFeature;
+  if (!selected) return false;
+  if (selected.type === "azone") return regionMapLayerVisible("azones");
+  if (selected.type === "mpo") return regionMapLayerVisible("mpos");
+  if (selected.type !== "bzone") return false;
+  const visibleBzones = regionMapVisibleBzoneIds();
+  return visibleBzones === null || visibleBzones.has(String(selected.id));
 }
 
 function regionMapScreenPosition(point, view, width, height) {
@@ -1272,12 +1651,13 @@ function updateRegionMapLabelControls() {
 }
 
 function updateRegionMapNameLabels(sharedOccupied = null) {
+  const occupied = sharedOccupied instanceof Set ? sharedOccupied : new Set();
   const scene = state.regionMapScene;
   if (!scene?.groups?.labels) return;
   updateRegionMapLabelControls();
   if (!$("regionMapNameLabels")?.checked || !regionMapLayerVisible("azones")) {
     scene.groups.labels.innerHTML = "";
-    return sharedOccupied || new Set();
+    return occupied;
   }
   const region = scene.currentRegion;
   const participating = new Set(region?.azoneFips || []);
@@ -1286,7 +1666,7 @@ function updateRegionMapNameLabels(sharedOccupied = null) {
     : [];
   const view = state.regionMapView || scene.fullView;
   const canvas = $("regionMapCanvas"), width = Math.max(1, canvas.clientWidth), height = Math.max(1, canvas.clientHeight);
-  const occupied = sharedOccupied || new Set(), labels = [];
+  const labels = [];
   const includeId = Boolean($("regionMapIdLabels")?.checked);
   for (const [id, feature] of entries) {
     const center = scene.featureCenters.get(`azone:${id}`);
@@ -1435,15 +1815,10 @@ function inspectRegionMapFeature(type, id, feature) {
 function regionMapHitFeature(point) {
   const scene = state.regionMapScene;
   if (!scene || !point) return null;
-  const current = scene.currentRegion;
-  const focusedBzones = new Set([
-    ...(current?.selectedBzones || []), ...(current?.includedBoundaryBzones || []),
-  ].map(String));
-  const showAllBzones = regionMapLayerVisible("all-bzones");
-  const showFocusedBzones = regionMapLayerVisible("selected-bzones") || regionMapLayerVisible("included-boundary");
-  if (showAllBzones || showFocusedBzones) {
+  const visibleBzones = regionMapVisibleBzoneIds();
+  if (visibleBzones === null || visibleBzones.size) {
     for (const entry of scene.hitBzones) {
-      if (!showAllBzones && !focusedBzones.has(entry.id)) continue;
+      if (visibleBzones !== null && !visibleBzones.has(entry.id)) continue;
       const bounds = entry.bounds;
       if (bounds && point.x >= bounds.minX && point.x <= bounds.maxX && point.y >= bounds.minY && point.y <= bounds.maxY && regionMapFeatureContains(entry.feature, point, scene.projection)) return {type: "bzone", ...entry};
     }
@@ -1475,12 +1850,15 @@ function updateRegionMapSelection({zoom = true} = {}) {
   const selected = region?.selectedBzones || [];
   const included = new Set(region?.includedBoundaryBzones || []);
   const ordinary = selected.filter((geoid) => !included.has(String(geoid)));
-  scene.groups.mpoFocus.innerHTML = mpoFeature ? `<path class="region-map-mpo-focus" d="${regionMapPath(mpoFeature, scene.projection)}"><title>${escapeHtml(region.name)}</title></path>` : "";
-  scene.groups.selected.innerHTML = ordinary.map((geoid) => regionMapOverlayPath(scene, geoid, "region-map-bzone-selected", "selected MPO Bzone")).join("");
-  scene.groups.included.innerHTML = [...included].map((geoid) => regionMapOverlayPath(scene, geoid, "region-map-bzone-boundary", "included boundary case")).join("");
+  const modelScoped = regionBuilderModelBacked();
+  scene.groups.mpoFocus.innerHTML = !modelScoped && mpoFeature ? `<path class="region-map-mpo-focus" d="${regionMapPath(mpoFeature, scene.projection)}"><title>${escapeHtml(region.name)}</title></path>` : "";
+  scene.groups.selected.innerHTML = modelScoped ? "" : ordinary.map((geoid) => regionMapOverlayPath(scene, geoid, "region-map-bzone-selected", "selected MPO Bzone")).join("");
+  scene.groups.included.innerHTML = modelScoped ? "" : [...included].map((geoid) => regionMapOverlayPath(scene, geoid, "region-map-bzone-boundary", "included boundary case")).join("");
   scene.groups.labels.innerHTML = "";
   $("regionMapTitle").textContent = region?.name || "Virginia MPO geography";
-  $("regionMapSubtitle").textContent = region
+  $("regionMapSubtitle").textContent = modelScoped && region
+    ? `${selected.length.toLocaleString()} included Bzones · ${(region.azoneFips || []).length.toLocaleString()} Azones / localities`
+    : region
     ? `${selected.length.toLocaleString()} included Bzones · ${(selected.length - included.size).toLocaleString()} substantially inside · ${included.size} boundary overlaps of at least 1%`
     : `${(data.summary?.mpos || 0).toLocaleString()} MPOs · ${(data.summary?.azones || 0).toLocaleString()} Azones · ${(data.summary?.bzones || 0).toLocaleString()} Bzones statewide`;
   const reviewFeatures = [mpoFeature, ...selected].map((item) => typeof item === "string" ? scene.bzoneFeatures.get(item) : item).filter(Boolean);
@@ -1545,6 +1923,7 @@ function renderRegionMap() {
     },
   };
   clearRegionMapInspector();
+  configureRegionMapControls();
   updateRegionMapSelection({zoom: false});
   $("regionMapLegend").hidden = false;
 }
@@ -1556,11 +1935,19 @@ function renderRegionMapLoadStatus() {
     idle: "",
     loading: "Preparing map…",
     ready: state.regionMapData?.cached ? "Cached locally" : "Map ready",
-    failed: "Map unavailable · select View map to retry",
+    failed: "Map unavailable · select Retry map",
   };
   status.textContent = labels[state.regionMapLoadState] || "";
   status.classList.toggle("error-text", state.regionMapLoadState === "failed");
-  button.disabled = !(state.regionBuilderRegions?.regions || []).length || state.regionMapLoadState === "loading";
+  const hasRegions = Boolean((state.regionBuilderRegions?.regions || []).length);
+  const loading = state.regionMapLoadState === "loading";
+  const text = state.regionMapLoadState === "failed" ? "Retry map" : loading ? "View map (loading…)" : "View map";
+  [button, ...document.querySelectorAll("[data-open-region-map]")].forEach((mapButton) => {
+    mapButton.textContent = text;
+    mapButton.disabled = !hasRegions || loading;
+    mapButton.setAttribute("aria-busy", String(loading));
+    mapButton.title = loading ? "Map geometry is loading." : state.regionMapLoadState === "failed" ? "Retry loading map geometry." : "Open the boundary map.";
+  });
 }
 
 async function preloadRegionMapGeometry({force = false} = {}) {
@@ -1575,7 +1962,7 @@ async function preloadRegionMapGeometry({force = false} = {}) {
   state.regionMapLoadState = "loading";
   state.regionMapLoadError = "";
   renderRegionMapLoadStatus();
-  state.regionMapLoadPromise = request(`/api/region-builder/map/statewide?packageId=${encodeURIComponent(packageId)}`)
+  const loadPromise = request(`/api/region-builder/map/statewide?packageId=${encodeURIComponent(packageId)}`)
     .then((data) => {
       if (state.regionBuilderPackageId !== packageId) return null;
       state.regionMapData = data;
@@ -1587,13 +1974,18 @@ async function preloadRegionMapGeometry({force = false} = {}) {
       return data;
     })
     .catch((error) => {
-      state.regionMapLoadState = "failed";
-      state.regionMapLoadError = error.message;
-      renderRegionMapLoadStatus();
+      if (state.regionBuilderPackageId === packageId) {
+        state.regionMapLoadState = "failed";
+        state.regionMapLoadError = error.message;
+        renderRegionMapLoadStatus();
+      }
       throw error;
-    })
-    .finally(() => { state.regionMapLoadPromise = null; });
-  return state.regionMapLoadPromise;
+    });
+  const trackedPromise = loadPromise.finally(() => {
+    if (state.regionMapLoadPromise === trackedPromise) state.regionMapLoadPromise = null;
+  });
+  state.regionMapLoadPromise = trackedPromise;
+  return trackedPromise;
 }
 
 async function openRegionMap() {
@@ -1602,6 +1994,7 @@ async function openRegionMap() {
   if (!packageId) return notify("Choose an installed regional package before opening the map.", "error");
   $("regionMapDialog").showModal();
   syncMenuContext();
+  configureRegionMapControls();
   $("regionMapTitle").textContent = "Virginia MPO geography";
   $("regionMapCanvas").className = "region-map-canvas empty-state";
   $("regionMapCanvas").textContent = state.regionMapLoadState === "failed" ? "Retrying official map geometry…" : "Loading official map geometry…";
@@ -1622,14 +2015,16 @@ async function openRegionMap() {
 
 async function loadExploreFiles(libraryId = state.exploreLibraryId) {
   state.exploreLibraryId = libraryId;
+  const explanationId = state.exploreExplanationId;
   state.exploreSelectedFile = "";
   state.exploreDetail = null;
   $("exploreFiles").className = "explore-file-list empty-state";
   $("exploreFiles").textContent = "Loading input files…";
   try {
-    const payload = await request(`/api/explore/files?libraryId=${encodeURIComponent(libraryId || "")}&explanationPackageId=${encodeURIComponent(state.exploreExplanationId || "")}`);
-    if (state.exploreLibraryId !== libraryId) return;
+    const payload = await request(`/api/explore/files?libraryId=${encodeURIComponent(libraryId || "")}&explanationPackageId=${encodeURIComponent(explanationId || "")}`);
+    if (state.exploreLibraryId !== libraryId || state.exploreExplanationId !== explanationId) return;
     state.exploreFiles = payload.files || [];
+    renderExploreExplanationNotice(payload.explanationPackage || null);
     renderExploreFiles();
   } catch (error) {
     notify(error.message, "error");
@@ -1653,7 +2048,7 @@ function renderExploreFiles() {
   container.innerHTML = files.length ? files.map((file) => `
     <button class="explore-file ${state.exploreSelectedFile === file.filename ? "selected" : ""}" data-explore-file="${escapeHtml(file.filename)}" type="button">
       <span><strong>${escapeHtml(file.filename)}</strong><small>${escapeHtml(file.level)} · ${file.columnCount} fields</small></span>
-      ${file.installed ? `<span class="pill">Installed</span>` : file.hasExplanation ? `<span class="pill">Catalog guide</span>` : `<span class="pill">Catalog</span>`}
+      ${file.installed ? `<span class="pill">Installed</span>` : `<span class="pill" title="VisionEval recognizes this input, but the selected Input Library does not contain it.">Not included</span>`}
       <p>${escapeHtml(file.description)}</p>
     </button>`).join("") : "No input files match this search.";
   container.querySelectorAll("[data-explore-file]").forEach((button) => button.addEventListener("click", () => loadExploreFile(button.dataset.exploreFile)));
@@ -1669,24 +2064,29 @@ async function loadExploreFile(filename) {
     state.exploreDetail = detail;
     renderExploreDetail();
   } catch (error) {
-    notify(error.message, "error");
+    if (state.exploreSelectedFile !== filename) return;
+    state.exploreDetail = null;
+    $("exploreDetail").innerHTML = `<section class="panel empty-state"><h3>Input details unavailable</h3><p>This input could not be loaded. Try again, or repair the workspace from Settings.</p></section>`;
+    notify("This input detail could not be loaded. Try again or repair the workspace from Settings.", "error");
   }
 }
 
 function renderExploreDetail() {
   const detail = state.exploreDetail;
   if (!detail) return;
+  const catalogOnly = detail.availability === "catalog_only";
   $("exploreDetail").innerHTML = `
     <section class="panel explore-overview">
       <div><p class="step">${escapeHtml(detail.level)} input</p><h3>${escapeHtml(detail.filename)}</h3><p>${escapeHtml(detail.description)}</p></div>
       <span class="stable-id" title="Stable mapping identifier">${escapeHtml(detail.id)}</span>
     </section>
+    ${catalogOnly ? `<section class="notice"><strong>This file is not included in the selected Input Library.</strong><p>Install a model package containing this file to inspect its fields and values.</p></section>` : ""}
     <section class="panel">
       <div class="section-title"><div><p class="step">Fields</p><h3>Fields in this file</h3><p class="muted">Definitions and units come from VisionEval module specifications and the packaged input guide when available.</p></div></div>
       ${detail.fields.length ? `<div class="explore-fields">${detail.fields.map((field) => `
         <article class="explore-field ${field.unitWarning ? "metadata-warning" : ""}"><div><strong>${escapeHtml(field.display)}</strong>${field.display !== field.name ? `<code>${escapeHtml(field.name)}</code>` : ""}</div><p class="${field.descriptionAvailable === false ? "missing-description" : ""}">${escapeHtml(field.description)}</p><small>${field.identifier ? "Identifier · preserved as text" : [field.type, field.units].filter(Boolean).map(escapeHtml).join(" · ") || "Unit not verified"}</small><small class="metadata-source ${field.sourceAvailable === false ? "missing-source" : ""}">Source: ${escapeHtml(field.source || "Not recorded")}</small>${field.unitWarning ? `<p class="unit-warning"><strong>Unit review needed:</strong> ${escapeHtml(field.unitWarning)}</p>` : ""}</article>`).join("")}</div>
-    </section>` : `<div class="explore-fields"><p class="muted">Install or import an InputLibrary containing this file to inspect its actual columns and field definitions.</p></div></section>`}
-    ${detail.explanationHtml ? `<details class="panel explanation-panel" open><summary>Full input-file explanation</summary><div class="explanation-content">${detail.explanationHtml}</div></details>` : `<section class="panel"><h3>Full explanation</h3><p class="muted">A long-form guide has not been written for this file yet. The field descriptions above remain available.</p></section>`}
+    </section>` : `<div class="explore-fields"><p class="muted">Install a model package containing this file to inspect its actual columns and field definitions.</p></div></section>`}
+    ${detail.explanationHtml ? `<details class="panel explanation-panel" open><summary>Full input-file explanation</summary><div class="explanation-content">${detail.explanationHtml}</div></details>` : `<section class="panel"><h3>Input explanation</h3><p class="muted">${catalogOnly ? "No preloaded explanation is available for this input." : "A long-form guide has not been written for this file yet. The field descriptions above remain available."}</p></section>`}
     <section class="panel mapping-preview">
       <div><p class="step">Dependency network</p><h3>What could this input affect?</h3><p>Open the selected model’s declared execution network focused on this input file.</p></div>
       <button id="viewFileDependencies" type="button">View Dependencies</button>
@@ -1697,10 +2097,11 @@ function renderExploreDetail() {
   });
 }
 
-function switchExploreSubpage(pageId) {
+function switchExploreSubpage(pageId, resetScroll = true) {
+  state.activeExploreSubpage = pageId;
   document.querySelectorAll(".explore-subpage").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll("[data-explore-subpage]").forEach((button) => button.classList.toggle("active", button.dataset.exploreSubpage === pageId));
-  window.scrollTo({left:0, top:0});
+  if (resetScroll) window.scrollTo({left:0, top:0});
 }
 
 function dependencyKind(node) {
@@ -1888,33 +2289,26 @@ function renderDependencyGraph() {
   $("dependencyWarnings").innerHTML = graph.unknownModules?.length ? `<div class="dependency-warning"><strong>Unresolved custom modules:</strong> ${graph.unknownModules.map(escapeHtml).join(", ")}. They remain visible but no relationships were inferred.</div>` : "";
 }
 
-async function saveDependencyExport(format) {
+function saveDependencyExport(format) {
   const graph = state.dependencyGraph;
   if (!state.dependencyTemplateId || !graph) return notify("Load a dependency graph before exporting.", "error");
-  const button = $(`dependencyExport${format.charAt(0).toUpperCase()}${format.slice(1)}`);
-  setBusy(button, true, "Exporting…");
-  try {
-    const saved = await window.__TAURI_INTERNALS__.invoke("save_dependency_export", {
+  const snapshot={
       format,
       templateId: state.dependencyTemplateId,
       focusId: graph.focusId || "",
       scope: graph.focusView?.scope || "",
       originId: graph.focusView?.originId || "",
       view: graph.focusView?.view || "",
-    });
+  };
+  enqueueExport(`Dependency ${format.toUpperCase()}`,async()=>{
+    const saved = await window.__TAURI_INTERNALS__.invoke("save_dependency_export", snapshot);
     if (saved) notify(`Export saved to ${saved}.`, "success");
-  } catch (error) {
-    notify(error.message || String(error), "error");
-  } finally {
-    setBusy(button, false);
-  }
+    return saved||null;
+  });
 }
 
 function renderRuntime() {
-  const runtime = state.data?.runtime || {};
-  const profile = (state.desktop?.runtimeProfiles || []).find((item) => item.id === state.desktop?.activeRuntimeProfileId);
-  const native = runtime.adapter === "native";
-  const verified = Boolean(profile?.verified && runtime.imagePresent && (native || (runtime.digestMatches !== false && runtime.provenanceMatches !== false)));
+  const {runtime, profile, native, verified} = runtimeSetupSnapshot();
   const releaseCheck = runtime.releaseCheck || {};
   const dot = $("runtimeDot");
   dot.className = `dot ${runtime.running ? "ok" : "bad"}`;
@@ -1935,7 +2329,7 @@ function renderRuntime() {
     : !runtime.running
       ? "Start Docker Desktop here, then Workbench will wait for the engine and verify the pinned runtime."
       : !runtime.imagePresent
-        ? "The compatible VisionEval runtime image is not installed. Follow Runtime setup, then verify the image."
+        ? "The compatible VisionEval runtime image is not installed. Select Install runtime to download and verify it."
         : !runtime.provenanceMatches ? "This image does not carry the required VisionEval compatibility identity. Replace it before verification."
         : !verified ? "Verify the VisionEval runtime once. Workbench will save its immutable digest for later launches."
         : releaseCheck.status === "update_available" ? `${releaseCheck.message} The verified runtime remains available; Workbench will never update it automatically.`
@@ -1952,6 +2346,7 @@ function renderRuntime() {
       }
     } catch (_) { /* A blocked localStorage must never affect runtime use. */ }
   }
+  renderRuntimeSetupControls();
 }
 
 async function startDockerAndVerify(button) {
@@ -1968,17 +2363,112 @@ async function startDockerAndVerify(button) {
       if (state.data.runtime.imagePresent) {
         await verifyAndSaveRuntime();
         await refreshState({quiet:true});
+        state.runtimeSetupPhase = "idle";
+        state.runtimeSetupMessage = "";
+        renderRuntime();
         notify("Official VisionEval VE-40-RC6 runtime verified.", "success");
       } else {
+        state.runtimeSetupPhase = "failed";
+        state.runtimeSetupMessage = "Docker is ready, but the pinned VE-40-RC6 image still needs to be installed.";
+        renderRuntimeSetupControls();
         notify("Docker is ready, but the pinned VE-40-RC6 image still needs to be installed.", "error");
       }
       return;
     }
     throw new Error("Docker Desktop did not become ready within two minutes.");
   } catch (error) {
+    state.runtimeSetupPhase = "failed";
+    state.runtimeSetupMessage = error.message || String(error);
+    renderRuntimeSetupControls();
     notify(error.message || String(error), "error");
   } finally {
     setBusy(button, false);
+    renderRuntimeSetupControls();
+  }
+}
+
+async function installAndSaveRuntime(button, statusElement = null) {
+  if (!window.__TAURI_INTERNALS__?.invoke) return notify("Runtime installation is available in the macOS desktop application.", "error");
+  const runtime = state.data?.runtime || {};
+  if (!runtime.installed) {
+    const message = "Docker Desktop is required before Workbench can install the VisionEval runtime.";
+    state.runtimeSetupPhase = "failed";
+    state.runtimeSetupMessage = message;
+    renderRuntimeSetupControls();
+    return notify(message, "error");
+  }
+  setBusy(button, true, "Installing…");
+  state.runtimeSetupPhase = "installing";
+  state.runtimeSetupMessage = runtime.running ? "Preparing the pinned runtime download…" : "Starting Docker Desktop…";
+  renderRuntimeSetupControls();
+  try {
+    if (!runtime.running) {
+      await window.__TAURI_INTERNALS__.invoke("start_docker_desktop");
+      for (let attempt = 0; attempt < 48; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2500));
+        await refreshState({quiet:true});
+        if (state.data?.runtime?.running) break;
+      }
+      if (!state.data?.runtime?.running) throw new Error("Docker Desktop did not become ready within two minutes.");
+    }
+    state.runtimeSetupMessage = "Downloading and verifying the pinned runtime… This can take several minutes the first time.";
+    renderRuntimeSetupControls();
+    const operation = await post("/api/runtime/install/start", {});
+    const result = await waitForRuntimeInstallation(operation.id);
+    const prior = (state.desktop?.runtimeProfiles || []).find((item) => item.id === state.desktop?.activeRuntimeProfileId);
+    await window.__TAURI_INTERNALS__.invoke("save_runtime_profile", {profile:{
+      id:prior?.adapter==="docker"?prior.id:"", name:"Apple Silicon Docker", adapter:"docker", platform:result.platform || "darwin", architecture:result.architecture || "arm64",
+      imageReference:result.image, imageDigest:result.digest, runtimeVersion:result.runtimeVersion || "Compatible VisionEval runtime", verified:true,
+      verifiedAt:result.verifiedAt || new Date().toISOString(), verificationMessage:"The pinned image digest, VisionEval provenance, doctor, and compatibility checks passed.", remoteStatus:result.source || "ghcr",
+    }});
+    state.desktop = await window.__TAURI_INTERNALS__.invoke("desktop_state");
+    await refreshState({quiet:true});
+    state.runtimeSetupPhase = "idle";
+    state.runtimeSetupMessage = "";
+    renderRuntime();
+    notify("VisionEval runtime installed, verified, and connected.", "success");
+    nativeNotification("VisionEval runtime ready", "The pinned runtime was installed, verified, and connected.", {outcome:"runtime_ready", force:false});
+    return result;
+  } catch (error) {
+    const rawMessage = error.message || String(error);
+    const message = rawMessage.includes("docker-credential-desktop")
+      ? "Docker could not find Docker Desktop's credential helper. Quit and reopen Docker Desktop, then try Install runtime again."
+      : rawMessage;
+    state.runtimeSetupPhase = "failed";
+    state.runtimeSetupMessage = message;
+    renderRuntimeSetupControls();
+    notify(message, "error");
+    throw error;
+  } finally {
+    setBusy(button, false);
+    renderRuntimeSetupControls();
+  }
+}
+
+async function verifyRuntimeFromSetup(button) {
+  setBusy(button, true, "Verifying…");
+  state.runtimeSetupPhase = "verifying";
+  state.runtimeSetupMessage = "Verifying the pinned runtime and saved compatibility profile…";
+  renderRuntimeSetupControls();
+  try {
+    const result = await verifyAndSaveRuntime();
+    await refreshState({quiet:true});
+    state.runtimeSetupPhase = "idle";
+    state.runtimeSetupMessage = "";
+    renderRuntime();
+    notify("VisionEval runtime verified and connected.", "success");
+    nativeNotification("VisionEval runtime ready", "The pinned runtime was verified and connected.", {outcome:"runtime_ready", force:false});
+    return result;
+  } catch (error) {
+    const message = error.message || String(error);
+    state.runtimeSetupPhase = "failed";
+    state.runtimeSetupMessage = message;
+    renderRuntimeSetupControls();
+    notify(message, "error");
+    throw error;
+  } finally {
+    setBusy(button, false);
+    renderRuntimeSetupControls();
   }
 }
 
@@ -1986,45 +2476,65 @@ function renderSetup() {
   const libraries = state.data?.inputLibraries || [];
   const templates = state.data?.templates || [];
   const libraryValue = $("librarySelect").value;
-  const templateValue = $("templateSelect").value;
-  $("librarySelect").innerHTML = libraries.length ? libraries.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${item.fileCount} CSVs</option>`).join("") : `<option value="">Copy an InputLibrary first</option>`;
-  $("templateSelect").innerHTML = templates.length ? templates.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("") : `<option value="">Create region assets in Develop first</option>`;
-  const pending = state.pendingProjectSetup;
+  $("librarySelect").innerHTML = libraries.length ? libraries.map((item) => `<option value="${escapeHtml(item.id)}" ${item.pairingStatus === "paired" ? "" : "disabled"}>${escapeHtml(item.name)} · ${item.fileCount} CSVs${item.pairingStatus === "paired" ? "" : " · package repair required"}</option>`).join("") : `<option value="">Install a model or regional package first</option>`;
+  let pending = state.pendingProjectSetup;
+  if (pending) {
+    const pendingLibrary = libraries.find((item) => item.id === pending.inputLibraryId);
+    const pendingTemplate = templates.find((item) => item.id === pending.templateId);
+    if (!pendingLibrary || !pendingTemplate) {
+      state.pendingProjectSetup = null;
+      pending = null;
+    }
+  }
   const preferredLibrary = pending?.inputLibraryId || libraryValue || state.data?.workspaceSettings?.defaultInputLibraryId || "";
-  const preferredTemplate = pending?.templateId || templateValue || state.data?.workspaceSettings?.defaultTemplateId || "";
-  selectedOption($("librarySelect"), libraries.some((item) => item.id === preferredLibrary) ? preferredLibrary : libraries[0]?.id || "");
-  selectedOption($("templateSelect"), templates.some((item) => item.id === preferredTemplate) ? preferredTemplate : templates[0]?.id || "");
+  const eligibleLibraries = libraries.filter((item) => item.pairingStatus === "paired");
+  selectedOption($("librarySelect"), eligibleLibraries.some((item) => item.id === preferredLibrary) ? preferredLibrary : eligibleLibraries[0]?.id || "");
+  const selectedLibrary=libraries.find((item)=>item.id===$("librarySelect").value);
+  const selectedTemplate=templates.find((item)=>item.id===selectedLibrary?.pairedTemplateId);
+  const baselines=(state.data?.catalog||[]).filter((item)=>item.role==="baseline"&&item.verification==="verified"&&item.templateFingerprint===selectedTemplate?.fingerprint&&item.inputLibraryFingerprint===selectedLibrary?.fingerprint).sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+  $("existingBaseline").innerHTML=baselines.length?baselines.map((item)=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.displayLabel || item.label)}</option>`).join(""):`<option value="">No compatible completed baseline</option>`;
+  const strategy=baselines.length?"existing":"fresh";
+  const strategyControl=document.querySelector(`input[name="baselineStrategy"][value="${strategy}"]`);if(strategyControl)strategyControl.checked=true;
+  $("existingBaselineStrategy").disabled=!baselines.length;
+  $("existingBaselineChoice").classList.toggle("choice-unavailable",!baselines.length);
+  $("existingBaselineHelp").textContent=baselines.length
+    ? "Choose a verified completed baseline produced by this exact Model package."
+    : "Run and successfully complete a baseline for this Model package before this option becomes available.";
+  $("existingBaseline").disabled=!baselines.length||strategy!=="existing";
   if (pending?.projectName && !$("projectName").value) $("projectName").value = pending.projectName;
-  const restored = !pending || ($("templateSelect").value === pending.templateId && $("librarySelect").value === pending.inputLibraryId);
+  const restored = !pending || ($("librarySelect").value === pending.inputLibraryId && selectedLibrary?.pairedTemplateId === pending.templateId);
   const identity = $("projectAssetIdentity");
   identity.hidden = !pending;
-  if (pending && !restored) identity.innerHTML = `<strong>Built region could not be restored</strong><p>Refresh or rebuild the region assets before creating this project.</p>`;
+  const clearPendingAction = `<div class="notice-actions"><button id="clearBuiltRegionSelection" type="button" class="secondary">Clear built region selection</button></div>`;
+  if (pending && !restored) identity.innerHTML = `<strong>Built region package is inconsistent</strong><p>The generated Input Library and Model package are still installed, but their pairing no longer matches. Clear this selection to use another Model package, or rebuild the region assets.</p>${clearPendingAction}`;
   else if (pending) {
-    const details = [
-      pending.templateName !== pending.regionName ? `<p><b>Model template:</b> ${escapeHtml(pending.templateName)}</p>` : "",
-      pending.inputLibraryName !== pending.regionName ? `<p><b>InputLibrary:</b> ${escapeHtml(pending.inputLibraryName)}</p>` : "",
-    ].join("");
-    identity.innerHTML = `<strong>Built region selected: ${escapeHtml(pending.regionName)}</strong>${details}`;
+    const packageName = pending.inputLibraryName || pending.templateName || pending.regionName;
+    const details = packageName !== pending.regionName ? `<p><b>Model package:</b> ${escapeHtml(packageName)}</p>` : "";
+    identity.innerHTML = `<strong>Built region selected: ${escapeHtml(pending.regionName)}</strong>${details}${clearPendingAction}`;
   }
-  $("createProjectButton").disabled = !libraries.length || !templates.length || !restored;
+  const pairingError = selectedLibrary && selectedLibrary.pairingStatus !== "paired"
+    ? selectedLibrary.pairingError
+    : (!eligibleLibraries.length && libraries.length ? libraries[0].pairingError : "");
+  if (pairingError) {
+    identity.hidden = false;
+    identity.innerHTML = `<strong>Asset package repair required</strong><p>${escapeHtml(pairingError)}</p>${pending ? clearPendingAction : ""}`;
+  }
+  $("clearBuiltRegionSelection")?.addEventListener("click", () => {
+    state.pendingProjectSetup = null;
+    renderSetup();
+    $("librarySelect").focus();
+    notify("Built region selection cleared. Choose any installed Model package.", "success");
+  });
+  $("createProjectButton").disabled = !selectedLibrary || !selectedTemplate || !restored;
+  if($("hypercubeLibrarySelect")){
+    const prior=$("hypercubeLibrarySelect").value;
+    $("hypercubeLibrarySelect").innerHTML=eligibleLibraries.length?eligibleLibraries.map((item)=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)} · ${item.fileCount} CSVs</option>`).join(''):'<option value="">Install a model package first</option>';
+    selectedOption($("hypercubeLibrarySelect"),eligibleLibraries.some((item)=>item.id===prior)?prior:eligibleLibraries[0]?.id||'');
+    $("createHypercubeProjectButton").disabled=!$("hypercubeLibrarySelect").value;
+  }
+  $("projectTypeGuidance").textContent = "The untouched baseline is created with the project. Add scenarios from the Editor sidebar.";
 }
 
-function renderProjects() {
-  const projects = state.data?.projects || [];
-  $("projectCount").textContent = projects.length;
-  $("projectList").classList.toggle("empty-state", !projects.length);
-  $("projectList").innerHTML = projects.length ? projects.map((project) => `
-    <button class="item-card ${state.selectedProject?.id === project.id ? "selected" : ""}" data-project="${escapeHtml(project.id)}">
-      <header><strong>${escapeHtml(project.name)}</strong></header>
-      <small>${escapeHtml(project.template.name)} · ${escapeHtml(project.inputLibrary.id)}</small>
-      <span class="project-card-metadata"><span class="scenario-count-badge"><b>${project.variations.length}</b> ${project.variations.length === 1 ? "scenario" : "scenarios"}</span><small>${project.runIds.length} runs · ${project.datastoreIds.length} registered results</small></span>
-    </button>`).join("") : "No projects yet.";
-  document.querySelectorAll("[data-project]").forEach((button) => button.addEventListener("click", () => selectProject(button.dataset.project)));
-  if (state.selectedProject) {
-    const current = projects.find((item) => item.id === state.selectedProject.id);
-    if (current) selectProject(current.id, false);
-  }
-}
 function renderArchivedProjects() {
   const projects = state.data?.archivedProjects || [];
   $("archiveCount").textContent = projects.length;
@@ -2032,7 +2542,7 @@ function renderArchivedProjects() {
   $("archiveList").innerHTML = projects.length ? projects.map((project) => `
     <article class="item-card project-card archived-project-card">
       <div class="project-card-open"><header><strong>${escapeHtml(project.name)}</strong><span class="pill">${project.daysRemaining} days remaining</span></header>
-      <small>${escapeHtml(project.template?.name || "Model template")} · ${project.variations?.length || 0} scenarios</small></div>
+      <small>${escapeHtml(projectPackageName(project))} · ${project.variations?.length || 0} scenarios</small></div>
       <div class="project-card-actions"><button class="secondary" type="button" data-restore-project="${escapeHtml(project.id)}">Restore</button><button class="danger" type="button" data-purge-project="${escapeHtml(project.id)}">Delete now</button></div>
     </article>`).join("") : "No archived projects.";
   document.querySelectorAll("[data-restore-project]").forEach((button) => button.addEventListener("click", async () => {
@@ -2054,15 +2564,33 @@ async function renameVariation(variationId, name) {
   try { await post("/api/projects/variations/update", { projectId: state.selectedProject.id, variationId, name }); await refreshState({ quiet: true }); }
   catch (error) { notify(error.message, "error"); await refreshState({ quiet: true }); }
 }
-async function deleteVariation(variationId) {
-  const variation = state.selectedProject.variations.find((item) => item.id === variationId);
-  if (!variation || !await confirmWorkbench(`Remove scenario “${variation.name}” and all of its saved file changes?`)) return;
-  try { await post("/api/projects/variations/delete", { projectId: state.selectedProject.id, variationId }); state.editorVariationId = ""; state.editorFileName = ""; await refreshState({ quiet: true }); }
-  catch (error) { notify(error.message, "error"); }
+function confirmScenarioRemoval(variation, impact) {
+  const dialog=$("scenarioRemovalDialog");
+  $("scenarioRemovalTitle").textContent=`Remove “${variation.name}”?`;
+  const removedResults=Math.max(0,Number(impact.results||0)-Number(impact.retainedResults||0));
+  const facts=[["Saved files",impact.files],["Terminal runs",impact.terminalRuns],["Run logs",impact.logs],["Results",removedResults],["Storage",humanBytes(impact.removableBytes||0)]];
+  $("scenarioRemovalImpact").innerHTML=facts.map(([label,value])=>`<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("");
+  const retained=$("scenarioRemovalRetained");retained.hidden=!impact.retainedResults;retained.textContent=impact.retainedResults?`${impact.retainedResults} shared result${impact.retainedResults===1?" is":"s are"} still referenced by another project and will be retained.`:"";
+  return new Promise((resolve)=>{dialog.addEventListener("close",()=>resolve(dialog.returnValue==="remove"),{once:true});dialog.showModal()});
+}
+async function deleteVariation(variationId, requestedProjectId = state.selectedProject?.id) {
+  const project=state.data?.projects?.find((item)=>item.id===requestedProjectId),variation=project?.variations?.find((item)=>item.id===variationId);
+  if (!project || !variation) return;
+  try {
+    const impact=await request(`/api/projects/variations/delete-impact?projectId=${encodeURIComponent(project.id)}&variationId=${encodeURIComponent(variationId)}`);
+    if(impact.blocked)return notify(`Stop or finish this scenario’s ${impact.activeRuns} active or queued run${impact.activeRuns===1?"":"s"} before removing it.`,"error");
+    if(!await confirmScenarioRemoval(variation,impact))return;
+    const result=await post("/api/projects/variations/delete", {projectId:project.id,variationId});
+    removeEditorDrafts({projectId:project.id,scenarioId:variationId});
+    state.projectScenarioSelections.get(project.id)?.delete(variationId);
+    if(state.selectedProject?.id===project.id&&state.editorVariationId===variationId){state.editorVariationId="";state.editorFileName="";clearEditorFile()}
+    await refreshState({quiet:true});
+    notify(`Removed ${variation.name}, ${result.runsRemoved} run${result.runsRemoved===1?"":"s"}, and ${result.resultsRemoved} result${result.resultsRemoved===1?"":"s"}.`,"success");
+  } catch (error) { notify(error.message, "error"); }
 }
 async function removeOverlay(variationId, filename) {
   if (!await confirmWorkbench(`Remove the saved changes for ${filename} and restore the original input file?`)) return;
-  try { await post("/api/overlays/delete", { projectId: state.selectedProject.id, variationId, filename }); if (state.editorFileName === filename) openNewFile(variationId); await refreshState({ quiet: true }); }
+  try { const projectId = state.selectedProject.id; await post("/api/overlays/delete", { projectId, variationId, filename }); removeEditorDrafts({projectId,scenarioId:variationId,filename}); if (state.editorFileName === filename) openNewFile(variationId); await refreshState({ quiet: true }); }
   catch (error) { notify(error.message, "error"); }
 }
 
@@ -2075,16 +2603,94 @@ function baselineEditorFileUrl(filename) {
   return `/api/input-file?libraryId=${encodeURIComponent(project.inputLibrary.id)}&filename=${encodeURIComponent(filename)}`;
 }
 
-async function loadEditorFile() {
-  const filename = $("editorFile").value;
-  if (!filename || !state.selectedProject) return;
-  setBusy($("saveOverlay"), true, "Loading…");
-  try {
-    state.editorFileName = filename;
-    state.csv = await request(editorFileUrl(filename));
-    state.editorOriginalRows = state.csv.rows.map((row) => [...row]); state.editorUndo = []; state.editorRedo = [];
-    renderEditorControls(); renderCsv(); renderScenarioTree(); renderEditorPage(); $("saveOverlay").disabled = false;
-  } catch (error) { notify(error.message, "error"); } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.csv; }
+function meaningfulEditOperations(operations, source = "") {
+  return (operations || []).filter((operation) => operation && typeof operation === "object" && operation.operation !== "manual" && Array.isArray(operation.columns) && operation.columns.length && (!source || operation.source === source));
+}
+function combinedOperationFields(operations) {
+  const rawOperations = operations.map((item) => String(item.operation || ""));
+  const operationValues = [...new Set(rawOperations.filter(Boolean))];
+  const rawAmounts = operations.map((item) => item.value === undefined || item.value === null || item.value === "" ? "" : String(item.value));
+  const amounts = [...new Set(rawAmounts.filter(Boolean))];
+  const years = [...new Set(operations.map((item) => String(item.year || "")).filter(Boolean))];
+  const scopeUnavailable = !operations.every((item) => item.allLocations === true || (item.allLocations === false && Boolean(item.geographyType)));
+  const scopes = scopeUnavailable ? [] : operations.map((item) => ({type:item.allLocations ? "all" : String(item.geographyType || ""),label:String(item.geographyLabel || (item.allLocations ? "All locations" : item.geographyType || "Selected locations")),all:Boolean(item.allLocations),locations:[...new Set((item.locations || []).map(String))]}));
+  const uniqueScopes = [...new Map(scopes.map((scope) => [`${scope.type}|${scope.all}|${scope.locations.slice().sort().join("\u0000")}`,scope])).values()];
+  const scopeKinds = new Set(scopes.map((scope) => `${scope.type}|${scope.all}`));
+  const mixedScopes = scopeKinds.size > 1 ? uniqueScopes : [];
+  return {
+    operation:rawOperations.every(Boolean) && operationValues.length === 1 ? operationValues[0] : rawOperations.every(Boolean) && operationValues.length > 1 ? MIXED_EDITOR_VALUE : "",
+    value:rawAmounts.every(Boolean) && amounts.length === 1 ? amounts[0] : "",
+    mixedValue:rawAmounts.every(Boolean) && amounts.length > 1,
+    year:years.length === 1 ? years[0] : years.includes("2045") ? "2045" : years[0] || "2045",
+    geographyType:scopeUnavailable ? "" : mixedScopes.length ? MIXED_EDITOR_VALUE : scopes[0]?.type || "",
+    locations:scopeUnavailable || mixedScopes.length || scopes[0]?.all ? [] : [...new Set(scopes.flatMap((scope) => scope.locations))],
+    mixedScopes,
+    scopeUnavailable,
+  };
+}
+function savedFileDraft(operations) {
+  const usable = meaningfulEditOperations(operations); if (!usable.length) return null;
+  return {...combinedOperationFields(usable),savedReconstruction:true,columns:[...new Set(usable.flatMap((item) => item.columns.map(String)))],locationSearch:""};
+}
+function savedBatchDraft(scenario) {
+  const grouped = [], columns = {};
+  (scenario?.overlays || []).forEach((overlay) => {
+    const operations = meaningfulEditOperations(overlay.editOperations, "batch");
+    if (!operations.length) return;
+    grouped.push(...operations);
+    columns[overlay.fileName] = [...new Set(operations.flatMap((item) => item.columns.map(String)))];
+  });
+  if (!grouped.length) return null;
+  return {...combinedOperationFields(grouped),savedReconstruction:true,files:Object.keys(columns),columns,locationSearch:""};
+}
+function scopeLocationLabel(value, payloads) {
+  for (const payload of payloads) for (const level of payload?.levels || []) {
+    const found = (level.values || []).find((item) => String(item.value) === String(value));
+    if (found) return found.label;
+  }
+  return String(value);
+}
+function savedScopeSummary(scopes, payloads = []) {
+  return (scopes || []).map((scope) => {
+    if (scope.all) return "All locations";
+    const labels = scope.locations.map((value) => scopeLocationLabel(value, payloads));
+    return `${scope.label || scope.type || "Selected locations"}: ${labels.length ? labels.join(", ") : "selection unavailable"}`;
+  }).join(" · ");
+}
+function savedDraftGuidance(draft, payloads = []) {
+  const messages = [];
+  if (draft?.operation === MIXED_EDITOR_VALUE || draft?.mixedValue) messages.push("Saved edits use different operations or change amounts. Choose a specific operation and value before applying another change.");
+  const scopes = savedScopeSummary(draft?.mixedScopes, payloads);
+  if (scopes) messages.push(`Saved location scopes: ${scopes}. Choose one location type before applying another change.`);
+  return messages.join(" ");
+}
+function updateFileDraftGuidance(draft = fileDraftFromControls()) {
+  const guidance = savedDraftGuidance(draft, [state.editorGeography]);
+  $("editorSavedScopeSummary").hidden = !guidance; $("editorSavedScopeSummary").textContent = guidance;
+}
+function updateBatchDraftGuidance(draft = batchDraftFromControls()) {
+  const guidance = savedDraftGuidance(draft, Object.values(state.batchGeographies));
+  $("batchSavedScopeSummary").hidden = !guidance; $("batchSavedScopeSummary").textContent = guidance;
+}
+function setSelectDraftValue(select, value, mixedLabel) {
+  select.querySelector(`option[value="${MIXED_EDITOR_VALUE}"]`)?.remove();
+  if (value === MIXED_EDITOR_VALUE) {
+    const option = new Option(mixedLabel, MIXED_EDITOR_VALUE, true, true); option.disabled = true; select.prepend(option);
+  } else if ([...select.options].some((option) => option.value === value)) select.value = value;
+}
+function fileDraftFromControls() {
+  return {columns:selectedEditorColumns(),geographyType:$('editorLocationField').value,locations:[...state.editorSelectedLocations],year:$('editorYear').value,operation:$('editorOperation').value,value:$('editorValue').value,mixedValue:$('editorValue').placeholder === "Mixed",mixedScopes:structuredClone(state.editorMixedScopes),scopeUnavailable:state.editorScopeUnavailable,locationSearch:$('editorLocationSearch').value};
+}
+function persistFileDraft() {
+  if (!state.editorFileName || !state.csv) return;
+  storeEditorDraft("file", fileDraftFromControls(), state.editorFileName);
+}
+function batchDraftFromControls() {
+  return {files:[...state.batchSelectedFiles],columns:Object.fromEntries([...state.batchSelectedColumns].map(([filename,columns]) => [filename,[...columns]])),geographyType:$('batchLocationType').value,locations:[...state.batchSelectedLocations],year:$('batchYear').value,operation:$('batchOperation').value,value:$('batchValue').value,mixedValue:$('batchValue').placeholder === "Mixed",mixedScopes:structuredClone(state.batchMixedScopes),scopeUnavailable:state.batchDraftScopeUnavailable,locationSearch:$('batchLocationSearch').value,fromBaseline:$("batchFromBaseline").checked};
+}
+function persistBatchDraft() {
+  if (!state.editorVariationId || state.editorMode !== "scenario") return;
+  storeEditorDraft("batch", batchDraftFromControls());
 }
 
 const protectedColumn = (name) => { const value = String(name).toLowerCase(); return ["geo", "year", "county", "bzone", "azone", "marea", "zone", "taz", "id"].includes(value) || value.endsWith("id") || value.endsWith("_id") || value.endsWith("code"); };
@@ -2105,6 +2711,28 @@ function precisionFor(context = "output") {
 function calculatedValue(next, context = "singleFile", csv = null, column = "") {
   if (csv?.columnTypes?.[column] === "integer") return String(Math.round(next));
   return String(Number(Number(next).toFixed(precisionFor(context))));
+}
+function newOperationId(prefix = "operation") {
+  return globalThis.crypto?.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+function operationRounding(csv, columns, context) {
+  return {precision:precisionFor(context),integerColumns:integerColumns(csv, columns)};
+}
+function rowsDifferAt(leftRows, rightRows, rowIndex, columnIndex) {
+  return String(leftRows?.[rowIndex]?.[columnIndex] ?? "") !== String(rightRows?.[rowIndex]?.[columnIndex] ?? "");
+}
+function normalizedOperationSet(values) { return [...new Set((values || []).map(String))].sort().join("\u0000"); }
+function sameOperationScope(left, right) {
+  return String(left?.year || "") === String(right?.year || "")
+    && Boolean(left?.allLocations) === Boolean(right?.allLocations)
+    && String(left?.geographyType || "") === String(right?.geographyType || "")
+    && normalizedOperationSet(left?.columns) === normalizedOperationSet(right?.columns)
+    && normalizedOperationSet(left?.locations) === normalizedOperationSet(right?.locations);
+}
+function operationsWithBaselineOverride(operations, nextOperation) {
+  const prior = [...(operations || [])];
+  if (nextOperation?.basis !== "baseline") return [...prior,nextOperation];
+  return [...prior.filter((operation) => !sameOperationScope(operation,nextOperation)),nextOperation];
 }
 function integerColumns(csv, columns) { return columns.filter((column) => csv?.columnTypes?.[column] === "integer"); }
 function numericColumns(csv) { return csv.columns.filter((column, index) => !protectedColumn(column) && csv.rows.some((row) => row[index] !== "" && Number.isFinite(Number(row[index])))); }
@@ -2160,9 +2788,88 @@ function setEditorDirty(dirty = true) {
   syncMenuContext();
 }
 function recomputeEditorDirty() {
-  setEditorDirty(Boolean(state.csv) && (!editorRowsEqual(state.csv.rows, state.editorOriginalRows) || $("editorNotes").value !== state.editorSavedNotes));
+  setEditorDirty(Boolean(state.csv) && !editorRowsEqual(state.csv.rows, state.editorOriginalRows));
+}
+function noteStatusElement(kind) { return $(kind === "scenario" ? "scenarioNoteStatus" : "fileNoteStatus"); }
+function setNoteStatus(kind, status) {
+  const element = noteStatusElement(kind); if (!element) return;
+  element.textContent = status;
+  element.classList.toggle("saving", status === "Saving…");
+  element.classList.toggle("failed", status === "Not saved");
+}
+function noteContext(kind) {
+  const projectId = state.selectedProject?.id || "", variationId = state.editorVariationId || "";
+  return kind === "scenario" ? `${projectId}|${variationId}` : `${projectId}|${variationId}|${state.editorFileName || ""}`;
+}
+function primeNoteAutosave(kind, value) {
+  const tracker = state.noteAutosave[kind];
+  if (tracker.timer) clearTimeout(tracker.timer);
+  tracker.timer = null; tracker.dirty = false; tracker.revision += 1; tracker.context = noteContext(kind); tracker.value = String(value || "");
+  setNoteStatus(kind, "Saved");
+}
+function updateLocalVariation(projectId, variationId, update) {
+  const projects = [...(state.data?.projects || []), ...(state.data?.archivedProjects || [])];
+  const seen = new Set();
+  for (const project of [...projects, state.selectedProject].filter(Boolean)) {
+    if (seen.has(project)) continue; seen.add(project);
+    if (project.id !== projectId) continue;
+    const variation = (project.variations || []).find((item) => item.id === variationId);
+    if (variation) update(variation);
+  }
+}
+function scheduleNoteAutosave(kind, value) {
+  const tracker = state.noteAutosave[kind], context = noteContext(kind);
+  if (!context.replaceAll("|", "")) return;
+  if (tracker.context !== context) primeNoteAutosave(kind, value);
+  tracker.value = String(value); tracker.dirty = true; tracker.revision += 1;
+  if (tracker.timer) clearTimeout(tracker.timer);
+  setNoteStatus(kind, "Saving…");
+  tracker.timer = setTimeout(() => { tracker.timer = null; saveNoteNow(kind); }, 700);
+}
+async function saveNoteNow(kind) {
+  const tracker = state.noteAutosave[kind];
+  if (tracker.timer) { clearTimeout(tracker.timer); tracker.timer = null; }
+  if (tracker.inFlight) {
+    await tracker.inFlight;
+  }
+  if (!tracker.dirty) return true;
+  const [projectId, variationId, filename] = tracker.context.split("|"), revision = tracker.revision, value = tracker.value;
+  if (!projectId || !variationId || (kind === "file" && !filename)) return false;
+  setNoteStatus(kind, "Saving…");
+  const requestBody = kind === "scenario"
+    ? {projectId, variationId, scenarioNote:value}
+    : {projectId, variationId, fileNote:{filename, text:value}};
+  const requestPromise = (async () => {
+    try {
+      await post("/api/projects/variations/update", requestBody);
+      updateLocalVariation(projectId, variationId, (variation) => {
+        if (kind === "scenario") variation.scenarioNote = value;
+        else { variation.notes ||= {}; if (value) variation.notes[filename] = value; else delete variation.notes[filename]; }
+      });
+      if (tracker.context === noteContext(kind) && tracker.revision === revision) {
+        tracker.dirty = false; setNoteStatus(kind, "Saved");
+      }
+      return true;
+    } catch (error) {
+      if (tracker.context === noteContext(kind)) setNoteStatus(kind, "Not saved");
+      return false;
+    }
+  })();
+  tracker.inFlight = requestPromise;
+  const saved = await requestPromise;
+  if (tracker.inFlight === requestPromise) tracker.inFlight = null;
+  if (saved && tracker.dirty && tracker.revision !== revision) return saveNoteNow(kind);
+  return saved;
+}
+async function flushPendingNoteSaves() {
+  const saved = await Promise.all([saveNoteNow("scenario"), saveNoteNow("file")]);
+  if (saved.every(Boolean)) return true;
+  notify("A note could not be saved. Your text is still here; try again before leaving.", "error");
+  return false;
 }
 async function guardUnsaved(action) {
+  if (!await flushPendingNoteSaves()) return false;
+  if (!await flushHypercubeAutosave()) return false;
   if (!state.editorDirty) { await action(); return true; }
   const dialog = $("unsavedDialog");
   return new Promise((resolve) => {
@@ -2181,23 +2888,81 @@ async function guardUnsaved(action) {
 }
 function switchCreateSubpage(pageId, guarded = true) {
   const change = () => {
+    closeLocationPopovers();
+    state.activeCreateSubpage = pageId;
     document.querySelectorAll(".create-subpage").forEach((page) => page.classList.toggle("active", page.id === pageId));
     document.querySelectorAll("[data-create-subpage]").forEach((button) => button.classList.toggle("active", button.dataset.createSubpage === pageId));
     if (pageId === "createReview") loadProjectReview();
     if (pageId === "createDevelop") preloadRegionMapGeometry().catch(() => {});
   };
-  return guarded && pageId !== "createEditor" ? guardUnsaved(change) : change();
+  return guarded ? guardUnsaved(change) : change();
 }
 function openProjectEditDialog(projectId) {
   const project = state.data?.projects.find((item) => item.id === projectId); if (!project) return;
   $("projectEditDialog").dataset.projectId = projectId; $("projectEditName").value = project.name;
   $("projectEditDialog").showModal(); $("projectEditName").focus(); $("projectEditName").select();
 }
+function openProjectCopyDialog(projectId) {
+  const project = state.data?.projects.find((item) => item.id === projectId); if (!project) return;
+  const blocked=destinationCopyBlockedMessage(projectId);
+  if(blocked)return notify(blocked,"error");
+  $("projectCopyDialog").dataset.projectId = projectId;
+  const existing=new Set([...(state.data?.projects||[]),...(state.data?.archivedProjects||[])].map((item)=>String(item.name||"").trim().replace(/\s+/g," ").toLocaleLowerCase()));
+  const base=`${project.name} Copy`;let candidate=base,number=2;while(existing.has(candidate.trim().replace(/\s+/g," ").toLocaleLowerCase()))candidate=`${base} ${number++}`;
+  $("projectCopyName").value = candidate;
+  $("projectCopyResultEstimate").textContent = "Checking completed-result storage…";
+  request(`/api/projects/copy-estimate?projectId=${encodeURIComponent(projectId)}`).then((estimate)=>{
+    $("projectCopyResultEstimate").textContent=estimate.resultCount
+      ? `${estimate.resultCount} completed result${estimate.resultCount===1?"":"s"} · approximately ${humanBytes(estimate.bytes)} will be copied into the new project.`
+      : "No completed results are available; the project design will still be copied.";
+  }).catch(()=>{$("projectCopyResultEstimate").textContent="Completed-result size could not be estimated. Workbench will verify available space before copying."});
+  $("projectCopyDialog").showModal(); $("projectCopyName").focus(); $("projectCopyName").select();
+}
 function openBaselineRenameDialog() {
   if (!state.selectedProject) return;
   $("baselineDisplayName").value = baselineDisplayName();
   $("baselineRenameDialog").showModal();
   $("baselineDisplayName").focus(); $("baselineDisplayName").select();
+}
+function nextScenarioName(variations = state.selectedProject?.variations || []) {
+  const existing = new Set(variations.map((item) => String(item?.name || "").trim().toLowerCase()));
+  let number = 1;
+  while (existing.has(`scenario ${number}`)) number += 1;
+  return `Scenario ${number}`;
+}
+function projectPackageName(project) {
+  return project?.inputLibrary?.displayName || project?.inputLibrary?.name || project?.template?.name || "VisionEval model";
+}
+function isHypercubeProject(project) { return project?.projectType === "hypercube"; }
+function isStatewideProject(project) {
+  if (!project) return false;
+  if (project.regionType === "statewide" || project.selectionMethod === "package-statewide") return true;
+  const template = (state.data?.templates || []).find((item) => item.id === project.template?.id);
+  return template?.regionType === "statewide"
+    || template?.selectionMethod === "package-statewide"
+    || template?.regionId === "virginia-statewide";
+}
+function editSourceValue(operations = []) {
+  if (!operations.length || operations.some((item) => !["batch", "single_file"].includes(item?.source))) return "unavailable";
+  const sources = new Set(operations.map((item) => item.source));
+  return sources.size > 1 ? "mixed" : [...sources][0];
+}
+function scenarioEditSource(scenario) {
+  const sources = new Set((scenario?.overlays || []).map((item) => editSourceValue(item.editOperations || [])));
+  if (!sources.size || sources.has("unavailable")) return "unavailable";
+  return sources.size > 1 || sources.has("mixed") ? "mixed" : [...sources][0];
+}
+function editSourceLabel(value) {
+  return {batch:"Batch change",single_file:"Single-file change",mixed:"Batch and single-file changes"}[value] || "";
+}
+function editSourceMarker(value, focusable = true) {
+  const label = editSourceLabel(value);
+  if (!label) return "";
+  const singleIcon = `<svg class="edit-source-icon edit-source-icon-single" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 3.5h7l3 3V20.5H7zM14 3.5v4h4"/></svg>`;
+  const batchIcon = `<svg class="edit-source-icon edit-source-icon-batch" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5.5 7.5h7l3 3v10h-10zM8.5 4.5h7l3 3v10"/></svg>`;
+  const mixedIcon = `<span class="edit-source-mixed-letter" aria-hidden="true">M</span>`;
+  const icons = value === "mixed" ? mixedIcon : value === "batch" ? batchIcon : singleIcon;
+  return `<span class="edit-source-marker edit-source-${escapeHtml(value)}" role="img" aria-label="${escapeHtml(label)}"${focusable ? ' tabindex="0"' : ""}>${icons}<span class="edit-source-tooltip" role="tooltip">${escapeHtml(label)}</span></span>`;
 }
 function openProjectRemoveDialog(projectId) {
   const project = state.data?.projects.find((item) => item.id === projectId); if (!project) return;
@@ -2207,28 +2972,61 @@ function openProjectRemoveDialog(projectId) {
 function openScenarioDialog(duplicate = false) {
   if (!state.selectedProject) return;
   const source = duplicate ? activeEditorVariation() : null;
-  if (duplicate && !source) return notify("Select a scenario to duplicate first.", "error");
+  if (duplicate && !source) return notify("Select a scenario to copy first.", "error");
   const dialog = $("scenarioDialog"); dialog.dataset.duplicateFrom = source?.id || "";
-  $("scenarioDialogTitle").textContent = source ? `Duplicate ${source.name}` : "New scenario";
-  $("scenarioDialogName").value = source ? `${source.name} Copy` : `Scenario ${state.selectedProject.variations.length + 1}`;
-  $("scenarioDialogHelp").textContent = source ? "The duplicate includes all saved file changes and notes from the selected scenario." : "The new scenario starts with untouched project inputs.";
-  $("confirmScenarioDialog").textContent = source ? "Duplicate Scenario" : "Create Scenario";
+  $("scenarioDialogTitle").textContent = source ? `Copy ${source.name}` : "New scenario";
+  $("scenarioDialogName").value = nextScenarioName(state.selectedProject.variations);
+  $("scenarioDialogHelp").textContent = source ? "The copy includes all saved file changes and notes from the selected scenario." : "The new scenario starts with untouched project inputs.";
+  $("confirmScenarioDialog").textContent = source ? "Copy Scenario" : "Create Scenario";
   dialog.showModal(); $("scenarioDialogName").focus(); $("scenarioDialogName").select();
 }
 function renderProjects() {
   const projects = state.data?.projects || [];
+  const projectIds = new Set(projects.map((project) => project.id));
+  for (const projectId of state.expandedProjectIds) if (!projectIds.has(projectId)) state.expandedProjectIds.delete(projectId);
   $("projectCount").textContent = projects.length;
   $("projectList").classList.toggle("empty-state", !projects.length);
-  $("projectList").innerHTML = projects.length ? projects.map((project) => `
-    <article class="item-card project-card ${state.selectedProject?.id === project.id ? "selected" : ""}">
-      <button class="project-card-open" data-project="${escapeHtml(project.id)}">
-        <header><strong>${escapeHtml(project.name)}</strong></header>
-        <small>${escapeHtml(project.template.name)} · ${escapeHtml(project.inputLibrary.id)}</small>
-        <span class="project-card-metadata"><span class="scenario-count-badge"><b>${project.variations.length}</b> ${project.variations.length === 1 ? "scenario" : "scenarios"}</span><small>${project.runIds.length} runs · ${project.datastoreIds.length} registered results</small></span>
+  const catalog = new Map((state.data?.catalog || []).map((item)=>[item.id,item]));
+  $("projectList").innerHTML = projects.length ? projects.map((project) => {
+    const expanded=state.expandedProjectIds.has(project.id),links=project.resultLinks||[],linkedIds=new Set(links.map((item)=>item.datastoreId)),resultIds=[...new Set([...(project.datastoreIds||[]),...linkedIds])],selected=state.projectScenarioSelections.get(project.id)||new Set();
+    const projectCopyJobs=activeProjectCopyJobs(project.id),projectCopyReason=projectCopyJobs.length?"Cannot copy this project while its runs are in progress. Wait until they finish or are stopped.":"";
+    const selectedCopyReason=activeScenarioCopyJobs(project.id,[...selected]).length?"Cannot copy while selected scenario runs are in progress. Wait until they finish or are stopped.":"";
+    const scenarios=project.variations.length?project.variations.map((scenario)=>{const copyJob=activeScenarioCopyJobs(project.id,[scenario.id])[0],copyBlocked=Boolean(copyJob),removeLabel=`Remove ${scenario.name}`;return `<div class="project-scenario-row ${copyBlocked?"copy-blocked":""}"><label class="project-scenario-selection"><input type="checkbox" data-project-scenario="${escapeHtml(project.id)}" value="${escapeHtml(scenario.id)}" ${selected.has(scenario.id)?"checked":""}><span><strong>${escapeHtml(scenario.name)} ${editSourceMarker(scenarioEditSource(scenario),false)}</strong><small>${scenario.overlays?.length||0} saved input files${scenario.hypercube?" · hypercube case":""}${scenario.resultStatus==="current"?" · current result available":scenario.resultStatus&&scenario.resultStatus!=="missing"?" · previous result available":""}${copyBlocked?` · ${escapeHtml(copyJob.state)} run; actions available after it finishes or is stopped`:""}</small></span></label>${isHypercubeProject(project)?"":`<button type="button" class="secondary project-scenario-remove" data-remove-project-scenario="${escapeHtml(scenario.id)}" data-remove-scenario-project="${escapeHtml(project.id)}" data-remove-disabled-reason="${copyBlocked?"Stop or finish this scenario’s run before removing it.":""}" aria-label="${escapeHtml(removeLabel)}" title="${escapeHtml(removeLabel)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3m-9 0 1 14h10l1-14M10 11v6m4-6v6"/></svg></button>`}</div>`}).join(""):`<p class="muted">No scenarios to copy.</p>`;
+    const results=resultIds.length?resultIds.map((id)=>{const record=catalog.get(id),linked=linkedIds.has(id),status=(project.resultStatuses?.[record?.role==="baseline"?"baseline":record?.variationId]||[]).find((item)=>item.datastoreId===id)?.status||"";if(!record)return"";const statusLabel={current:"Current",previous:"Previous version",runtime_differs:"Runtime differs",unproven:"Reuse unverified"}[status]||"Completed";return `<div class="project-result-row"><span><strong>${escapeHtml(record.displayLabel||record.label||record.displayVariationName||record.variationName||"Completed result")}</strong><small>${linked?"Legacy shared result":"Independent project result"} · ${escapeHtml(statusLabel)} · ${escapeHtml(record.displayVariationName||record.variationName||record.role||"")}</small></span><span class="project-result-actions"><button type="button" class="secondary" data-compare-project-result="${escapeHtml(id)}">Compare</button>${linked?`<button type="button" class="text-button" data-unlink-project-result="${escapeHtml(id)}" data-result-project="${escapeHtml(project.id)}">Remove link</button>`:""}</span></div>`}).join(""):`<p class="muted">No completed results.</p>`;
+    const hypercubeProject=isHypercubeProject(project),projectTypeLabel=hypercubeProject?"Hypercube":"Standard";
+    const scenarioNoun=hypercubeProject?(project.variations.length===1?"case":"cases"):(project.variations.length===1?"scenario":"scenarios");
+    return `<article class="item-card project-card ${expanded?"expanded":""}">
+      <button class="project-card-open" type="button" data-expand-project="${escapeHtml(project.id)}" aria-expanded="${expanded}">
+        <span class="project-card-chevron" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false"><path d="M7 4l10 8-10 8z"/></svg></span><header><strong>${escapeHtml(project.name)}</strong></header>
+        <small>${escapeHtml(projectPackageName(project))} · ${projectTypeLabel}</small>
+        <span class="project-card-metadata"><span class="scenario-count-badge"><b>${project.variations.length}</b> ${scenarioNoun}</span><small>${project.runIds.length} runs · ${resultIds.length} results${linkedIds.size?` (${linkedIds.size} linked)`:""}</small></span>
       </button>
-      <div class="project-card-actions"><button class="secondary" type="button" data-edit-project="${escapeHtml(project.id)}">Edit</button><button class="danger" type="button" data-remove-project="${escapeHtml(project.id)}">Remove</button></div>
-    </article>`).join("") : "No projects yet.";
-  document.querySelectorAll("[data-project]").forEach((button) => button.addEventListener("click", () => guardUnsaved(() => { selectProject(button.dataset.project); switchCreateSubpage("createEditor", false); })));
+      <div class="project-card-actions"><button class="secondary" type="button" data-open-project="${escapeHtml(project.id)}" data-project-type="${projectTypeLabel.toLowerCase()}">${hypercubeProject?"Open Hypercube":"Open in Editor"}</button><button class="secondary" type="button" data-copy-project="${escapeHtml(project.id)}" data-copy-disabled-reason="${escapeHtml(projectCopyReason)}">Copy Project</button><button class="secondary" type="button" data-edit-project="${escapeHtml(project.id)}">Edit name</button><button class="danger" type="button" data-remove-project="${escapeHtml(project.id)}">Remove</button></div>
+      ${expanded?`<div class="project-card-details"><section><div class="checklist-heading"><strong>${hypercubeProject?"Generated cases":"Scenarios"}</strong><button type="button" data-copy-project-scenarios="${escapeHtml(project.id)}" data-copy-disabled-reason="${escapeHtml(selectedCopyReason)}">${hypercubeProject?"Copy Cases":"Copy Scenarios"} (${selected.size})</button></div><div class="project-scenario-list">${scenarios}</div></section><section><strong>Results</strong><div class="project-result-list">${results}</div></section></div>`:""}
+    </article>`;
+  }).join("") : "No projects yet.";
+  document.querySelectorAll("[data-copy-project]").forEach((button)=>setButtonAvailability(button,!button.dataset.copyDisabledReason,button.dataset.copyDisabledReason));
+  document.querySelectorAll("[data-copy-project-scenarios]").forEach((button)=>{
+    const selected=state.projectScenarioSelections.get(button.dataset.copyProjectScenarios)||new Set();
+    setButtonAvailability(button,Boolean(selected.size)&&!button.dataset.copyDisabledReason,button.dataset.copyDisabledReason||"Select one or more scenarios to copy.");
+  });
+  document.querySelectorAll("[data-remove-project-scenario]").forEach((button)=>{setButtonAvailability(button,!button.dataset.removeDisabledReason,button.dataset.removeDisabledReason);button.addEventListener("click",()=>deleteVariation(button.dataset.removeProjectScenario,button.dataset.removeScenarioProject))});
+  document.querySelectorAll("[data-expand-project]").forEach((button)=>button.addEventListener("click",()=>{const id=button.dataset.expandProject;state.expandedProjectIds.has(id)?state.expandedProjectIds.delete(id):state.expandedProjectIds.add(id);renderProjects()}));
+  document.querySelectorAll("[data-open-project]").forEach((button) => button.addEventListener("click", () => guardUnsaved(() => {
+    selectProject(button.dataset.openProject);
+    if(button.dataset.projectType==="hypercube") {
+      if(state.hypercubeProjectId!==button.dataset.openProject) {
+        state.hypercubeAxes=[];state.hypercubeSelectedLocations=new Set();state.hypercubePreview=null;state.hypercubeHydratedProjectId="";state.hypercubeFiles=new Map();
+      }
+      state.hypercubeProjectId=button.dataset.openProject;renderHypercubeSetup();switchPage("hypercubePage");switchHypercubeSubpage("hypercubeBuildPage");
+    }
+    else switchCreateSubpage("createEditor", false);
+  })));
+  document.querySelectorAll("[data-project-scenario]").forEach((control)=>control.addEventListener("change",()=>{const projectId=control.dataset.projectScenario,selections=state.projectScenarioSelections.get(projectId)||new Set();control.checked?selections.add(control.value):selections.delete(control.value);state.projectScenarioSelections.set(projectId,selections);renderProjects()}));
+  document.querySelectorAll("[data-copy-project-scenarios]").forEach((button)=>button.addEventListener("click",async()=>{if(await flushPendingNoteSaves())openScenarioCopyDialog(button.dataset.copyProjectScenarios)}));
+  document.querySelectorAll("[data-compare-project-result]").forEach((button)=>button.addEventListener("click",()=>{switchPage("comparePage",{restoreScroll:false});switchSubpage("compareData");selectedOption($("compareReference"),button.dataset.compareProjectResult);$("compareComparison").value="";loadCompareSelection();notify("Result selected as the Compare reference.","success")}));
+  document.querySelectorAll("[data-unlink-project-result]").forEach((button)=>button.addEventListener("click",async()=>{if(!await confirmWorkbench("Remove this shared result link from the project? The original result data will not be deleted while another project still owns or references it."))return;try{await post("/api/projects/results/unlink",{projectId:button.dataset.resultProject,datastoreId:button.dataset.unlinkProjectResult});await refreshState({quiet:true});notify("Shared result link removed.","success")}catch(error){notify(error.message,"error")}}));
+  document.querySelectorAll("[data-copy-project]").forEach((button) => button.addEventListener("click", () => openProjectCopyDialog(button.dataset.copyProject)));
   document.querySelectorAll("[data-edit-project]").forEach((button) => button.addEventListener("click", () => openProjectEditDialog(button.dataset.editProject)));
   document.querySelectorAll("[data-remove-project]").forEach((button) => button.addEventListener("click", () => openProjectRemoveDialog(button.dataset.removeProject)));
   if (state.selectedProject) {
@@ -2236,29 +3034,428 @@ function renderProjects() {
     if (current) selectProject(current.id, false);
   }
 }
+
+function openScenarioCopyDialog(projectId){
+  const source=state.data?.projects.find((item)=>item.id===projectId),selected=[...(state.projectScenarioSelections.get(projectId)||[])];
+  if(!source||!selected.length)return notify("Select one or more scenarios first.","error");
+  const blockedMessage=scenarioCopyBlockedMessage(projectId,selected);if(blockedMessage)return notify(blockedMessage,"error");
+  const compatible=(state.data?.projects||[]).filter((item)=>item.id!==projectId&&!isHypercubeProject(item)&&item.template?.fingerprint===source.template?.fingerprint&&item.inputLibrary?.fingerprint===source.inputLibrary?.fingerprint);
+  const dialog=$("scenarioCopyDialog");dialog.dataset.sourceProjectId=projectId;dialog.dataset.variationIds=JSON.stringify(selected);
+  $("scenarioCopySummary").textContent=`${selected.length} scenario${selected.length===1?"":"s"} selected from ${source.name}.`;
+  $("scenarioCopyResultEstimate").textContent="Checking completed-result storage…";
+  request(`/api/projects/copy-estimate?projectId=${encodeURIComponent(projectId)}&variationIds=${encodeURIComponent(selected.join(","))}`).then((estimate)=>{
+    $("scenarioCopyResultEstimate").textContent=estimate.resultCount
+      ? `${estimate.resultCount} completed result${estimate.resultCount===1?"":"s"} · approximately ${humanBytes(estimate.bytes)} will be copied independently.`
+      : "These scenarios have no completed results. Workbench can offer to run them after copying.";
+  }).catch(()=>{$("scenarioCopyResultEstimate").textContent="Completed-result size could not be estimated. Workbench will verify available space before copying."});
+  const idle=compatible.filter((item)=>!activeProjectCopyJobs(item.id).length);
+  $("scenarioCopyTargetProject").innerHTML=compatible.length?compatible.map((item)=>{const jobs=activeProjectCopyJobs(item.id),states=[...new Set(jobs.map((job)=>job.state))].sort().join(", ");return `<option value="${escapeHtml(item.id)}" ${jobs.length?"disabled":""}>${escapeHtml(item.name)}${jobs.length?` — unavailable (${escapeHtml(states)})`:""}</option>`}).join(""):`<option value="">No compatible existing projects</option>`;
+  const existingRadio=document.querySelector('[name="scenarioCopyDestination"][value="existing"]'),newRadio=document.querySelector('[name="scenarioCopyDestination"][value="new"]');
+  existingRadio.disabled=!idle.length;existingRadio.checked=Boolean(idle.length);newRadio.checked=!idle.length;
+  $("scenarioCopyTargetProject").disabled=!idle.length;$("scenarioCopyNewProjectName").disabled=Boolean(idle.length);$("scenarioCopyNewProjectName").value=`${source.name} — Selected Scenarios`;
+  const destinationStatus=$("scenarioCopyDestinationStatus");destinationStatus.hidden=compatible.length===idle.length;destinationStatus.textContent=compatible.length===idle.length?"":"Projects with unfinished runs are unavailable. Please wait until every run in the project has finished or been stopped.";
+  dialog.showModal();
+}
 function renderEditorProjectSelect() {
   const projects = state.data?.projects || [], prior = state.selectedProject?.id || $("editorProjectSelect").value;
-  $("editorProjectSelect").innerHTML = `<option value="">Choose a project</option>${projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("")}`;
-  selectedOption($("editorProjectSelect"), prior);
+  const standardProjects = projects.filter((project)=>!isHypercubeProject(project));
+  $("editorProjectSelect").innerHTML = `<option value="">Choose a standard project</option>${standardProjects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("")}`;
+  $("reviewProjectSelect").innerHTML = `<option value="">Choose a project</option>${projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("")}`;
+  selectedOption($("editorProjectSelect"), standardProjects.some((project)=>project.id===prior)?prior:"");
+  selectedOption($("reviewProjectSelect"), prior);
+}
+function hypercubeProject() {
+  return state.data?.projects?.find((item) => item.id === state.hypercubeProjectId) || null;
+}
+function hypercubeLibrary() {
+  const project = hypercubeProject();
+  return state.data?.inputLibraries?.find((item) => item.id === project?.inputLibrary?.id) || null;
+}
+function hypercubeProjectEditable() {
+  const project=hypercubeProject(),existing=project?.hypercubes?.[0];
+  if(!project)return false;
+  if(!existing)return true;
+  return !(project.runIds||[]).length&&!Object.entries(project.resultStatuses||{}).some(([key,records])=>key!=="baseline"&&(records||[]).length);
+}
+function refreshHypercubeSaveControls() {
+  const tracker=state.hypercubeAutosave;
+  if($("hypercubeSaveStatus")){
+    const label=tracker.inFlight?"Saving…":tracker.lastError?"Not saved—retry":state.hypercubeDirty?"Saving…":"Saved";
+    $("hypercubeSaveStatus").textContent=label;
+    $("hypercubeSaveStatus").classList.toggle("warning",Boolean(tracker.lastError||state.hypercubeDirty));
+  }
+  if($("retryHypercubeSave"))$("retryHypercubeSave").hidden=!tracker.lastError||!hypercubeProjectEditable()||Boolean(tracker.inFlight);
+  if($("previewHypercube"))$("previewHypercube").disabled=state.hypercubeDirty||Boolean(tracker.inFlight)||!state.hypercubeSavedRevision||!state.hypercubeSavedComplete||!hypercubeProjectEditable();
+  if($("generateHypercube"))$("generateHypercube").disabled=state.hypercubeDirty||Boolean(tracker.inFlight)||!state.hypercubePreviewRevision||state.hypercubePreviewRevision!==state.hypercubeSavedRevision;
+}
+function scheduleHypercubeAutosave() {
+  const tracker=state.hypercubeAutosave;
+  if(tracker.timer)clearTimeout(tracker.timer);
+  if(!state.hypercubeDirty||!hypercubeProjectEditable())return;
+  tracker.timer=setTimeout(()=>{tracker.timer=null;saveHypercubeDraft({announce:false,flush:false})},650);
+}
+function setHypercubeDirty(dirty=true) {
+  state.hypercubeDirty=Boolean(dirty);
+  if(dirty){state.hypercubeAutosave.changeRevision+=1;state.hypercubeAutosave.lastError="";state.hypercubePreview=null;state.hypercubePreviewRevision="";state.hypercubePreviewToken="";scheduleHypercubeAutosave()}
+  else if(state.hypercubeAutosave.timer){clearTimeout(state.hypercubeAutosave.timer);state.hypercubeAutosave.timer=null}
+  refreshHypercubeSaveControls();
+}
+function hydrateHypercubeProject(project) {
+  if(!project||state.hypercubeHydratedProjectId===project.id)return;
+  const source=project.hypercubeDraft||project.hypercubes?.[0]||null;
+  state.hypercubeHydratedProjectId=project.id;
+  state.hypercubeAxes=(source?.axes||[]).map((axis)=>({id:`hypercube-axis-${++state.hypercubeAxisSequence}`,filename:String(axis.filename||""),column:String(axis.column||""),operation:String(axis.operation||"percent"),start:String(axis.start??"10"),end:String(axis.end??"50"),interval:String(axis.interval??"5")}));
+  state.hypercubeScopeDraft={year:source?String(source.year||""):null,geographyType:String(source?.geographyType||"all")};
+  state.hypercubeSelectedLocations=new Set((source?.locations||[]).map(String));
+  state.hypercubeSavedRevision=String(project.hypercubeDraft?.revision||"");
+  state.hypercubeSavedComplete=project.hypercubeDraft?Boolean(project.hypercubeDraft.complete):Boolean(project.hypercubes?.length);
+  state.hypercubePreviewRevision="";state.hypercubePreviewToken="";state.hypercubePreview=null;state.hypercubeLocationSearch="";
+  state.hypercubeLocationPopoverOpen=false;
+  if(state.hypercubeAutosave.timer)clearTimeout(state.hypercubeAutosave.timer);
+  state.hypercubeAutosave={timer:null,inFlight:null,changeRevision:0,lastError:""};
+  setHypercubeDirty(false);
+  [...new Set(state.hypercubeAxes.map((axis)=>axis.filename).filter(Boolean))].forEach((filename)=>ensureHypercubeFile(filename));
+}
+function invalidateHypercubePreview(message = "Configure the parameters, then preview the matrix.") {
+  state.hypercubePreview = null;state.hypercubePreviewRevision="";state.hypercubePreviewToken="";
+  $("generateHypercube").disabled = true;
+  $("hypercubePreview").className = "hypercube-preview empty-state";
+  $("hypercubePreview").textContent = message;
+}
+function hypercubeFileKey(filename) { return `${state.hypercubeProjectId}:${filename}`; }
+function hypercubeFileState(axis) { return state.hypercubeFiles.get(hypercubeFileKey(axis.filename)); }
+function hypercubeFileRecord(axis) { const record=hypercubeFileState(axis);return record?.status==="ready"?record:null; }
+async function ensureHypercubeFile(filename) {
+  if(!filename)return null;
+  const project=hypercubeProject();if(!project)return null;
+  const key=hypercubeFileKey(filename),existing=state.hypercubeFiles.get(key);
+  if(existing?.status==="ready")return existing;
+  if(existing?.status==="loading")return existing.promise;
+  const token=++state.hypercubeFileLoadSequence,projectId=project.id;
+  const record={status:"loading",token,error:"",csv:null,geography:null,promise:null};
+  record.promise=Promise.all([
+    request(`/api/input-file?libraryId=${encodeURIComponent(project.inputLibrary.id)}&filename=${encodeURIComponent(filename)}`),
+    request(`/api/geography-options?projectId=${encodeURIComponent(project.id)}&filename=${encodeURIComponent(filename)}`),
+  ]).then(([csv,geography])=>{const current=state.hypercubeFiles.get(key);if(current?.token!==token)return current;Object.assign(record,{status:"ready",csv,geography,promise:null});return record}).catch((error)=>{const current=state.hypercubeFiles.get(key);if(current?.token===token)Object.assign(record,{status:"error",error:error.message||String(error),promise:null});return record}).finally(()=>{if(state.hypercubeProjectId===projectId){renderHypercubeAxes();renderHypercubeSharedFilters()}});
+  state.hypercubeFiles.set(key,record);renderHypercubeAxes();renderHypercubeSharedFilters();return record.promise;
+}
+function renderHypercubeSetup() {
+  if (!$("hypercubeProject")) return;
+  const projects = (state.data?.projects || []).filter(isHypercubeProject);
+  const prior = state.hypercubeProjectId || state.selectedProject?.id || $("hypercubeProject").value;
+  $("hypercubeProject").innerHTML = `<option value="">Choose a Hypercube project</option>${projects.map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("")}`;
+  state.hypercubeProjectId = projects.some((item) => item.id === prior) ? prior : "";
+  selectedOption($("hypercubeProject"), state.hypercubeProjectId);
+  const project=hypercubeProject(),existing=project?.hypercubes?.[0],replaceAllowed=Boolean(existing)&&!(project.runIds||[]).length&&!Object.entries(project.resultStatuses||{}).some(([key,records])=>key!=="baseline"&&(records||[]).length);
+  if(!project&&state.hypercubeHydratedProjectId){state.hypercubeHydratedProjectId="";state.hypercubeAxes=[];state.hypercubeSelectedLocations=new Set();state.hypercubeSavedRevision="";state.hypercubeSavedComplete=false;setHypercubeDirty(false)}
+  hydrateHypercubeProject(project);
+  $("hypercubeExistingNotice").hidden=!existing;
+  if(existing) $("hypercubeExistingNotice").innerHTML=replaceAllowed
+    ? `<strong>${escapeHtml(existing.name)} is this project’s current matrix.</strong><p>You may configure a replacement until a case is submitted to Run. Replacing it removes the current generated cases.</p>`
+    : `<strong>${escapeHtml(existing.name)} is locked.</strong><p>A case has been submitted to Run or produced a result. Create a new Hypercube project to build a different matrix.</p>`;
+  const editable=Boolean(project)&&(!existing||replaceAllowed);
+  $("addHypercubeAxis").disabled = !editable || state.hypercubeAxes.length >= 2;
+  $("addHypercubeAxis").title = state.hypercubeAxes.length >= 2 ? "Hypercube matrices are limited to two parameter axes." : "";
+  $("previewHypercube").disabled=!editable;
+  renderHypercubeAxes();
+  renderHypercubeSharedFilters();
+  refreshHypercubeSaveControls();
+  if(!editable) {
+    $("hypercubeYear").disabled=true;$("hypercubeGeographyType").disabled=true;$("hypercubeLocationTrigger").disabled=true;
+    $("hypercubeAxes").querySelectorAll("input,select,button").forEach((control)=>control.disabled=true);
+  }
+}
+function addHypercubeAxis() {
+  if(state.hypercubeAxes.length>=2)return notify("A Hypercube matrix may contain no more than two parameter axes.","error");
+  const library = hypercubeLibrary();
+  if (!library?.files?.length) return notify("The selected project has no input CSV files.", "error");
+  const axis = {id:`hypercube-axis-${++state.hypercubeAxisSequence}`,filename:"",column:"",operation:"percent",start:"10",end:"50",interval:"5"};
+  state.hypercubeAxes.push(axis); setHypercubeDirty(); invalidateHypercubePreview(); renderHypercubeAxes();
+}
+async function loadHypercubeAxisFile(axis, filename) {
+  axis.filename = filename; axis.column = ""; setHypercubeDirty(); invalidateHypercubePreview(); renderHypercubeAxes(); renderHypercubeSharedFilters();
+  if (!filename) { renderHypercubeSharedFilters(); return; }
+  try {
+    const record=await ensureHypercubeFile(filename);
+    const current = state.hypercubeAxes.find((item) => item.id === axis.id);
+    if (!current || current.filename !== filename) return;
+    if(record?.status!=="ready")return;
+    current.column = numericColumns(record.csv)[0] || "";
+    setHypercubeDirty();invalidateHypercubePreview();
+    renderHypercubeAxes(); renderHypercubeSharedFilters();
+  } catch (error) { notify(error.message, "error"); }
+}
+function hypercubeOperationOptions(selected) {
+  const options = [["set","Set to"],["add","Increase by"],["subtract","Decrease by"],["multiply","Multiply by"],["percent","Increase by %"],["decrease_percent","Decrease by %"]];
+  return options.map(([value,label]) => `<option value="${value}" ${selected===value?"selected":""}>${label}</option>`).join("");
+}
+function renderHypercubeAxes() {
+  if (!$("hypercubeAxes")) return;
+  const files = (hypercubeLibrary()?.files || []).filter((item) => item.toLowerCase().endsWith(".csv"));
+  $("hypercubeAxes").classList.toggle("empty-state", !state.hypercubeAxes.length);
+  $("hypercubeAxes").innerHTML = state.hypercubeAxes.length ? state.hypercubeAxes.map((axis) => {
+    const load=hypercubeFileState(axis),record = hypercubeFileRecord(axis), columns = record ? numericColumns(record.csv) : [],loading=load?.status==="loading",failed=load?.status==="error";
+    return `<article class="hypercube-axis-row" data-hypercube-axis="${escapeHtml(axis.id)}">
+      <label>Input file<select data-hypercube-axis-field="filename"><option value="">Choose file</option>${files.map((name)=>`<option value="${escapeHtml(name)}" ${axis.filename===name?"selected":""}>${escapeHtml(name)}</option>`).join("")}</select></label>
+      <label>Numeric column<select data-hypercube-axis-field="column" ${record?"":"disabled"}><option value="">${loading?"Loading file…":failed?"File could not load":record?"Choose column":"Choose file first"}</option>${columns.map((name)=>`<option value="${escapeHtml(name)}" ${axis.column===name?"selected":""}>${escapeHtml(name)}</option>`).join("")}</select>${failed?`<small class="field-error">${escapeHtml(load.error)}</small><button type="button" class="text-button" data-retry-hypercube-file="${escapeHtml(axis.filename)}">Retry loading file</button>`:""}</label>
+      <label>Operation<select data-hypercube-axis-field="operation">${hypercubeOperationOptions(axis.operation)}</select></label>
+      <label>Start<input data-hypercube-axis-field="start" type="number" step="any" value="${escapeHtml(axis.start)}"></label>
+      <label>End<input data-hypercube-axis-field="end" type="number" step="any" value="${escapeHtml(axis.end)}"></label>
+      <label>Interval<input data-hypercube-axis-field="interval" type="number" min="2" step="any" value="${escapeHtml(axis.interval)}"></label>
+      <button type="button" class="danger" data-remove-hypercube-axis="${escapeHtml(axis.id)}" aria-label="Remove parameter">×</button>
+    </article>`;
+  }).join("") : (hypercubeProject() ? "Add at least one parameter axis." : "Choose a project, then add a parameter.");
+  $("hypercubeAxes").querySelectorAll("[data-hypercube-axis-field]").forEach((control) => {
+    const row = control.closest("[data-hypercube-axis]"), axis = state.hypercubeAxes.find((item)=>item.id===row.dataset.hypercubeAxis), field = control.dataset.hypercubeAxisField;
+    const eventName = control.tagName === "INPUT" ? "input" : "change";
+    control.addEventListener(eventName, () => {
+      if (field === "filename") return loadHypercubeAxisFile(axis, control.value);
+      axis[field] = control.value; setHypercubeDirty(); invalidateHypercubePreview();
+    });
+  });
+  $("hypercubeAxes").querySelectorAll("[data-retry-hypercube-file]").forEach((button)=>button.addEventListener("click",()=>{state.hypercubeFiles.delete(hypercubeFileKey(button.dataset.retryHypercubeFile));ensureHypercubeFile(button.dataset.retryHypercubeFile)}));
+  $("hypercubeAxes").querySelectorAll("[data-remove-hypercube-axis]").forEach((button)=>button.addEventListener("click",()=>{
+    state.hypercubeAxes=state.hypercubeAxes.filter((axis)=>axis.id!==button.dataset.removeHypercubeAxis);setHypercubeDirty();invalidateHypercubePreview();renderHypercubeAxes();renderHypercubeSharedFilters();
+  }));
+  $("addHypercubeAxis").disabled=!hypercubeProjectEditable()||state.hypercubeAxes.length>=2;
+}
+function compatibleHypercubeGeographyLevels() {
+  const selectedAxes=state.hypercubeAxes.filter((axis)=>axis.filename),records=selectedAxes.map(hypercubeFileRecord).filter(Boolean);
+  if (!records.length||records.length!==selectedAxes.length) return [];
+  const first = records[0].geography.levels || [];
+  return first.filter((level)=>level.id!=="all"&&level.compatible&&records.every((record)=>record.geography.levels?.some((item)=>item.id===level.id&&item.compatible)));
+}
+function renderHypercubeSharedFilters() {
+  if (!$("hypercubeYear")) return;
+  const selectedAxes=state.hypercubeAxes.filter((axis)=>axis.filename),records=selectedAxes.map(hypercubeFileRecord).filter(Boolean),complete=selectedAxes.length>0&&records.length===selectedAxes.length;
+  if(!complete){$("hypercubeScope").hidden=true;$("hypercubeYear").disabled=true;$("hypercubeGeographyType").disabled=true;$("hypercubeLocationTrigger").disabled=true;$("hypercubeScopeSummary").textContent=selectedAxes.length?"Loading every selected parameter file before resolving shared scope…":"";return}
+  const priorYear=state.hypercubeScopeDraft.year;
+  const yearSets = records.map((record)=>{const index=record.csv.columns.indexOf("Year");return index<0?null:new Set(record.csv.rows.map((row)=>row[index]).filter(Boolean))}).filter(Boolean);
+  const years = yearSets.length ? [...yearSets[0]].filter((year)=>yearSets.every((set)=>set.has(year))).sort() : [];
+  $("hypercubeYear").innerHTML = `<option value="">All rows / timeless inputs</option>${years.map((year)=>`<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join("")}`;
+  selectedOption($("hypercubeYear"), priorYear===""?"":years.includes(priorYear)?priorYear:years.includes("2045")?"2045":years[0]||"");
+  state.hypercubeScopeDraft.year=$("hypercubeYear").value;
+  const levels = compatibleHypercubeGeographyLevels(), priorType = state.hypercubeScopeDraft.geographyType;
+  $("hypercubeGeographyType").innerHTML = `<option value="all">All matching rows</option>${levels.map((level)=>`<option value="${escapeHtml(level.id)}">${escapeHtml(level.label)}</option>`).join("")}`;
+  selectedOption($("hypercubeGeographyType"), levels.some((level)=>level.id===priorType)?priorType:"all");
+  state.hypercubeScopeDraft.geographyType=$("hypercubeGeographyType").value;
+  const ready=complete&&hypercubeProjectEditable();
+  $("hypercubeScope").hidden=!complete;
+  $("hypercubeYear").disabled=!ready;
+  $("hypercubeGeographyType").disabled=!ready;
+  renderHypercubeLocations();
+}
+function hypercubeLocationOptions() {
+  const type = $("hypercubeGeographyType").value;
+  if (type === "all") return [];
+  const records = state.hypercubeAxes.map(hypercubeFileRecord).filter(Boolean), maps = records.map((record)=>new Map((record.geography.levels?.find((item)=>item.id===type)?.values||[]).map((item)=>[String(item.value),item.label])));
+  if (!maps.length) return [];
+  return [...maps[0]].filter(([value])=>maps.every((map)=>map.has(value))).sort((a,b)=>String(a[1]).localeCompare(String(b[1]),undefined,{numeric:true}));
+}
+function pluralGeography(label,count){
+  const noun=String(label||"location");
+  if(count===1)return noun;
+  if(noun.toLowerCase()==="county")return `${noun.slice(0,-1)}ies`;
+  return `${noun}s`;
+}
+function renderHypercubeLocations() {
+  const selectedAxes=state.hypercubeAxes.filter((axis)=>axis.filename),records=selectedAxes.map(hypercubeFileRecord).filter(Boolean),complete=selectedAxes.length>0&&records.length===selectedAxes.length,type = $("hypercubeGeographyType").value, options = hypercubeLocationOptions(), valid = new Set(options.map(([value])=>value)),priorCount=state.hypercubeSelectedLocations.size;
+  if(!complete){setHypercubeLocationPopoverOpen(false);$("hypercubeLocationTrigger").disabled=true;return}
+  state.hypercubeSelectedLocations = new Set([...state.hypercubeSelectedLocations].filter((value)=>valid.has(value)));
+  if(priorCount>state.hypercubeSelectedLocations.size)notify("Some location selections were cleared because they are not compatible with every selected parameter file.","success");
+  const search=state.hypercubeLocationSearch.trim().toLowerCase(),visible=options.filter(([,label])=>!search||String(label).toLowerCase().includes(search));
+  $("hypercubeLocationSearch").value=state.hypercubeLocationSearch;
+  $("hypercubeLocations").innerHTML = visible.map(([value,label])=>`<label class="check-option"><input type="checkbox" data-hypercube-location="${escapeHtml(value)}" ${state.hypercubeSelectedLocations.has(value)?"checked":""}><span>${escapeHtml(label)}</span></label>`).join("") || `<p class="muted">${options.length?"No matching locations.":"No locations are shared by every selected input file."}</p>`;
+  $("hypercubeSelectAllLocations").disabled = !complete||!hypercubeProjectEditable()||type === "all" || !options.length;
+  $("hypercubeClearLocations").disabled = !state.hypercubeSelectedLocations.size;
+  const selected = options.filter(([value])=>state.hypercubeSelectedLocations.has(value)).length;
+  const level=compatibleHypercubeGeographyLevels().find((item)=>item.id===type),noun=level?.label||"locations";
+  $("hypercubeLocationTrigger").disabled=!complete||!hypercubeProjectEditable()||type==="all"||!options.length;
+  if(type==="all"||!options.length)setHypercubeLocationPopoverOpen(false);
+  else setHypercubeLocationPopoverOpen(state.hypercubeLocationPopoverOpen);
+  $("hypercubeLocationTrigger").textContent=type==="all"?"All matching rows":selected===options.length&&options.length?`All ${options.length.toLocaleString()} ${pluralGeography(noun,options.length)}`:selected?`${selected.toLocaleString()} of ${options.length.toLocaleString()} ${pluralGeography(noun,options.length)}`:`Choose ${pluralGeography(noun,2).toLowerCase()}`;
+  const uniqueFiles=[...new Map(selectedAxes.map((axis)=>[axis.filename,hypercubeFileRecord(axis)]).filter(([,record])=>record)).entries()];
+  const year=$("hypercubeYear").value;
+  const summaries=uniqueFiles.map(([filename,record])=>{
+    const yearIndex=record.csv.columns.indexOf("Year"),rows=record.csv.rows.filter((row)=>!year||yearIndex<0||String(row[yearIndex])===year),target=record.geography.targetLevel||"location";
+    return `${filename}: ${type==="all"?`All ${rows.length.toLocaleString()} ${target}${rows.length===1?" row":" rows"} will receive each matrix combination`:`${selected.toLocaleString()} selected ${pluralGeography(noun,selected)}`}`;
+  });
+  $("hypercubeScopeSummary").innerHTML=`<strong>${type==="all"?"Each combination changes every matching row; no MPO aggregation or location dimension is added.":"Each combination changes the selected shared geography scope."}</strong>${summaries.length?`<span>${summaries.map(escapeHtml).join(" · ")}</span>`:""}`;
+  $("hypercubeLocations").querySelectorAll("[data-hypercube-location]").forEach((box)=>box.addEventListener("change",()=>{if(box.checked)state.hypercubeSelectedLocations.add(box.dataset.hypercubeLocation);else state.hypercubeSelectedLocations.delete(box.dataset.hypercubeLocation);setHypercubeDirty();invalidateHypercubePreview();renderHypercubeLocations()}));
+}
+function hypercubePayload() {
+  return {projectId:state.hypercubeProjectId,year:String(state.hypercubeScopeDraft.year||""),geographyType:state.hypercubeScopeDraft.geographyType,locations:[...state.hypercubeSelectedLocations],replaceExisting:Boolean(hypercubeProject()?.hypercubes?.length),axes:state.hypercubeAxes.map(({filename,column,operation,start,end,interval})=>({filename,column,operation,start,end,interval}))};
+}
+function hypercubeAxisLabel(axis){return `${axis.column} (${axis.values.length})`;}
+function hypercubeDiagram(preview){
+  const axes=preview.axes||[],labels=axes.map(hypercubeAxisLabel),description=`${axes.length}-dimensional matrix. ${labels.join(", ")}. ${Number(preview.caseCount).toLocaleString()} total scenarios.`;
+  if(axes.length===1){
+    const points=axes[0].values.slice(0,9).map((value,index,values)=>{const x=32+(values.length===1?108:index*216/(values.length-1));return `<circle cx="${x}" cy="58" r="5"/><text x="${x}" y="82" text-anchor="middle">${escapeHtml(value)}</text>`}).join("");
+    return `<svg class="hypercube-diagram" viewBox="0 0 280 110" role="img" aria-label="${escapeHtml(description)}"><line x1="28" y1="58" x2="252" y2="58"/>${points}<text x="140" y="18" text-anchor="middle">${escapeHtml(labels[0])}</text></svg>`;
+  }
+  if(axes.length===2){
+    const dots=[];for(let y=0;y<Math.min(axes[1].values.length,7);y++)for(let x=0;x<Math.min(axes[0].values.length,9);x++)dots.push(`<circle cx="${48+x*22}" cy="${24+y*18}" r="3.5"/>`);
+    return `<svg class="hypercube-diagram" viewBox="0 0 280 170" role="img" aria-label="${escapeHtml(description)}"><path d="M40 14v126h216"/>${dots.join("")}<text x="150" y="164" text-anchor="middle">${escapeHtml(labels[0])}</text><text x="14" y="78" text-anchor="middle" transform="rotate(-90 14 78)">${escapeHtml(labels[1])}</text></svg>`;
+  }
+  const layers=Math.max(1,axes.slice(3).reduce((total,axis)=>total*axis.values.length,1)),layerShapes=Array.from({length:Math.min(layers,4)},(_,index)=>{const d=index*7;return `<path d="M${62+d} ${55-d}l92 -32 64 45 -92 34zM${62+d} ${55-d}v68l64 38v-59M${218+d} ${68-d}v68l-92 25"/>`}).join("");
+  return `<svg class="hypercube-diagram" viewBox="0 0 310 205" role="img" aria-label="${escapeHtml(description)}">${layerShapes}<text x="204" y="190">${escapeHtml(labels[0])}</text><text x="18" y="105" transform="rotate(-55 18 105)">${escapeHtml(labels[1])}</text><text x="236" y="72" transform="rotate(55 236 72)">${escapeHtml(labels[2])}</text>${axes.length>3?`<text x="155" y="18" text-anchor="middle">${layers.toLocaleString()} layer${layers===1?"":"s"} across ${axes.length-3} more ${axes.length-3===1?"axis":"axes"}</text>`:""}</svg>`;
+}
+function medianNumber(values) {
+  const ordered=values.filter(Number.isFinite).sort((a,b)=>a-b);
+  if(!ordered.length)return NaN;
+  const middle=Math.floor(ordered.length/2);
+  return ordered.length%2?ordered[middle]:(ordered[middle-1]+ordered[middle])/2;
+}
+function approximateDuration(milliseconds) {
+  if(!Number.isFinite(milliseconds)||milliseconds<=0)return "";
+  const minutes=Math.max(1,Math.round(milliseconds/60000));
+  if(minutes<60)return `about ${minutes} minute${minutes===1?"":"s"}`;
+  const hours=Math.round(minutes/6)/10;
+  return `about ${hours.toLocaleString(undefined,{maximumFractionDigits:1})} hour${hours===1?"":"s"}`;
+}
+function hypercubePlanningProject() {
+  return hypercubeProject() || (isHypercubeProject(state.selectedProject)?state.selectedProject:null) || (state.data?.projects||[]).find(isHypercubeProject) || null;
+}
+async function loadHypercubeResourceReport() {
+  if(state.hypercubeResourceReport)return state.hypercubeResourceReport;
+  if(state.hypercubeResourceReportPromise)return state.hypercubeResourceReportPromise;
+  const pending=request("/api/storage").then((report)=>{state.hypercubeResourceReport=report;return report}).finally(()=>{if(state.hypercubeResourceReportPromise===pending)state.hypercubeResourceReportPromise=null});
+  state.hypercubeResourceReportPromise=pending;
+  return pending;
+}
+function comparableHypercubeJobs(project) {
+  if(!project)return [];
+  const template=String(project.template?.fingerprint||""),library=String(project.inputLibrary?.fingerprint||"");
+  return (state.data?.jobs||[]).filter((job)=>job.state==="succeeded"&&job.startedAt&&job.finishedAt&&(!template||job.templateFingerprint===template)&&(!library||job.inputLibraryFingerprint===library));
+}
+async function hypercubeResourcePlan(project) {
+  const report=await loadHypercubeResourceReport(),jobs=comparableHypercubeJobs(project),runSizes=new Map((report.runs||[]).map((item)=>[item.id,item]));
+  const durations=jobs.map(jobRuntimeMilliseconds).filter((value)=>Number.isFinite(value)&&value>0);
+  const measuredSizes=jobs.map((job)=>runSizes.get(job.id)).filter(Boolean).map((item)=>Number(item.datastoreBytes)).filter((value)=>Number.isFinite(value)&&value>0);
+  const measuredBytes=medianNumber(measuredSizes);
+  return {medianRuntimeMs:Number.isFinite(medianNumber(durations))?medianNumber(durations):11*60*1000,runtimeSamples:durations.length,perResultBytes:Number.isFinite(measuredBytes)?measuredBytes:318*1000*1000,storageSamples:measuredSizes.length,retainExports:false,storageSource:Number.isFinite(measuredBytes)?"measured":"planning"};
+}
+function hypercubeResourceEstimateMarkup({caseCount,concurrency,project,plan,illustrative=false}) {
+  const count=Math.max(1,Number(caseCount)||1),waves=count;
+  const elapsed=illustrative?"about 15 hours":approximateDuration(waves*plan.medianRuntimeMs);
+  const disk=illustrative?"about 26 GB":`about ${humanBytes(plan.perResultBytes*count)}`;
+  const runtimeSource=illustrative?"Planning figure based on roughly 11 minutes per regional run, executed one at a time.":plan.runtimeSamples?`Based on ${plan.runtimeSamples.toLocaleString()} comparable completed run${plan.runtimeSamples===1?"":"s"}.`:"Planning estimate based on roughly 11 minutes per regional run; actual native runtime varies by computer.";
+  const storageSource=illustrative?"Planning figure based on roughly 318 MB per retained Datastore.":plan.storageSource==="measured"?`Based on ${plan.storageSamples.toLocaleString()} comparable retained result${plan.storageSamples===1?"":"s"}.`:"Planning estimate based on roughly 318 MB per retained Datastore.";
+  const warning=count>100?"Large Hypercubes can take a long time because Windows runs one case at a time.":"";
+  return `<div class="hypercube-resource-heading"><strong>${illustrative?"81-case Windows planning example":"Resource estimate"}</strong>${illustrative?"":`<span>${count.toLocaleString()} complete run${count===1?"":"s"}</span>`}</div><div class="hypercube-resource-grid"><div><small>Execution</small><strong>${waves.toLocaleString()} queued case${waves===1?"":"s"}</strong><span>${escapeHtml(elapsed)}</span></div><div><small>Native runtime</small><strong>One active slot</strong><span>Standard and Hypercube batches share the workspace FIFO queue</span></div><div><small>Retained disk</small><strong>${escapeHtml(disk)}</strong><span>Datastores only · no optional full CSV trees</span></div></div><p class="muted">${escapeHtml(runtimeSource)} ${escapeHtml(storageSource)}</p><p class="hypercube-parallel-guidance"><span>Windows executes one VisionEval case at a time to avoid shared-state collisions in the installed native runtime.</span></p>${warning?`<p class="hypercube-resource-warning">${escapeHtml(warning)}</p>`:""}`;
+}
+function renderHypercubeSafetyEstimate() {
+  const target=$("hypercubeSafetyEstimate");if(!target)return;
+  const plan={medianRuntimeMs:11*60*1000,runtimeSamples:0,perResultBytes:318*1000*1000,storageSamples:0,storageSource:"planning"};
+  target.innerHTML=hypercubeResourceEstimateMarkup({caseCount:81,concurrency:4,project:null,plan,illustrative:true});bindHypercubeResourceLinks(target);
+}
+function bindHypercubeResourceLinks(container) {
+  container?.querySelectorAll("[data-open-hypercube-resources]").forEach((button)=>button.addEventListener("click",()=>{if($("hypercubeSafetyDialog")?.open)$("hypercubeSafetyDialog").close("back");openSettings("settingsResources")}));
+}
+async function renderHypercubePreviewResourceEstimate(preview) {
+  const target=$("hypercubePreviewResourceEstimate"),revision=String(preview.draftRevision||"");if(!target)return;
+  try{const project=hypercubeProject(),plan=await hypercubeResourcePlan(project);if(!state.hypercubePreview||String(state.hypercubePreview.draftRevision||"")!==revision)return;const configured=state.data?.runtime?.adapter==="native"?1:Number(state.desktop?.resources?.maxConcurrentRuns||state.data?.queue?.maxActive||1);target.innerHTML=hypercubeResourceEstimateMarkup({caseCount:preview.caseCount,concurrency:configured,project,plan});bindHypercubeResourceLinks(target)}
+  catch(error){if(state.hypercubePreview&&String(state.hypercubePreview.draftRevision||"")===revision)target.innerHTML=`<p class="muted">Resource estimate unavailable: ${escapeHtml(error.message||String(error))}</p>`}
+}
+function renderHypercubePreview(preview) {
+  state.hypercubePreview = preview;state.hypercubePreviewRevision=String(preview.draftRevision||"");state.hypercubePreviewToken=String(preview.previewToken||""); $("hypercubePreview").className = "hypercube-preview";
+  const formula=preview.axes.map((axis)=>axis.values.length.toLocaleString()).join(" × "),scope=(preview.scopeDetails||[]).map((item)=>`${item.filename}: all ${Number(item.matchedRows).toLocaleString()} ${item.targetLevel||"location"} row${Number(item.matchedRows)===1?"":"s"}`).join(" · ");
+  const examples=(preview.examples||[]).map((combination,index)=>`<li><strong>Case ${index+1}:</strong> ${combination.map((item)=>`${escapeHtml(item.column)} = ${escapeHtml(item.value)}`).join("; ")}</li>`).join("");
+  $("hypercubePreview").innerHTML = `<h3>${escapeHtml(preview.name)}</h3><div class="hypercube-preview-layout"><div>${hypercubeDiagram(preview)}<p class="hypercube-formula"><strong>${escapeHtml(formula)} = ${Number(preview.caseCount).toLocaleString()}</strong> scenarios</p></div><div><div class="hypercube-preview-grid"><div><strong>${Number(preview.caseCount).toLocaleString()}</strong><small>scenarios</small></div><div><strong>${preview.axes.length}</strong><small>parameter axes</small></div><div><strong>${Number(preview.affectedCellsPerCase).toLocaleString()}</strong><small>changed cells per case</small></div></div><div class="hypercube-axis-values">${preview.axes.map((axis)=>`<div><strong>${escapeHtml(axis.filename)} / ${escapeHtml(axis.column)}</strong>: ${axis.values.map(escapeHtml).join(", ")}</div>`).join("")}</div>${scope?`<p class="hypercube-preview-scope"><strong>Scope:</strong> ${escapeHtml(scope)}. Every combination changes these rows; locations are not additional cases.</p>`:""}${examples?`<div class="hypercube-examples"><strong>Example combinations</strong><ol>${examples}</ol></div>`:""}</div></div><div id="hypercubePreviewResourceEstimate" class="hypercube-resource-estimate" role="status" aria-live="polite">Calculating time, memory, and retained-disk estimates…</div>`;
+  $("generateHypercube").disabled = state.hypercubePreviewRevision!==state.hypercubeSavedRevision;
+  renderHypercubePreviewResourceEstimate(preview);
+}
+async function saveHypercubeDraft({announce=true,flush=true}={}) {
+  const tracker=state.hypercubeAutosave;
+  if(tracker.timer){clearTimeout(tracker.timer);tracker.timer=null}
+  if(tracker.inFlight){const active=tracker.inFlight,prior=await active;if(tracker.inFlight===active)tracker.inFlight=null;refreshHypercubeSaveControls();if(state.hypercubeDirty&&!tracker.lastError)return saveHypercubeDraft({announce,flush});if(!prior||tracker.lastError)return false;return true}
+  const project=hypercubeProject();if(!project)return !state.hypercubeDirty;
+  if(!state.hypercubeDirty&&!tracker.lastError)return true;
+  const savedChangeRevision=tracker.changeRevision,payload={...hypercubePayload(),expectedProjectUpdatedAt:project.updatedAt||""};
+  tracker.lastError="";refreshHypercubeSaveControls();
+  const requestPromise=(async()=>{
+    try{
+      const result=await post("/api/projects/hypercubes/draft",payload);
+      project.hypercubeDraft=result.draft;project.updatedAt=result.projectUpdatedAt;
+      state.hypercubeSavedRevision=result.draft.revision;state.hypercubeSavedComplete=Boolean(result.complete);state.hypercubePreviewRevision="";state.hypercubePreviewToken="";state.hypercubePreview=null;
+      if(tracker.changeRevision===savedChangeRevision){state.hypercubeDirty=false;invalidateHypercubePreview(result.complete?"Setup saved. Preview the saved matrix before generating scenarios.":"Setup saved. Complete every parameter before previewing the matrix.")}
+      if(announce)notify(result.complete?"Hypercube setup saved.":"Incomplete Hypercube setup saved.","success");
+      return true;
+    }catch(error){tracker.lastError=error.message||String(error);state.hypercubeDirty=true;if(announce||flush)notify(`Hypercube setup was not saved: ${tracker.lastError}`,"error");return false}
+  })();
+  tracker.inFlight=requestPromise;refreshHypercubeSaveControls();
+  const saved=await requestPromise;
+  if(tracker.inFlight===requestPromise)tracker.inFlight=null;
+  refreshHypercubeSaveControls();
+  if(saved&&state.hypercubeDirty){if(flush)return saveHypercubeDraft({announce:false,flush:true});scheduleHypercubeAutosave()}
+  return saved&&!state.hypercubeDirty;
+}
+async function flushHypercubeAutosave() {
+  if(!state.hypercubeDirty&&!state.hypercubeAutosave.inFlight)return true;
+  const saved=await saveHypercubeDraft({announce:false,flush:true});
+  if(!saved)notify("Automatic saving failed. Stay on Hypercube and retry saving before leaving.","error");
+  return saved;
+}
+async function previewHypercube() {
+  if(state.hypercubeDirty||!state.hypercubeSavedRevision)return notify("Wait for the Hypercube setup to finish saving before previewing it.","error");
+  setBusy($("previewHypercube"),true,"Previewing…");
+  try { renderHypercubePreview(await post("/api/projects/hypercubes/preview",{projectId:state.hypercubeProjectId,draftRevision:state.hypercubeSavedRevision})); }
+  catch(error){invalidateHypercubePreview(error.message);notify(error.message,"error")}
+  finally{setBusy($("previewHypercube"),false)}
+}
+async function pollHypercubeOperation() {
+  if (!state.hypercubeOperationId) return;
+  try {
+    const operation=await request(`/api/projects/hypercubes/status?id=${encodeURIComponent(state.hypercubeOperationId)}`);
+    $("hypercubeProgress").hidden=false;$("hypercubeProgress").textContent=operation.message;
+    if(["waiting","running","cancelling"].includes(operation.state)){setTimeout(pollHypercubeOperation,400);return}
+    $("cancelHypercube").hidden=true;$("generateHypercube").disabled=true;state.hypercubeOperationId="";state.hypercubePreviewToken="";
+    if(operation.state==="succeeded"){
+      state.reviewHypercubeId=operation.result.hypercube.id;state.hypercubeHydratedProjectId="";state.hypercubeSavedRevision="";state.hypercubePreviewRevision="";state.hypercubeDirty=false;await refreshState({quiet:true});selectProject(operation.result.projectId);switchHypercubeSubpage("hypercubeReviewPage");notify(operation.message,"success");nativeNotification("Hypercube scenarios ready",operation.message,{outcome:"succeeded",force:true});
+    }else{notify(operation.message,operation.state==="cancelled"?"success":"error");if(operation.state==="failed")nativeNotification("Hypercube generation failed",operation.message,{outcome:"failed",force:true});}
+  }catch(error){state.hypercubeOperationId="";$("cancelHypercube").hidden=true;notify(error.message,"error")}
+}
+async function generateHypercube() {
+  if(!state.hypercubePreview||state.hypercubeDirty||state.hypercubePreviewRevision!==state.hypercubeSavedRevision)return notify("Wait for automatic saving, then preview the current Hypercube setup before generating scenarios.","error");
+  if(state.hypercubePreview.replacingExisting&&!await confirmWorkbench("Replace this project’s current matrix and all of its unrun generated cases? This cannot be undone."))return;
+  const payload={projectId:state.hypercubeProjectId,draftRevision:state.hypercubeSavedRevision,previewToken:state.hypercubePreviewToken};
+  setBusy($("generateHypercube"),true,"Starting…");
+  try{const operation=await post("/api/projects/hypercubes/start",payload);state.hypercubeOperationId=operation.id;setBusy($("generateHypercube"),false);$("generateHypercube").disabled=true;$("cancelHypercube").hidden=false;$("hypercubeProgress").hidden=false;$("hypercubeProgress").textContent=operation.message;pollHypercubeOperation()}
+  catch(error){notify(error.message,"error");setBusy($("generateHypercube"),false)}
 }
 function clearEditorFile() {
-  state.editorFileName = ""; state.csv = null; state.editorGeography = null; state.editorBaselineRows = []; state.editorOriginalRows = []; state.editorUndo = []; state.editorRedo = []; state.editorSavedNotes = ""; setEditorDirty(false);
-  $("editorFile").value = ""; $("csvTableWrap").innerHTML = `<p class="empty-state">Choose an input file to preview rows.</p>`;
+  state.editorFileName = ""; state.csv = null; state.editorGeography = null; state.editorBaselineRows = []; state.editorOriginalRows = []; state.editorUndo = []; state.editorRedo = []; state.editorManualEdit = false; setEditorDirty(false);
+  $("editorNotes").value = ""; primeNoteAutosave("file", "");
+  $("editorFile").value = "";
+  $("editorLocationField").innerHTML = `<option value="">Choose an input file</option>`;
+  $("editorYear").innerHTML = `<option value="">Choose an input file</option>`;
+  $("editorOperation").value = ""; $("editorValue").value = ""; $("editorValue").placeholder = ""; $("editorLocationSearch").value = "";
+  $("editorLocations").innerHTML = `<p class="muted">Choose an input file.</p>`;
+  $("editorColumns").innerHTML = `<p class="muted">Choose an input file.</p>`;
+  $("editorSavedScopeSummary").hidden = true; $("editorSavedScopeSummary").textContent = "";
+  ["editorLocationField","editorLocationSearch","editorYear","editorOperation","editorValue","editorSelectAllLocations","editorSelectAllColumns","clearEditorColumns","applyEditorChange","clearEditorSelections","resetEditorFile","undoEditorChange","redoEditorChange"].forEach((id) => { $(id).disabled = true; });
+  $("csvTableWrap").innerHTML = `<p class="empty-state">Choose an input file to preview rows.</p>`;
 }
 function selectProject(projectId, rerender = true) {
   const changed = state.selectedProject?.id !== projectId;
   state.selectedProject = state.data.projects.find((item) => item.id === projectId) || null;
-  if (!state.selectedProject) { $("inputEditor").hidden = true; return; }
-  if (changed) { state.editorVariationId = ""; clearEditorFile(); clearBatchDraftState(""); state.review = null; }
+  $("editorProjectSelect").value = state.selectedProject?.id || "";
+  $("reviewProjectSelect").value = state.selectedProject?.id || "";
+  if (!state.selectedProject) { $("inputEditor").hidden = true; state.review = null; renderReview(); return; }
+  if (changed) { state.editorVariationId = ""; clearEditorFile(); clearBatchDraftState(""); state.review = null; state.reviewHypercubeId = ""; }
+  if(isHypercubeProject(state.selectedProject)) {
+    $("editorProjectSelect").value="";$("inputEditor").hidden=true;
+    $("editorProjectFacts").textContent="This is a dedicated Hypercube project. Open it from Setup or the Hypercube tab.";
+    syncMenuContext();if(rerender){renderProjects();renderEditorProjectSelect()}return;
+  }
   $("inputEditor").hidden = false;
-  $("editorProjectSelect").value = projectId;
-  $("editorProjectFacts").textContent = `${state.selectedProject.template.name} · ${state.selectedProject.inputLibrary.id} · ${state.selectedProject.variations.length} scenarios`;
+  $("editorProjectFacts").textContent = `${projectPackageName(state.selectedProject)} · ${state.selectedProject.variations.length} scenarios`;
   const baseline = state.selectedProject.baseline || {strategy:"fresh"};
   const baselineName = baselineDisplayName(state.selectedProject);
   const existingResult = state.data?.catalog?.find((item) => item.id === baseline.datastoreId);
   const baselineDescription = baseline.strategy === "fresh"
     ? "Untouched model and Input Library values"
-    : `${escapeHtml(existingResult?.label || "Existing completed result")} · ${escapeHtml(baseline.compatibility || "unverified")}`;
+    : `${escapeHtml(existingResult?.displayLabel || existingResult?.label || "Existing completed result")} · ${escapeHtml(baseline.compatibility || "unverified")}`;
   $("baselineCard").innerHTML = `<div class="baseline-card-header"><strong>${escapeHtml(baselineName)} <span class="pill">Read only</span></strong><button id="renameBaseline" class="text-button" type="button">Rename</button></div><small>${baselineDescription}</small>`;
   $("renameBaseline").addEventListener("click", openBaselineRenameDialog);
   if (!state.selectedProject.variations.some((item) => item.id === state.editorVariationId)) state.editorVariationId = state.selectedProject.variations[0]?.id || "";
@@ -2275,11 +3472,12 @@ function renderScenarioTree() {
   $("duplicateEditorScenario").disabled = !project.variations.length;
   $("editorScenarioTree").innerHTML = project.variations.map((scenario) => {
     const active = scenario.id === state.editorVariationId;
+    const source = scenarioEditSource(scenario);
     return `<div class="scenario-group"><div class="scenario-title-row ${active ? "active" : ""}">
-      <input data-scenario-name="${escapeHtml(scenario.id)}" value="${escapeHtml(scenario.name)}" aria-label="Scenario name">
+      <div class="scenario-name-field ${source === "unavailable" ? "" : "has-edit-source-marker"}"><input data-scenario-name="${escapeHtml(scenario.id)}" value="${escapeHtml(scenario.name)}" aria-label="Scenario name">${editSourceMarker(source)}</div>
       <button data-scenario-tools="${escapeHtml(scenario.id)}" title="Open scenario tools">›</button>
       <button class="remove-editor-scenario" data-delete-scenario="${escapeHtml(scenario.id)}" title="Remove scenario">×</button></div>
-      <div class="file-edit-branch">${(scenario.overlays || []).map((file) => `<div class="file-edit-row ${active && state.editorFileName === file.fileName && state.editorMode === "file" ? "active" : ""}"><button data-open-file-change="${escapeHtml(scenario.id)}" data-file-name="${escapeHtml(file.fileName)}">${escapeHtml(file.fileName)}</button><button class="remove-file-edit" data-remove-file-change="${escapeHtml(scenario.id)}" data-file-name="${escapeHtml(file.fileName)}" title="Remove saved file change">×</button></div>`).join("")}<button class="new-file-edit" data-new-file="${escapeHtml(scenario.id)}">+ New File</button></div></div>`;
+      <div class="file-edit-branch">${(scenario.overlays || []).map((file) => `<div class="file-edit-row ${active && state.editorFileName === file.fileName && state.editorMode === "file" ? "active" : ""}"><button data-open-file-change="${escapeHtml(scenario.id)}" data-file-name="${escapeHtml(file.fileName)}"><span>${escapeHtml(file.fileName)}</span>${editSourceMarker(editSourceValue(file.editOperations || []),false)}</button><button class="remove-file-edit" data-remove-file-change="${escapeHtml(scenario.id)}" data-file-name="${escapeHtml(file.fileName)}" title="Remove saved file change">×</button></div>`).join("")}<button class="new-file-edit" data-new-file="${escapeHtml(scenario.id)}">+ New File</button></div></div>`;
   }).join("") || `<p class="muted">No editable scenarios yet.</p>`;
   document.querySelectorAll("[data-scenario-tools]").forEach((button) => button.addEventListener("click", () => guardUnsaved(() => openScenarioTools(button.dataset.scenarioTools))));
   document.querySelectorAll("[data-new-file]").forEach((button) => button.addEventListener("click", () => guardUnsaved(() => openNewFile(button.dataset.newFile))));
@@ -2291,22 +3489,30 @@ function renderScenarioTree() {
 function renderEditorPage() {
   const scenario = activeEditorVariation(), hasScenario = Boolean(scenario);
   $("editorEmpty").hidden = hasScenario;
+  $("editorNotesPanel").hidden = !hasScenario;
   $("scenarioTools").hidden = !hasScenario || state.editorMode !== "scenario";
   $("fileEditorPage").hidden = !hasScenario || state.editorMode !== "file";
   if (!scenario) return;
+  if (state.noteAutosave.scenario.context !== noteContext("scenario")) { $("scenarioNote").value = scenario.scenarioNote || ""; primeNoteAutosave("scenario", $("scenarioNote").value); }
+  const showScenarioNote = state.editorMode === "scenario";
+  const showFileNote = state.editorMode === "file" && Boolean(state.editorFileName);
+  $("scenarioNoteField").hidden = !showScenarioNote;
+  $("fileNoteField").hidden = !showFileNote;
+  $("editorNotesTitle").textContent = showScenarioNote ? "Scenario note" : "File note";
+  $("editorNotesGuidance").textContent = showScenarioNote
+    ? "This scenario note saves automatically and does not save pending batch changes."
+    : showFileNote
+      ? "This file note saves automatically and does not save pending CSV edits."
+      : "Choose an input file to add or edit its file note.";
   if (state.editorMode === "scenario") {
-    $("scenarioToolsTitle").textContent = `Batch change ${scenario.name}`; $("scenarioNote").value = scenario.scenarioNote || "";
+    $("scenarioToolsTitle").textContent = `Batch change ${scenario.name}`;
     if (!batchSessionMatches(scenario.id)) resetBatchDraft(scenario.id);
   }
-  else { $("editorProjectName").textContent = `${scenario.name}${state.editorFileName ? ` · ${state.editorFileName}` : ""}`; if (state.editorFileName) $("editorNotes").value = scenario.notes?.[state.editorFileName] || state.editorSavedNotes; }
+  else { $("editorProjectName").textContent = `${scenario.name}${state.editorFileName ? ` · ${state.editorFileName}` : ""}`; }
 }
 function openScenarioTools(scenarioId) {
-  // A batch draft belongs to one uninterrupted visit to one scenario. Opening
-  // Batch Change from the file editor must start clean even if an earlier
-  // render happened to stamp the new scenario id onto the previous draft.
-  const shouldResetDraft = state.editorMode !== "scenario" || !batchSessionMatches(scenarioId);
   state.editorVariationId = scenarioId; state.editorMode = "scenario"; clearEditorFile();
-  if (shouldResetDraft) resetBatchDraft(scenarioId);
+  if (!batchSessionMatches(scenarioId)) resetBatchDraft(scenarioId);
   renderScenarioTree(); renderEditorPage();
 }
 function openNewFile(scenarioId) { state.editorVariationId = scenarioId; state.editorMode = "file"; clearEditorFile(); renderScenarioTree(); renderEditorPage(); }
@@ -2318,27 +3524,40 @@ async function loadEditorFile(requestedFilename = "") {
   setBusy($("saveOverlay"), true, "Loading…");
   try {
     const [csvPayload, baselinePayload, geography] = await Promise.all([request(editorFileUrl(filename)), request(baselineEditorFileUrl(filename)), request(`/api/geography-options?projectId=${encodeURIComponent(state.selectedProject.id)}&filename=${encodeURIComponent(filename)}`)]);
-    state.editorFileName = filename; state.csv = csvPayload; state.editorGeography = geography; state.editorSelectedLocations.clear();
+    state.editorFileName = filename; state.csv = csvPayload; state.editorGeography = geography; state.editorSelectedLocations.clear(); state.editorManualEdit = false;
     state.editorBaselineRows = baselinePayload.rows.map((row) => [...row]);
     state.editorOriginalRows = csvPayload.rows.map((row) => [...row]); state.editorUndo = []; state.editorRedo = [];
-    state.editorSavedNotes = activeEditorVariation()?.notes?.[filename] || ""; $("editorNotes").value = state.editorSavedNotes;
-    renderEditorControls(); renderCsv(); renderScenarioTree(); renderEditorPage(); setEditorDirty(false);
+    const overlayRecord=activeEditorVariation()?.overlays?.find((item)=>item.fileName===filename);
+    state.editorSavedOperations=structuredClone(overlayRecord?.editOperations||[]);state.editorPendingOperations=structuredClone(state.editorSavedOperations);
+    $("editorNotes").value = activeEditorVariation()?.notes?.[filename] || ""; primeNoteAutosave("file", $("editorNotes").value);
+    const draft = loadEditorDraft("file", filename) || savedFileDraft(state.editorSavedOperations) || {};
+    renderEditorControls(draft); renderCsv(); renderScenarioTree(); renderEditorPage(); setEditorDirty(false); persistFileDraft();
   } catch (error) { notify(error.message, "error"); } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty; }
 }
-function selectedGeographyLevel(payload, select) { return payload?.levels?.find((level) => level.id === select.value) || payload?.levels?.[0] || null; }
-function renderEditorControls() {
+function selectedGeographyLevel(payload, select) { return !select.value || select.value === MIXED_EDITOR_VALUE ? null : payload?.levels?.find((level) => level.id === select.value) || null; }
+function renderEditorControls(draft = {}) {
   if (!state.csv) return;
-  const levels = state.editorGeography?.levels || [{id:"all",label:"All locations",values:[]}], prior = $("editorLocationField").value;
-  $("editorLocationField").innerHTML = levels.map((level) => `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label)}</option>`).join("");
-  const preferred = levels.some((level) => level.id === prior) ? prior : levels.some((level) => level.id === "county") ? "county" : levels[0]?.id;
-  $("editorLocationField").value = preferred || "all";
-  state.editorSelectedLocations = new Set();
+  ["editorLocationField","editorLocationSearch","editorYear","editorOperation","editorValue","editorSelectAllLocations","editorSelectAllColumns","clearEditorColumns","applyEditorChange","clearEditorSelections","resetEditorFile"].forEach((id) => { $(id).disabled = false; });
+  const levels = state.editorGeography?.levels || [{id:"all",label:"All locations",values:[]}];
+  state.editorScopeUnavailable = Boolean(draft.scopeUnavailable);
+  $("editorLocationField").innerHTML = `${state.editorScopeUnavailable ? '<option value="">Choose location type</option>' : ""}${levels.map((level) => `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label)}</option>`).join("")}`;
+  const preferred = state.editorScopeUnavailable ? "" : draft.geographyType || (levels.some((level) => level.id === "county") ? "county" : levels[0]?.id || "all");
+  setSelectDraftValue($("editorLocationField"), preferred, "Mixed saved scopes");
+  state.editorSelectedLocations = new Set((draft.locations || []).map(String));
+  state.editorMixedScopes = structuredClone(draft.mixedScopes || []);
   const columns = numericColumns(state.csv);
-  $("editorColumns").innerHTML = columns.map((name) => `<label class="check-option"><input type="checkbox" data-editor-column="${escapeHtml(name)}"><span>${escapeHtml(name)}</span></label>`).join("") || `<p class="muted">No editable numeric columns.</p>`;
-  document.querySelectorAll("[data-editor-column]").forEach((box) => box.addEventListener("change", syncEditorColumnSelectAll));
+  const selectedColumns = new Set((draft.columns || []).filter((name) => columns.includes(name)));
+  $("editorColumns").innerHTML = columns.map((name) => `<label class="check-option"><input type="checkbox" data-editor-column="${escapeHtml(name)}" ${selectedColumns.has(name)?"checked":""}><span>${escapeHtml(name)}</span></label>`).join("") || `<p class="muted">No editable numeric columns.</p>`;
+  document.querySelectorAll("[data-editor-column]").forEach((box) => box.addEventListener("change", () => { syncEditorColumnSelectAll(); persistFileDraft(); }));
   syncEditorColumnSelectAll();
   const yearIndex = state.csv.columns.indexOf("Year"), years = yearIndex >= 0 ? [...new Set(state.csv.rows.map((row) => row[yearIndex]).filter(Boolean))].sort() : [""];
-  $("editorYear").innerHTML = years.map((year) => `<option ${year === "2045" ? "selected" : ""}>${escapeHtml(year)}</option>`).join("");
+  $("editorYear").innerHTML = years.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
+  $("editorYear").value = years.includes(String(draft.year || "")) ? String(draft.year) : years.includes("2045") ? "2045" : years[0] || "";
+  setSelectDraftValue($("editorOperation"), Object.prototype.hasOwnProperty.call(draft,"operation") ? draft.operation : "", "Mixed saved changes");
+  $("editorValue").value = draft.mixedValue ? "" : String(draft.value ?? "");
+  $("editorValue").placeholder = draft.mixedValue ? "Mixed" : "";
+  $("editorLocationSearch").value = draft.locationSearch || "";
+  updateFileDraftGuidance({...draft,mixedScopes:state.editorMixedScopes});
   renderEditorLocations(); updateEditorHistoryButtons();
 }
 function renderEditorLocations() {
@@ -2346,8 +3565,8 @@ function renderEditorLocations() {
   const level = selectedGeographyLevel(state.editorGeography, $("editorLocationField")), allValues = level?.values || [], valid = new Set(allValues.map((item) => item.value)), query = $("editorLocationSearch").value.trim().toLowerCase();
   state.editorSelectedLocations = new Set([...state.editorSelectedLocations].filter((value) => valid.has(value)));
   const values = allValues.filter((item) => !query || item.label.toLowerCase().includes(query));
-  $("editorLocations").innerHTML = $("editorLocationField").value === "all" ? `<p class="muted">All locations are included.</p>` : values.map((item) => `<label class="check-option"><input type="checkbox" data-editor-location="${escapeHtml(item.value)}" ${state.editorSelectedLocations.has(item.value) ? "checked" : ""}><span>${escapeHtml(item.label)}</span></label>`).join("") || `<p class="muted">No matching locations.</p>`;
-  document.querySelectorAll("[data-editor-location]").forEach((box) => box.addEventListener("change", () => { if (box.checked) state.editorSelectedLocations.add(box.dataset.editorLocation); else state.editorSelectedLocations.delete(box.dataset.editorLocation); syncEditorLocationSelectAll(allValues); renderCsv(); }));
+  $("editorLocations").innerHTML = !$("editorLocationField").value ? `<p class="muted">Choose a location type.</p>` : $("editorLocationField").value === MIXED_EDITOR_VALUE ? `<p class="muted">Saved changes use multiple location scopes. Choose a location type to edit.</p>` : $("editorLocationField").value === "all" ? `<p class="muted">All locations are included.</p>` : values.map((item) => `<label class="check-option"><input type="checkbox" data-editor-location="${escapeHtml(item.value)}" ${state.editorSelectedLocations.has(item.value) ? "checked" : ""}><span>${escapeHtml(item.label)}</span></label>`).join("") || `<p class="muted">No matching locations.</p>`;
+  document.querySelectorAll("[data-editor-location]").forEach((box) => box.addEventListener("change", () => { if (box.checked) state.editorSelectedLocations.add(box.dataset.editorLocation); else state.editorSelectedLocations.delete(box.dataset.editorLocation); syncEditorLocationSelectAll(allValues); renderCsv(); persistFileDraft(); }));
   syncEditorLocationSelectAll(allValues);
 }
 function syncEditorLocationSelectAll(values = selectedGeographyLevel(state.editorGeography, $("editorLocationField"))?.values || []) {
@@ -2370,43 +3589,91 @@ function syncEditorColumnSelectAll() {
 }
 function renderCsv() {
   const csv = state.csv; if (!csv) return;
-  $("csvTableWrap").innerHTML = `<table><thead><tr>${csv.columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${csv.rows.map((row, rowIndex) => `<tr ${rowMatchesEditor(row) ? "" : "hidden"}>${csv.columns.map((column, columnIndex) => { const editable = !protectedColumn(column), unsaved = editable && String(row[columnIndex] ?? "") !== String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? ""), saved = editable && String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? "") !== String(state.editorBaselineRows[rowIndex]?.[columnIndex] ?? ""), changeClass = unsaved ? "changed-cell" : saved ? "saved-change-cell" : "", changeTitle = unsaved ? "Unsaved preview change" : saved ? "Saved scenario change from baseline" : ""; return `<td contenteditable="${editable}" class="${editable ? "" : "readonly-cell"} ${changeClass}" ${changeTitle ? `title="${changeTitle}"` : ""} data-row="${rowIndex}" data-column="${columnIndex}">${escapeHtml(roundedValue(row[columnIndex], column))}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
+  $("csvTableWrap").innerHTML = `<table><thead><tr>${csv.columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${csv.rows.map((row, rowIndex) => `<tr ${rowMatchesEditor(row) ? "" : "hidden"}>${csv.columns.map((column, columnIndex) => { const editable = !protectedColumn(column), unsaved = editable && String(row[columnIndex] ?? "") !== String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? ""), saved = editable && String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? "") !== String(state.editorBaselineRows[rowIndex]?.[columnIndex] ?? ""), changeClass = unsaved ? "changed-cell" : saved ? "saved-change-cell" : "", changeTitle = unsaved ? "Unsaved direct edit" : saved ? "Saved scenario change from baseline" : ""; return `<td contenteditable="${editable}" class="${editable ? "" : "readonly-cell"} ${changeClass}" ${changeTitle ? `title="${changeTitle}"` : ""} data-row="${rowIndex}" data-column="${columnIndex}">${escapeHtml(roundedValue(row[columnIndex], column))}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
   $("csvTableWrap").querySelectorAll('td[contenteditable="true"]').forEach((cell) => {
     const row = Number(cell.dataset.row), columnIndex = Number(cell.dataset.column), column = state.csv.columns[columnIndex];
     cell.addEventListener("focus", () => { cell.textContent = state.csv.rows[row][columnIndex] ?? ""; });
-    cell.addEventListener("input", () => { state.csv.rows[row][columnIndex] = cell.textContent; recomputeEditorDirty(); });
+    cell.addEventListener("input", () => { state.csv.rows[row][columnIndex] = cell.textContent; state.editorManualEdit = true; recomputeEditorDirty(); });
     cell.addEventListener("blur", () => { cell.textContent = roundedValue(state.csv.rows[row][columnIndex], column); });
   });
 }
-function applyEditorChange() {
-  const columns = selectedEditorColumns(), value = Number($("editorValue").value); if (!columns.length || !Number.isFinite(value)) return notify("Choose one or more columns and enter a numeric value.", "error");
+async function applyEditorChange() {
+  const columns = selectedEditorColumns(), operation = $("editorOperation").value, valueText = $("editorValue").value.trim(), value = Number(valueText); if (!columns.length || !operation || !valueText || !Number.isFinite(value) || operation === MIXED_EDITOR_VALUE) return notify("Choose one or more columns, a specific operation, and a numeric value.", "error");
+  if (state.editorManualEdit || state.editorDirty) return notify("Save or revert direct table edits before applying a calculated change.", "error");
+  if (!$("editorLocationField").value || $("editorLocationField").value === MIXED_EDITOR_VALUE) return notify("Choose one location type before applying another change.", "error");
   if ($("editorLocationField").value !== "all" && !state.editorSelectedLocations.size) return notify("Choose at least one location or use Select all locations.", "error");
-  state.editorUndo.push(editorSnapshot()); state.editorRedo = [];
-  const yearIndex = state.csv.columns.indexOf("Year"), targetYear = $("editorYear").value, operation = $("editorOperation").value; let changed = 0;
-  state.csv.rows.forEach((row) => { if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return; columns.forEach((column) => { const index = state.csv.columns.indexOf(column), current = Number(row[index]); if (!Number.isFinite(current)) return; let next = calculateValue(current, operation, value); if (column.toLowerCase().includes("prop")) next = Math.min(1, next); row[index] = calculatedValue(next, "singleFile", state.csv, column); changed++; }); });
-  renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); notify(`Preview changed ${changed} values.`, "success");
+  const button = $("applyEditorChange");
+  if (button.disabled) return;
+  setBusy(button, true, "Checking…");
+  try {
+    const yearIndex = state.csv.columns.indexOf("Year"), targetYear = $("editorYear").value;
+    let overlap = 0;
+    state.csv.rows.forEach((row, rowIndex) => {
+      if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return;
+      columns.forEach((column) => {
+        const index = state.csv.columns.indexOf(column);
+        if (Number.isFinite(Number(row[index])) && rowsDifferAt(state.csv.rows, state.editorBaselineRows, rowIndex, index)) overlap++;
+      });
+    });
+    const basis = await chooseOverlappingOperation(overlap);
+    if (basis === "cancel") return;
+    setBusy(button, false); setBusy(button, true, "Applying and saving…");
+    const beforeRows=editorSnapshot(),nextRows=beforeRows.map((row)=>[...row]);
+    let changed = 0;
+    nextRows.forEach((row,rowIndex) => { if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return; columns.forEach((column) => { const index = state.csv.columns.indexOf(column), sourceRow=basis==="baseline"?state.editorBaselineRows[rowIndex]:row,current=Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; let next=calculateValue(current,operation,value); if(column.toLowerCase().includes("prop"))next=Math.min(1,next); row[index]=calculatedValue(next,"singleFile",state.csv,column); changed++; }); });
+    const nextOperation={operationId:newOperationId("single-file"),source:"single_file",basis,columns:[...columns],operation,value,year:targetYear,allLocations:$("editorLocationField").value==="all",geographyType:$("editorLocationField").value,geographyLabel:$("editorLocationField").value==="all"?"all locations":`${state.editorSelectedLocations.size} selected locations`,locations:[...state.editorSelectedLocations],rounding:operationRounding(state.csv,columns,"singleFile")};
+    const operations=operationsWithBaselineOverride(structuredClone(state.editorPendingOperations),nextOperation);
+    await post("/api/overlays",{projectId:state.selectedProject.id,variationId:state.editorVariationId,filename:state.csv.filename,columns:state.csv.columns,rows:nextRows,editOperations:operations});
+    state.editorUndo.push(beforeRows);state.editorRedo=[];state.csv.rows=nextRows;state.editorOriginalRows=nextRows.map((row)=>[...row]);state.editorSavedOperations=structuredClone(operations);state.editorPendingOperations=structuredClone(operations);state.editorManualEdit=false;setEditorDirty(false);
+    persistFileDraft();renderCsv();updateEditorHistoryButtons();notify(`Applied and saved changes to ${changed.toLocaleString()} values${basis==="baseline"?" from the untouched baseline":""}.`,"success");
+    await refreshState({quiet:true});
+  } catch(error) { notify(error.message,"error"); }
+  finally { setBusy(button, false); $("saveOverlay").disabled=!state.editorDirty; }
 }
-function undoEditor() { const rows = state.editorUndo.pop(); if (!rows) return; state.editorRedo.push(editorSnapshot()); state.csv.rows = rows; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
-function redoEditor() { const rows = state.editorRedo.pop(); if (!rows) return; state.editorUndo.push(editorSnapshot()); state.csv.rows = rows; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
+function undoEditor() { const rows = state.editorUndo.pop(); if (!rows) return; state.editorRedo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
+function redoEditor() { const rows = state.editorRedo.pop(); if (!rows) return; state.editorUndo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
 async function saveFileChanges(showNotice = true) {
   if (!state.csv || !state.editorVariationId) return false;
+  const applyButton = $("applyEditorChange");
   setBusy($("saveOverlay"), true, "Saving…");
+  setButtonAvailability(applyButton, false, "File save is in progress.");
   try {
-    await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename:state.csv.filename, columns:state.csv.columns, rows:state.csv.rows});
-    const scenario = activeEditorVariation(), notes = {...(scenario?.notes || {}), [state.csv.filename]:$("editorNotes").value};
-    await post("/api/projects/variations/update", {projectId:state.selectedProject.id, variationId:state.editorVariationId, notes});
-    state.editorOriginalRows = editorSnapshot(); state.editorSavedNotes = $("editorNotes").value; setEditorDirty(false); renderCsv();
+    const hasNewOperation = state.editorPendingOperations.length > state.editorSavedOperations.length;
+    const operations = state.editorManualEdit && !hasNewOperation
+      ? [...state.editorPendingOperations, {operationId:newOperationId("manual"),source:"single_file",operation:"manual",columns:[]}]
+      : state.editorPendingOperations;
+    await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename:state.csv.filename, columns:state.csv.columns, rows:state.csv.rows,editOperations:operations});
+    state.editorOriginalRows = editorSnapshot(); state.editorSavedOperations=structuredClone(operations); state.editorPendingOperations=structuredClone(operations); state.editorManualEdit=false; setEditorDirty(false); persistFileDraft(); renderCsv();
     if (showNotice) notify("File changes saved to this scenario.", "success");
     await refreshState({quiet:true}); return true;
-  } catch (error) { notify(error.message, "error"); return false; } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty; }
+  } catch (error) { notify(error.message, "error"); return false; } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty; setButtonAvailability(applyButton, true); }
 }
 
 function renderRunProjects() {
-  const projects = state.data?.projects || [];
+  const projects = (state.data?.projects || []).filter((item)=>item.projectType!=="hypercube");
   const prior = $("runProject").value;
   $("runProject").innerHTML = `<option value="">Choose project</option>${projects.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;
   selectedOption($("runProject"), prior || state.selectedProject?.id || "");
   renderRunSelections();
+}
+
+function renderRunResourceGuide(project) {
+  const guide=$("runResourceGuide");
+  if(!project){guide.hidden=true;guide.textContent="";return}
+  const cap=Number(state.desktop?.resources?.memoryLimitGb||0);
+  const mode=state.desktop?.resources?.defaultRunMode||"queued";
+  const warnings=[];
+  if(isStatewideProject(project)){
+    if(mode==="parallel")warnings.push("Statewide models should begin with one active run.");
+    if(cap&&cap<24)warnings.push(`The ${cap.toLocaleString()} GB per-run limit is below the provisional statewide estimate.`);
+  }else if(cap&&cap<2.5){
+    warnings.push(`The ${cap.toLocaleString()} GB per-run limit is below the MPO/regional planning range.`);
+  }
+  const lead=warnings.length?warnings.join(" "):"Parallel runs share Docker memory.";
+  guide.classList.toggle("warning",Boolean(warnings.length));
+  guide.innerHTML=`<span>${escapeHtml(lead)}</span><span>${warnings.length?"Review concurrency and memory guidance in":"Adjust concurrency and view memory guidance in"}</span><button type="button" class="text-button" data-open-run-resources>Settings → Resources</button>`;
+  guide.querySelector("[data-open-run-resources]")?.addEventListener("click",()=>openSettings("settingsResources").catch(error=>notify(error.message||String(error),"error")));
+  guide.hidden=false;
 }
 
 function renderRunSelections() {
@@ -2417,26 +3684,34 @@ function renderRunSelections() {
     $("runSelectionSummary").className = "run-setup-helper";
     $("runSelectionSummary").textContent = "Choose a project to select baseline and scenarios.";
     $("openRunDialog").disabled = true;
+    renderRunResourceGuide(null);
     return;
   }
+  renderRunResourceGuide(project);
   $("runSelectionSummary").className = "muted";
   if (state.runSelectionProjectId !== project.id) {
     state.runSelectionProjectId = project.id;
-    state.runSelectedVariationIds = new Set();
-    state.runBaselineSelected = false;
+    state.runSelectedVariationIds = new Set(project.variations.filter((item)=>item.resultStatus!=="current").map((item)=>item.id));
+    state.runForceRerunIds = new Set();
+    state.runBaselineSelected = Boolean(project.requiresBaseline);
   }
   const availableIds = new Set(project.variations.map((item) => item.id));
   state.runSelectedVariationIds = new Set([...state.runSelectedVariationIds].filter((id) => availableIds.has(id)));
   const baselineName = baselineDisplayName(project);
-  const baseline = project.baseline?.strategy === "fresh" ? `<label class="selection-option"><input type="checkbox" data-baseline ${state.runBaselineSelected ? "checked" : ""}><span><strong>${escapeHtml(baselineName)}</strong><small>Fresh untouched model inputs</small></span></label>` : `<div class="selection-option"><span><strong>${escapeHtml(baselineName)}</strong><small>Existing baseline will not be rerun in this batch</small></span></div>`;
+  if(project.requiresBaseline)state.runBaselineSelected=true;
+  const baseline = `<label class="selection-option"><input type="checkbox" data-baseline ${state.runBaselineSelected ? "checked" : ""} ${project.requiresBaseline?"disabled":""}><span><strong>${escapeHtml(baselineName)}</strong><small>${project.requiresBaseline?"Required — no current compatible baseline exists":"Current result available; select to run again"}</small></span></label>`;
+  const hypercubeGroups = (project.hypercubes || []).length ? `<div class="run-hypercube-groups"><strong>Hypercube groups</strong>${project.hypercubes.map((hypercube)=>{const ids=(hypercube.scenarioIds||[]).filter((id)=>availableIds.has(id)),all=ids.length>0&&ids.every((id)=>state.runSelectedVariationIds.has(id));return `<button type="button" class="secondary" data-run-hypercube="${escapeHtml(hypercube.id)}">${all?"Clear":"Select"} ${escapeHtml(hypercube.name)} (${ids.length})</button>`}).join("")}<button type="button" class="text-button" data-clear-run-selection>Clear all</button></div>` : "";
   $("runSelections").className = "selection-grid";
-  $("runSelections").innerHTML = baseline + project.variations.map((variant) => `<label class="selection-option"><input type="checkbox" data-run-variation="${escapeHtml(variant.id)}" ${state.runSelectedVariationIds.has(variant.id) ? "checked" : ""}><span><strong>${escapeHtml(variant.name)}</strong><small>${variant.overlays.length} edited input files</small></span></label>`).join("");
-  $("runSelections").querySelector("[data-baseline]")?.addEventListener("change", (event) => { state.runBaselineSelected = event.target.checked; updateRunSelectionSummary(); });
+  $("runSelections").innerHTML = hypercubeGroups + baseline + project.variations.map((variant) => `<label class="selection-option"><input type="checkbox" data-run-variation="${escapeHtml(variant.id)}" ${state.runSelectedVariationIds.has(variant.id) ? "checked" : ""}><span><strong>${escapeHtml(variant.name)}</strong><small>${variant.overlays.length} edited input files · ${variant.resultStatus==="current"?"Current result available — select to run again":variant.resultStatus==="runtime_differs"?"Result uses a different runtime":variant.resultStatus==="previous"?"Inputs changed since the previous result":"No reusable result"}</small></span></label>`).join("");
+  $("runSelections").querySelector("[data-baseline]")?.addEventListener("change", (event) => { state.runBaselineSelected = event.target.checked;if(event.target.checked&&!project.requiresBaseline)state.runForceRerunIds.add("baseline");else state.runForceRerunIds.delete("baseline"); updateRunSelectionSummary(); });
   $("runSelections").querySelectorAll("[data-run-variation]").forEach((input) => input.addEventListener("change", () => {
-    if (input.checked) state.runSelectedVariationIds.add(input.dataset.runVariation);
-    else state.runSelectedVariationIds.delete(input.dataset.runVariation);
+    const variation=project.variations.find((item)=>item.id===input.dataset.runVariation);
+    if (input.checked){state.runSelectedVariationIds.add(input.dataset.runVariation);if(variation?.resultStatus==="current")state.runForceRerunIds.add(input.dataset.runVariation)}
+    else{state.runSelectedVariationIds.delete(input.dataset.runVariation);state.runForceRerunIds.delete(input.dataset.runVariation)}
     updateRunSelectionSummary();
   }));
+  $("runSelections").querySelectorAll("[data-run-hypercube]").forEach((button)=>button.addEventListener("click",()=>{const hypercube=project.hypercubes.find((item)=>item.id===button.dataset.runHypercube),ids=(hypercube?.scenarioIds||[]).filter((id)=>availableIds.has(id)),all=ids.length&&ids.every((id)=>state.runSelectedVariationIds.has(id));ids.forEach((id)=>all?state.runSelectedVariationIds.delete(id):state.runSelectedVariationIds.add(id));renderRunSelections()}));
+  $("runSelections").querySelector("[data-clear-run-selection]")?.addEventListener("click",()=>{state.runSelectedVariationIds.clear();state.runForceRerunIds.clear();state.runBaselineSelected=Boolean(project.requiresBaseline);renderRunSelections()});
   updateRunSelectionSummary();
 }
 
@@ -2444,7 +3719,7 @@ function selectedRunNames() {
   const project = state.data?.projects.find((item) => item.id === $("runProject").value);
   if (!project) return [];
   const names = [];
-  if (project.baseline?.strategy === "fresh" && state.runBaselineSelected) names.push(baselineDisplayName(project));
+  if (state.runBaselineSelected) names.push(baselineDisplayName(project));
   project.variations.forEach((item) => { if (state.runSelectedVariationIds.has(item.id)) names.push(item.name); });
   return names;
 }
@@ -2452,7 +3727,7 @@ function selectedRunNames() {
 function updateRunSelectionSummary() {
   const names = selectedRunNames();
   $("runSelectionSummary").className = "muted";
-  $("runSelectionSummary").textContent = names.length ? `${names.length} selected: ${names.join(", ")}` : "Nothing selected — choose each run explicitly";
+  $("runSelectionSummary").textContent = names.length ? (names.length > 10 ? `${names.length.toLocaleString()} scenarios selected.` : `${names.length} selected: ${names.join(", ")}`) : "Nothing selected — choose each run explicitly";
   $("openRunDialog").disabled = !names.length;
 }
 
@@ -2487,7 +3762,7 @@ function jobRuntimeMilliseconds(job) {
 
 function renderJobActions(job) {
   const active = Boolean(job && activeJobStates.has(job.state) && job.state !== "stopping");
-  const retry = Boolean(job && job.state === "failed");
+  const retry = Boolean(job && job.state === "failed" && job.retryable !== false);
   const waiting = job?.state === "waiting", cleanup = job?.state === "cleanup_failed";
   const removing = waiting && state.pendingJobActions.has(`/api/runs/queue/remove:${job.id}`);
   const hasRunnable = runnableJobs().length > 0;
@@ -2496,37 +3771,63 @@ function renderJobActions(job) {
   if (active) $("cancelJob").addEventListener("click", () => jobAction("/api/runs/cancel", job.id));
   if (hasRunnable && !stopAllBusy) $("stopAllJobs").addEventListener("click", stopAllRuns);
   if (waiting && !removing) $("removeQueuedJob").addEventListener("click", () => jobAction("/api/runs/queue/remove", job.id));
-  if (retry) $("retryJob").addEventListener("click", () => jobAction("/api/runs/retry", job.id));
+  if (retry) $("retryJob").addEventListener("click", () => retryRun(job).catch(error=>notify(error.message||String(error),"error")));
   if (cleanup) $("retryCleanup").addEventListener("click", () => jobAction("/api/runs/cleanup/retry", job.id));
 }
 
 function renderJobs() {
   if (state.draggedJobId) return;
   const jobs = [...(state.data?.jobs || [])];
+  const hypercubeProjects = new Map((state.data?.projects || []).filter(isHypercubeProject).map((project) => [project.id, project]));
+  const ordinaryJobs = jobs.filter((job) => !hypercubeProjects.has(job.projectId));
+  const hypercubeCards = [...hypercubeProjects.values()].map(hypercubeRunAggregate).filter((item) => item.jobs.length);
   state.queueRevision = Number(state.data?.queue?.revision || state.queueRevision || 0);
-  const active = jobs.filter((job) => activeJobStates.has(job.state)).sort((a,b) => new Date(a.startedAt || a.createdAt || 0)-new Date(b.startedAt || b.createdAt || 0));
-  const waiting = jobs.filter((job) => job.state === "waiting").sort((a,b) => (a.queuePosition ?? 1e9)-(b.queuePosition ?? 1e9));
-  const history = jobs.filter((job) => !activeJobStates.has(job.state) && job.state !== "waiting").sort((a,b) => new Date(b.finishedAt || b.createdAt || 0)-new Date(a.finishedAt || a.createdAt || 0));
-  const ordered = [...active, ...waiting, ...history];
+  const active = ordinaryJobs.filter((job) => activeJobStates.has(job.state)).sort((a,b) => new Date(a.startedAt || a.createdAt || 0)-new Date(b.startedAt || b.createdAt || 0));
+  const waiting = ordinaryJobs.filter((job) => job.state === "waiting").sort((a,b) => (a.queuePosition ?? 1e9)-(b.queuePosition ?? 1e9));
+  const history = ordinaryJobs.filter((job) => !activeJobStates.has(job.state) && job.state !== "waiting").sort((a,b) => new Date(b.finishedAt || b.createdAt || 0)-new Date(a.finishedAt || a.createdAt || 0));
+  const activeHypercubes=hypercubeCards.filter((item)=>item.section==="active").sort((a,b)=>a.sortTime-b.sortTime);
+  const waitingHypercubes=hypercubeCards.filter((item)=>item.section==="waiting").sort((a,b)=>a.queuePosition-b.queuePosition);
+  const historyHypercubes=hypercubeCards.filter((item)=>item.section==="history").sort((a,b)=>b.sortTime-a.sortTime);
   const activeBatches = new Set(jobs.filter((job) => !terminalJobStates.has(job.state)).map((job) => job.batchId));
-  $("jobList").classList.toggle("empty-state", !jobs.length);
+  const canReorderOrdinaryQueue=!jobs.some((job)=>hypercubeProjects.has(job.projectId)&&job.state==="waiting");
+  $("jobList").classList.toggle("empty-state", !ordinaryJobs.length&&!hypercubeCards.length);
   const card = (job) => {
-    const draggable = job.state === "waiting" ? `data-queue-job="${escapeHtml(job.id)}" aria-label="Drag ${escapeHtml(jobDisplayName(job))} to reorder queued runs" title="Drag this queued run to reorder. Right-click for queue options."` : terminalJobStates.has(job.state) ? `data-history-job="${escapeHtml(job.id)}" title="Right-click for history options"` : "";
+    const draggable = job.state === "waiting"&&canReorderOrdinaryQueue ? `data-queue-job="${escapeHtml(job.id)}" aria-label="Drag ${escapeHtml(jobDisplayName(job))} to reorder queued runs" title="Drag this queued run to reorder. Right-click for queue options."` : job.state === "waiting" ? `title="This Standard run is queued behind an aggregated Hypercube batch."` : terminalJobStates.has(job.state) ? `data-history-job="${escapeHtml(job.id)}" title="Right-click for history options"` : "";
     return `<article class="item-card job-card ${state.selectedJob === job.id ? "selected" : ""} ${activeBatches.has(job.batchId) ? "active-batch" : ""} ${escapeHtml(job.state)}" data-job="${escapeHtml(job.id)}" ${draggable}>
       <header><strong>${escapeHtml(jobDisplayName(job))}</strong><span class="job-card-metrics">${job.state === "waiting" ? `<span class="pill">Queued #${job.queuePosition || "—"}</span>` : ""}<span class="job-runtime">${escapeHtml(jobRuntime(job))}</span><span class="status ${escapeHtml(job.state)}">${escapeHtml(job.state.replace("_", " "))}${job.state === "waiting" ? `<small class="queue-drag-cue">Drag to reorder</small>` : ""}</span></span></header>
-      <small>${escapeHtml(job.projectName)} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(job.message || "")}</small></article>`;
+      <small>${escapeHtml(job.projectName)} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(jobDisplayMessage(job))}</small></article>`;
   };
-  $("jobList").innerHTML = ordered.length ? `${active.length ? `<div class="job-group-label">Active · ${active.length} of 2 runtime slots</div>${active.map(card).join("")}` : ""}${waiting.length ? `<div class="job-group-label">Queue · drag cards to reorder</div>${waiting.map(card).join("")}` : ""}${history.length ? `<div class="job-group-label">History</div>${history.map(card).join("")}` : ""}` : "No jobs yet.";
+  const hypercubeCard=(item)=>`<button class="item-card job-card hypercube-job-summary ${escapeHtml(item.state)}" type="button" data-open-hypercube-run="${escapeHtml(item.project.id)}" aria-label="Open ${escapeHtml(item.project.name)} in Hypercube Run. ${escapeHtml(item.accessibleSummary)}">
+    <header><strong>${escapeHtml(item.project.name)}</strong><span class="job-card-metrics"><span class="job-runtime">${escapeHtml(item.eta.shortLabel)}</span><span class="status ${escapeHtml(item.state)}">${escapeHtml(item.statusLabel)}</span></span></header>
+    <small>${escapeHtml(item.slotLabel)} · ${escapeHtml(item.caseLabel)}</small><small>${escapeHtml(item.progressLabel)} · ${escapeHtml(item.eta.detail)}</small></button>`;
+  const maxActive = Number(state.data?.queue?.maxActive || 2), modeLock = state.data?.queue?.modeLock;
+  const modeLabel = modeLock ? ` · ${modeLock === "queued" ? "Queued" : "Parallel"} active batch` : "";
+  const hasCards=active.length||waiting.length||history.length||hypercubeCards.length;
+  $("jobList").innerHTML = hasCards ? `${active.length||activeHypercubes.length ? `<div class="job-group-label">Active · ${active.length+activeHypercubes.reduce((total,item)=>total+item.activeCount,0)} of ${maxActive} runtime slot${maxActive === 1 ? "" : "s"}${modeLabel}</div>${active.map(card).join("")}${activeHypercubes.map(hypercubeCard).join("")}` : ""}${waiting.length||waitingHypercubes.length ? `<div class="job-group-label">Queue${waiting.length&&canReorderOrdinaryQueue?" · drag Standard-run cards to reorder":""}${modeLabel}</div>${waiting.map(card).join("")}${waitingHypercubes.map(hypercubeCard).join("")}` : ""}${history.length||historyHypercubes.length ? `<div class="job-group-label">History</div>${history.map(card).join("")}${historyHypercubes.map(hypercubeCard).join("")}` : ""}` : "No jobs yet.";
   document.querySelectorAll("[data-job]").forEach((element) => element.addEventListener("click", () => {
     if (element.dataset.suppressClick === "true") return;
     selectJob(element.dataset.job);
   }));
   document.querySelectorAll("[data-queue-job]").forEach((element) => element.addEventListener("contextmenu", (event) => openQueuedJobMenu(event, element.dataset.queueJob)));
   document.querySelectorAll("[data-history-job]").forEach((element) => element.addEventListener("contextmenu", (event) => openJobHistoryMenu(event, element.dataset.historyJob)));
-  enableQueueDragging(waiting);
-  if (state.selectedJob && !jobs.some((job) => job.id === state.selectedJob)) { state.selectedJob = null; if (state.logSource) state.logSource.close(); $("runLog").textContent = ""; $("logTitle").textContent = "R console"; }
+  document.querySelectorAll("[data-open-hypercube-run]").forEach((element)=>element.addEventListener("click",()=>openHypercubeRunProject(element.dataset.openHypercubeRun)));
+  enableQueueDragging(canReorderOrdinaryQueue?waiting:[]);
+  if (state.selectedJob && !ordinaryJobs.some((job) => job.id === state.selectedJob)) { state.selectedJob = null; if (state.logSource) state.logSource.close(); $("runLog").textContent = ""; $("logTitle").textContent = "R console"; }
   renderJobActions(jobs.find((job) => job.id === state.selectedJob));
   renderActiveJobTabs();
+  renderRunHistoryActions();
+}
+
+function renderRunHistoryActions(){
+  const unfinished=(state.data?.jobs||[]).filter((job)=>!terminalJobStates.has(job.state));
+  const message=unfinished.length
+    ? "Clear history will be available after all running and queued jobs finish."
+    : "Remove terminal run history and logs while preserving results and Datastores.";
+  [$("clearRunHistory"),$("clearHypercubeRunHistory")].filter(Boolean).forEach((button)=>{
+    button.disabled=Boolean(unfinished.length);
+    button.title=message;
+    button.setAttribute("aria-label",message);
+  });
 }
 
 function closeJobHistoryMenu() {
@@ -2538,11 +3839,16 @@ function openJobHistoryMenu(event, jobId) {
   const job = state.data?.jobs?.find((item) => item.id === jobId);
   if (!job || !terminalJobStates.has(job.state)) return;
   const menu = document.createElement("div"); menu.id = "jobHistoryMenu"; menu.className = "job-history-menu"; menu.setAttribute("role", "menu");
-  menu.innerHTML = `<button type="button" role="menuitem">Hide / Remove from History</button><small>${job.resultPath || job.datastoreId ? "Completed results will be preserved." : "The run log and history record will be removed."}</small>`;
+  const canRetry=job.state==="failed"&&job.retryable!==false;
+  menu.innerHTML = `${canRetry?`<button type="button" role="menuitem" data-retry-history>Retry Run…</button><small>${memoryFailure(job)?"Review memory settings before retrying this run.":"Queue a new run with the same project and scenario."}</small><div class="menu-divider" aria-hidden="true"></div>`:""}<button type="button" role="menuitem" data-remove-history>Hide / Remove from History</button><small>${job.resultPath || job.datastoreId ? "Completed results will be preserved." : "The run log and history record will be removed."}</small>`;
   document.body.appendChild(menu);
   const left = Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 10), top = Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 10);
   menu.style.left = `${Math.max(8, left)}px`; menu.style.top = `${Math.max(8, top)}px`;
-  menu.querySelector("button").addEventListener("click", async () => {
+  menu.querySelector("[data-retry-history]")?.addEventListener("click", () => {
+    closeJobHistoryMenu();
+    retryRun(job).catch(error=>notify(error.message||String(error),"error"));
+  });
+  menu.querySelector("[data-remove-history]").addEventListener("click", async () => {
     closeJobHistoryMenu();
     if (!await confirmWorkbench(`Remove ${jobDisplayName(job)} from Run History?\n\nIts history record and run log will be deleted. Completed datastore and comparison results will be kept.`)) return;
     try {
@@ -2636,7 +3942,8 @@ function enableQueueDragging(waiting) {
 }
 
 function consoleBatchJobs() {
-  const jobs = state.data?.jobs || [], selected = jobs.find((job) => job.id === state.selectedJob);
+  const hypercubeProjectIds=new Set((state.data?.projects||[]).filter(isHypercubeProject).map((project)=>project.id));
+  const jobs = (state.data?.jobs || []).filter((job)=>!hypercubeProjectIds.has(job.projectId)), selected = jobs.find((job) => job.id === state.selectedJob);
   const activeBatchIds = new Set(jobs.filter((job) => !terminalJobStates.has(job.state)).map((job) => job.batchId));
   const batchId = selected && activeBatchIds.has(selected.batchId) ? selected.batchId : state.consoleBatchId && activeBatchIds.has(state.consoleBatchId) ? state.consoleBatchId : jobs.filter((job) => activeBatchIds.has(job.batchId)).sort((a,b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))[0]?.batchId;
   if (batchId) return jobs.filter((job) => job.batchId === batchId).sort((a,b) => {
@@ -2653,7 +3960,8 @@ function renderActiveJobTabs() {
 }
 
 function followActiveConsoleJob() {
-  const jobs=state.data?.jobs||[],selected=jobs.find((job)=>job.id===state.selectedJob),batchId=state.consoleBatchId||selected?.batchId||"";
+  const hypercubeProjectIds=new Set((state.data?.projects||[]).filter(isHypercubeProject).map((project)=>project.id));
+  const jobs=(state.data?.jobs||[]).filter((job)=>!hypercubeProjectIds.has(job.projectId)),selected=jobs.find((job)=>job.id===state.selectedJob),batchId=state.consoleBatchId||selected?.batchId||"";
   const candidates=jobs.filter((job)=>activeJobStates.has(job.state)&&job.state!=="stopping"&&(!batchId||job.batchId===batchId)).sort((a,b)=>new Date(a.startedAt||a.createdAt||0)-new Date(b.startedAt||b.createdAt||0));
   const active=candidates[0];
   if(!active){state.consoleAutoFollowJob="";return}
@@ -2696,30 +4004,29 @@ function formatTime(value) {
 
 function renderDatastores() {
   const datastores = state.data?.catalog || [];
-  $("datastoreCount").textContent = datastores.length;
-  $("datastoreList").classList.toggle("empty-state", !datastores.length);
+  const hypercubeProjectIds=new Set((state.data?.projects||[]).filter((project)=>project.projectType==='hypercube').map((project)=>project.id));
+  const ordinary = datastores.filter((item)=>item.projectType !== "hypercube"&&!hypercubeProjectIds.has(item.projectId));
+  const selectedTransient = [...state.transientDatastoreIds].map((id)=>datastores.find((item)=>item.id===id)).filter(Boolean);
+  const visible = [...ordinary, ...selectedTransient.filter((item)=>!ordinary.some((candidate)=>candidate.id===item.id))];
   const grouped = new Map();
-  datastores.forEach((item) => { const group=item.projectName || "Previously registered"; if(!grouped.has(group))grouped.set(group,[]); grouped.get(group).push(item); });
-  $("datastoreList").innerHTML = datastores.length ? [...grouped.entries()].map(([group,items]) => `<section class="datastore-group"><h4>${escapeHtml(group)}</h4>${items.map((item) => `
-    <article class="item-card datastore-card"><header><strong>${escapeHtml(item.label)}</strong><span class="datastore-card-actions"><span class="status ${item.verification === "verified" ? "succeeded" : ""}">${escapeHtml(item.verification || "unverified")}</span>${item.role === "imported" ? `<span class="pill">Legacy · read only</span>` : ""}</span></header>
-      <small>${escapeHtml(item.projectName || (item.role === "imported" ? "Previously registered result" : "Completed result"))} · ${escapeHtml(item.variationName || item.role || "")}</small>
-      <small>${escapeHtml(item.templateId || "No template provenance")} · ${formatTime(item.completedAt || item.registeredAt)}</small>
-    </article>`).join("")}</section>`).join("") : "No completed datastores registered.";
-  const options = [...grouped.entries()].map(([group,items])=>`<optgroup label="${escapeHtml(group)}">${items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}${item.verification !== "verified" ? " ⚠" : ""}</option>`).join("")}</optgroup>`).join("");
-  const values = [$("referenceDatastore").value, $("comparisonOne").value, $("comparisonTwo").value];
-  $("referenceDatastore").innerHTML = `<option value="">Choose reference</option>${options}`;
-  $("comparisonOne").innerHTML = `<option value="">None — view reference only</option>${options}`;
-  $("comparisonTwo").innerHTML = `<option value="">None</option>${options}`;
-  [$("referenceDatastore"), $("comparisonOne"), $("comparisonTwo")].forEach((select, index) => selectedOption(select, values[index]));
-  const mapValues=[$("mapReference")?.value,$("mapComparison")?.value];
-  if($("mapReference")){
-    $("mapReference").innerHTML=`<option value="">Choose reference</option>${options}`;
-    $("mapComparison").innerHTML=`<option value="">Choose comparison</option>${options}`;
-    selectedOption($("mapReference"),mapValues[0]);selectedOption($("mapComparison"),mapValues[1]);
-    if(!$("mapReference").value||!$("mapComparison").value){$("mapTable").innerHTML='<option value="">Choose two results first</option>';$("mapVariable").innerHTML='';$("mapYear").innerHTML='';$("generateMap").disabled=true;}
-  }
-  const baselines = datastores.filter((item) => item.role === "baseline");
-  $("existingBaseline").innerHTML = baselines.length ? baselines.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("") : `<option value="">No baselines registered</option>`;
+  visible.forEach((item) => { const group=item.projectType === "hypercube" ? "Hypercube drilldown (temporary)" : item.displayProjectName || item.projectName || "Previously registered"; if(!grouped.has(group))grouped.set(group,[]); grouped.get(group).push(item); });
+  const options = [...grouped.entries()].map(([group,items])=>`<optgroup label="${escapeHtml(group)}">${items.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.displayLabel || item.label)}${item.projectType === "hypercube" ? " · temporary" : ""}${item.verification !== "verified" ? " ⚠" : ""}</option>`).join("")}</optgroup>`).join("");
+  const configure=(referenceId,comparisonId,comparisonOptional=true)=>{
+    const reference=$(referenceId),comparison=$(comparisonId);if(!reference||!comparison)return;
+    const values=[reference.value,comparison.value];
+    reference.innerHTML=`<option value="">Choose reference</option>${options}`;
+    comparison.innerHTML=`<option value="">${comparisonOptional?"None — view reference only":"Choose comparison"}</option>${options}`;
+    selectedOption(reference,values[0]);selectedOption(comparison,values[1]);
+  };
+  configure("compareReference","compareComparison",true);
+  configure("mapReference","mapComparison",false);
+  configure("dashboardReference","dashboardComparison",false);
+  syncComparePairOptions();
+  if(!$("mapReference").value||!$("mapComparison").value){$("mapTable").innerHTML='<option value="">Choose two results first</option>';$("mapVariable").innerHTML='';$("mapYear").innerHTML='';$("generateMap").disabled=true;}
+  const selectedLibrary=(state.data?.inputLibraries||[]).find((item)=>item.id===$("librarySelect")?.value);
+  const selectedTemplate=(state.data?.templates||[]).find((item)=>item.id===selectedLibrary?.pairedTemplateId);
+  const baselines=datastores.filter((item)=>item.role==="baseline"&&item.verification==="verified"&&item.templateFingerprint===selectedTemplate?.fingerprint&&item.inputLibraryFingerprint===selectedLibrary?.fingerprint).sort((a,b)=>String(b.completedAt||"").localeCompare(String(a.completedAt||"")));
+  $("existingBaseline").innerHTML=baselines.length?baselines.map((item)=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.displayLabel || item.label)}</option>`).join(""):`<option value="">No compatible completed baseline</option>`;
 }
 
 async function submitForm(form, action, busyLabel = "Working…") {
@@ -2728,8 +4035,9 @@ async function submitForm(form, action, busyLabel = "Working…") {
   try { await action(); } catch (error) { notify(error.message, "error"); } finally { setBusy(button, false); }
 }
 
-$("installRegionPackage").addEventListener("click", (event) => installRegionalPackage(event.currentTarget));
-$("installRegionPackageFolder").addEventListener("click", (event) => installRegionalPackage(event.currentTarget,"choose_package_folder"));
+$("installRegionPackage").addEventListener("click", (event) => openPackageSourceDialog(event.currentTarget, true));
+$("choosePackageZip").addEventListener("click", () => installSelectedPackage("choose_package"));
+$("choosePackageFolder").addEventListener("click", () => installSelectedPackage("choose_package_folder"));
 $("regionPackage").addEventListener("change", (event) => {
   state.regionBuilderPackageId = event.target.value;
   state.regionBuilderReference = null;
@@ -2747,28 +4055,26 @@ $("regionPackage").addEventListener("change", (event) => {
   state.regionMapLoadError = "";
   state.regionMapLoadPromise = null;
   $("regionName").value = "";
-  $("regionCode").value = "";
   $("regionState").value = "";
-  state.regionBuilderOfficialIdentity=null;
-  state.regionBuilderCustomIdentity={name:"",code:""};
+  state.regionBuilderIdentityKey = "";
+  state.regionBuilderIdentityDrafts = {official:null, custom:null};
   resetRegionBuilderGeography();
   renderRegionBuilder();
 });
-$("regionSourceLibrary").addEventListener("change", (event) => { state.regionBuilderSourceLibraryId = event.target.value; state.regionBuilderPreview = null; resetRegionBuilderGeography(); renderRegionBuilderPreview(); });
+$("regionSourceLibrary").addEventListener("change", (event) => { state.regionBuilderSourceLibraryId = event.target.value; state.regionBuilderPreview = null; resetRegionBuilderGeography(); renderRegionBuilderMode(); });
 $("regionDefinition").addEventListener("change", (event) => {
   state.regionBuilderRegionId = event.target.value;
   state.regionBuilderPreview = null;
   const selectedRegion = (state.regionBuilderRegions?.regions || []).find((item) => item.id === event.target.value);
+  state.regionBuilderIdentityKey = "";
   resetRegionBuilderGeography();
-  if (selectedRegion) {
-    state.regionBuilderOfficialIdentity={name:selectedRegion.name||"",code:selectedRegion.defaultRegionCode||"",state:selectedRegion.state||""};
-    applyRegionIdentity(state.regionBuilderOfficialIdentity);
-  }
-  renderRegionBuilderPreview();
+  initializeRegionBuilderIdentity(selectedRegion, true);
+  renderRegionBuilderMode();
+  updateRegionBuilderAvailability();
 });
-["regionName", "regionCode", "regionState"].forEach((id) => $(id).addEventListener("input", () => { if(state.regionBuilderGeographyMode==="custom")state.regionBuilderCustomIdentity={name:$("regionName").value,code:$("regionCode").value};else state.regionBuilderOfficialIdentity=currentRegionIdentity();state.regionBuilderPreview = null; renderRegionBuilderPreview();renderRegionBuilder(); }));
-$("useOfficialRegionGeography").addEventListener("click", () => switchRegionGeographyMode("official"));
-$("customizeRegionGeography").addEventListener("click", () => switchRegionGeographyMode("custom"));
+["regionName", "regionState"].forEach((id) => $(id).addEventListener("input", () => { state.regionBuilderIdentityDrafts[state.regionBuilderGeographyMode] = currentRegionBuilderIdentity(); state.regionBuilderPreview = null; renderRegionBuilderPreview(); updateRegionBuilderAvailability(); }));
+$("useOfficialRegionGeography").addEventListener("click", () => switchRegionBuilderIdentity("official"));
+$("customizeRegionGeography").addEventListener("click", () => switchRegionBuilderIdentity("custom"));
 $("editCustomRegionGeography").addEventListener("click", openRegionGeographyDialog);
 [$("customRegionMpoLayer"), $("customRegionAzoneLayer"), $("customRegionBzoneLayer"), $("customRegionAzoneLabels"), $("customRegionAzoneIdLabels"), $("customRegionBzoneLabels")].forEach((control) => control.addEventListener("change", renderRegionGeographySelectionMap));
 $("zoomInRegionGeography").addEventListener("click", () => zoomCustomRegionMap(.8));
@@ -2819,7 +4125,6 @@ $("regionGeographyDialog").addEventListener("change", async (event) => {
 });
 $("applyRegionGeography").addEventListener("click", async (event) => {
   if (!state.regionBuilderDraftBzones.size) return;
-  if (!customRegionIdentityValid()) return notify("Enter a custom region name and code before applying this geography.", "error");
   state.regionBuilderSelectedBzones = new Set(state.regionBuilderDraftBzones);
   state.regionBuilderGeographyMode = "custom";
   state.regionBuilderPreview = null;
@@ -2828,16 +4133,22 @@ $("applyRegionGeography").addEventListener("click", async (event) => {
   renderRegionBuilderPreview();
   $("regionGeographyDialog").close();
   switchCreateSubpage("createDevelop", false);
+  updateRegionBuilderAvailability();
+  if (!$("regionName").value.trim()) {
+    $("regionOutputOptions").open = true;
+    $("regionName").focus();
+    notify("Enter a custom region name, then choose Preview region.", "error");
+    return;
+  }
   await previewRegionBuild(event.currentTarget);
 });
-$("regionGeographyDialog").addEventListener("close",()=>{if(state.regionBuilderGeographyFrame){cancelAnimationFrame(state.regionBuilderGeographyFrame);state.regionBuilderGeographyFrame=null}state.regionBuilderGeographyPan=null});
 $("viewRegionMap").addEventListener("click", openRegionMap);
 $("regionBuilderPreview").addEventListener("click", (event) => { if (event.target.closest("[data-open-region-map]")) openRegionMap(); });
 $("regionMapRegion").addEventListener("change", () => updateRegionMapSelection({zoom: true}));
 $("regionMapDialog").addEventListener("close", syncMenuContext);
 document.querySelectorAll("[data-region-map-layer]").forEach((input) => input.addEventListener("change", applyRegionMapLayers));
 $("regionMapIdLabels").addEventListener("change", () => { updateRegionMapNameLabels(); updateRegionMapIdLabels(); });
-$("regionMapNameLabels").addEventListener("change", updateRegionMapNameLabels);
+$("regionMapNameLabels").addEventListener("change", () => { updateRegionMapNameLabels(); updateRegionMapIdLabels(); });
 $("closeRegionMapInspector").addEventListener("click", clearRegionMapInspector);
 $("resetRegionMap").addEventListener("click", () => {
   const scene = state.regionMapScene;
@@ -2926,7 +4237,6 @@ $("buildRegionAssets").addEventListener("click", async (event) => {
     };
     state.regionBuilderPreview = null;
     await refreshState({ quiet: true });
-    selectedOption($("templateSelect"), result.modelTemplate.id);
     selectedOption($("librarySelect"), result.inputLibrary.id);
     switchCreateSubpage("createSetup", false);
     renderSetup();
@@ -2940,21 +4250,31 @@ $("buildRegionAssets").addEventListener("click", async (event) => {
 });
 
 document.querySelectorAll('input[name="baselineStrategy"]').forEach((input) => input.addEventListener("change", () => {
-  $("existingBaseline").disabled = document.querySelector('input[name="baselineStrategy"]:checked').value !== "existing";
+  $("existingBaseline").disabled = $("existingBaselineStrategy").disabled || document.querySelector('input[name="baselineStrategy"]:checked').value !== "existing";
 }));
+$("librarySelect").addEventListener("change",() => {
+  const selectedLibrary = (state.data?.inputLibraries || []).find((item) => item.id === $("librarySelect").value);
+  if (state.pendingProjectSetup && (
+    $("librarySelect").value !== state.pendingProjectSetup.inputLibraryId
+    || selectedLibrary?.pairedTemplateId !== state.pendingProjectSetup.templateId
+  )) state.pendingProjectSetup = null;
+  renderSetup();
+});
 
 $("projectForm").addEventListener("submit", (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   submitForm(form, async () => {
-    if (state.pendingProjectSetup && ($("templateSelect").value !== state.pendingProjectSetup.templateId || $("librarySelect").value !== state.pendingProjectSetup.inputLibraryId)) {
-      throw new Error("The exact template and InputLibrary built for this region are no longer selected. Rebuild or refresh the region assets before creating the project.");
+    const selectedLibrary = (state.data?.inputLibraries || []).find((item) => item.id === $("librarySelect").value);
+    if (state.pendingProjectSetup && (selectedLibrary?.pairedTemplateId !== state.pendingProjectSetup.templateId || $("librarySelect").value !== state.pendingProjectSetup.inputLibraryId)) {
+      throw new Error("The exact model package built for this region is no longer selected. Rebuild or refresh the region assets before creating the project.");
     }
     const strategy = document.querySelector('input[name="baselineStrategy"]:checked').value;
+    const projectType = "standard";
     const project = await post("/api/projects", {
       name: $("projectName").value,
-      templateId: $("templateSelect").value,
       inputLibraryId: $("librarySelect").value,
+      projectType,
       baseline: strategy === "fresh" ? { strategy } : { strategy, datastoreId: $("existingBaseline").value, compatibility: "unverified" },
       variations: [],
     });
@@ -2965,6 +4285,18 @@ $("projectForm").addEventListener("submit", (event) => {
     selectProject(project.id);
     switchCreateSubpage("createEditor", false);
   }, "Creating…");
+});
+
+$("hypercubeProjectForm")?.addEventListener("submit",(event)=>{
+  event.preventDefault();
+  const form=event.currentTarget;
+  submitForm(form,async()=>{
+    const project=await post('/api/projects',{name:$("hypercubeProjectName").value,inputLibraryId:$("hypercubeLibrarySelect").value,projectType:'hypercube',baseline:{strategy:'fresh'},variations:[]});
+    form.reset();
+    await refreshState({quiet:true});
+    state.hypercubeProjectId=project.id;state.hypercubeHydratedProjectId='';state.hypercubeFiles=new Map();
+    renderHypercubeSetup();notify(`Created ${project.name}.`,'success');
+  },'Creating…');
 });
 
 $("saveOverlay").addEventListener("click", () => saveFileChanges());
@@ -2978,7 +4310,7 @@ function renderBatchFiles(scenarioId = state.editorVariationId) {
     // WebKit can retain a checkbox property when identical markup is replaced.
     // The session draft is authoritative, especially after switching scenarios.
     input.checked = state.batchSelectedFiles.has(input.dataset.batchFile);
-    input.addEventListener("change",()=>{if(input.checked)state.batchSelectedFiles.add(input.dataset.batchFile);else{state.batchSelectedFiles.delete(input.dataset.batchFile);state.batchSelectedColumns.delete(input.dataset.batchFile)}renderBatchColumns()});
+    input.addEventListener("change",()=>{if(input.checked)state.batchSelectedFiles.add(input.dataset.batchFile);else{state.batchSelectedFiles.delete(input.dataset.batchFile);state.batchSelectedColumns.delete(input.dataset.batchFile)}persistBatchDraft();renderBatchColumns()});
   });
   if (state.batchSelectedFiles.size) renderBatchColumns();
   else {
@@ -3001,21 +4333,37 @@ function clearBatchDraftState(scenarioId = state.editorVariationId, startSession
   } else if (!scenarioId) {
     state.batchSessionOwner = "";
   }
-  state.batchScenarioId=scenarioId; state.batchFiles={}; state.batchGeographies={}; state.batchSelectedFiles=new Set(); state.batchSelectedColumns=new Map(); state.batchSelectedLocations=new Set();
+  state.batchScenarioId=scenarioId; state.batchFiles={}; state.batchBaselineFiles={}; state.batchGeographies={}; state.batchSelectedFiles=new Set(); state.batchSelectedColumns=new Map(); state.batchSelectedLocations=new Set();
+  if ($("batchFromBaseline")) $("batchFromBaseline").checked = false;
+  if ($("batchBaselineDescription")) renderBatchBaselineChoice();
 }
-function resetBatchDraft(scenarioId = state.editorVariationId) {
+function resetBatchDraft(scenarioId = state.editorVariationId, clear = false) {
   clearBatchDraftState(scenarioId, true);
-  $("batchLocationSearch").value = "";
-  $("batchValue").value = "";
-  $("batchOperation").value = "";
+  const scenario = state.selectedProject?.variations?.find((item) => item.id === scenarioId);
+  const draft = clear ? {} : loadEditorDraft("batch") || savedBatchDraft(scenario) || {};
+  state.batchSelectedFiles = new Set((draft.files || []).map(String));
+  state.batchSelectedColumns = new Map(Object.entries(draft.columns || {}).map(([filename,columns]) => [filename,new Set((columns || []).map(String))]));
+  state.batchSelectedLocations = new Set((draft.locations || []).map(String));
+  state.batchMixedScopes = structuredClone(draft.mixedScopes || []);
+  state.batchDraftGeographyType = draft.geographyType || "";
+  state.batchDraftScopeUnavailable = Boolean(draft.scopeUnavailable);
+  $("batchLocationSearch").value = draft.locationSearch || "";
+  $("batchValue").value = draft.mixedValue ? "" : String(draft.value ?? "");
+  $("batchValue").placeholder = draft.mixedValue ? "Mixed" : "";
+  $("batchFromBaseline").checked = Boolean(draft.fromBaseline);
+  renderBatchBaselineChoice();
+  setSelectDraftValue($("batchOperation"), draft.operation || "", "Mixed saved changes");
   $("batchYear").innerHTML = `<option value="">Choose year</option>`;
+  $("batchYear").dataset.draftYear = draft.year || "2045";
   $("batchSelectAllColumns").checked = false;
   $("batchSelectAllColumns").indeterminate = false;
   $("batchLocationType").innerHTML = `<option value="all">All locations</option>`;
   $("batchLocations").innerHTML = `<p class="muted">Choose a location type.</p>`;
   $("batchSelectAllLocations").disabled = true;
   $("batchCompatibility").textContent = "";
+  updateBatchDraftGuidance({...draft,mixedScopes:state.batchMixedScopes});
   renderBatchFiles(scenarioId);
+  if (clear) persistBatchDraft();
 }
 function syncBatchSelectAll() {
   const boxes = [...document.querySelectorAll("[data-batch-column-file]")], checked = boxes.filter((box) => box.checked).length;
@@ -3032,10 +4380,10 @@ function batchLocationValues(type = $("batchLocationType").value) {
   return values;
 }
 function renderBatchLocationTypes() {
-  const levels = batchCommonLevels(), prior = $("batchLocationType").value;
-  $("batchLocationType").innerHTML = levels.map((level) => `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label)}</option>`).join("");
-  const next = levels.some((level) => level.id === prior) ? prior : levels.some((level) => level.id === "county") ? "county" : "all";
-  $("batchLocationType").value = next; if (next !== prior) state.batchSelectedLocations = new Set();
+  const levels = batchCommonLevels(), prior = state.batchDraftScopeUnavailable ? "" : state.batchDraftGeographyType || $("batchLocationType").value;
+  $("batchLocationType").innerHTML = `${state.batchDraftScopeUnavailable ? '<option value="">Choose location type</option>' : ""}${levels.map((level) => `<option value="${escapeHtml(level.id)}">${escapeHtml(level.label)}</option>`).join("")}`;
+  const next = state.batchDraftScopeUnavailable ? "" : prior === MIXED_EDITOR_VALUE ? MIXED_EDITOR_VALUE : levels.some((level) => level.id === prior) ? prior : levels.some((level) => level.id === "county") ? "county" : "all";
+  setSelectDraftValue($("batchLocationType"), next, "Mixed saved scopes"); state.batchDraftGeographyType = next;
   renderBatchLocations();
 }
 function renderBatchLocations() {
@@ -3047,8 +4395,8 @@ function renderBatchLocations() {
   const allItems = [...values].sort((a,b) => a[1].localeCompare(b[1], undefined, {numeric:true})), valid = new Set(allItems.map(([value]) => value));
   state.batchSelectedLocations = new Set([...state.batchSelectedLocations].filter((value) => valid.has(value)));
   const items = allItems.filter(([,label]) => !query || label.toLowerCase().includes(query));
-  $("batchLocations").innerHTML = type === "all" ? `<p class="muted">All locations are included.</p>` : items.map(([value,label]) => `<label class="check-option"><input type="checkbox" data-batch-location="${escapeHtml(value)}" ${state.batchSelectedLocations.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("") || `<p class="muted">No matching locations.</p>`;
-  document.querySelectorAll("[data-batch-location]").forEach((box) => box.addEventListener("change", () => { if (box.checked) state.batchSelectedLocations.add(box.dataset.batchLocation); else state.batchSelectedLocations.delete(box.dataset.batchLocation); syncBatchLocationSelectAll(allItems); }));
+  $("batchLocations").innerHTML = !type ? `<p class="muted">Choose a location type.</p>` : type === MIXED_EDITOR_VALUE ? `<p class="muted">Saved changes use multiple location scopes. Choose a location type to edit.</p>` : type === "all" ? `<p class="muted">All locations are included.</p>` : items.map(([value,label]) => `<label class="check-option"><input type="checkbox" data-batch-location="${escapeHtml(value)}" ${state.batchSelectedLocations.has(value) ? "checked" : ""}><span>${escapeHtml(label)}</span></label>`).join("") || `<p class="muted">No matching locations.</p>`;
+  document.querySelectorAll("[data-batch-location]").forEach((box) => box.addEventListener("change", () => { if (box.checked) state.batchSelectedLocations.add(box.dataset.batchLocation); else state.batchSelectedLocations.delete(box.dataset.batchLocation); syncBatchLocationSelectAll(allItems); persistBatchDraft(); }));
   syncBatchLocationSelectAll(allItems);
   renderBatchCompatibility();
 }
@@ -3057,7 +4405,7 @@ function syncBatchLocationSelectAll(items = []) {
   box.disabled = $("batchLocationType").value === "all" || !items.length; box.checked = items.length > 0 && count === items.length; box.indeterminate = count > 0 && count < items.length;
 }
 function renderBatchCompatibility() {
-  const type = $("batchLocationType").value; if (type === "all") { $("batchCompatibility").textContent = "All selected files are eligible."; return; }
+  const type = $("batchLocationType").value; if (!type || type === MIXED_EDITOR_VALUE) { $("batchCompatibility").textContent = "Choose one location type before applying another change."; return; } if (type === "all") { $("batchCompatibility").textContent = "All selected files are eligible."; return; }
   const selectedFiles = [...state.batchSelectedFiles];
   const skipped = selectedFiles.filter((filename) => !state.batchGeographies[filename]?.levels?.some((level) => level.id === type && level.compatible));
   $("batchCompatibility").textContent = skipped.length ? `${skipped.length} selected file${skipped.length === 1 ? " is" : "s are"} not compatible with this location type and will be skipped: ${skipped.join(", ")}` : "All selected files support this location type.";
@@ -3065,28 +4413,30 @@ function renderBatchCompatibility() {
 async function renderBatchColumns() {
   const requestId = ++state.batchColumnsRequestId, scenarioId = state.editorVariationId, sessionOwner = state.batchSessionOwner;
   const files = [...state.batchSelectedFiles], fileSignature = [...files].sort().join("\n");
-  const priorYear = $("batchYear").value;
-  if (!files.length) { $("batchColumnChecklist").innerHTML = `<p class="muted">Select one or more files.</p>`; state.batchFiles = {}; state.batchGeographies = {}; state.batchSelectedColumns.clear(); renderBatchLocationTypes(); syncBatchSelectAll(); return; }
+  const priorYear = $("batchYear").value || $("batchYear").dataset.draftYear || "";
+  if (!files.length) { $("batchColumnChecklist").innerHTML = `<p class="muted">Select one or more files.</p>`; state.batchFiles = {}; state.batchBaselineFiles = {}; state.batchGeographies = {}; state.batchSelectedColumns.clear(); renderBatchLocationTypes(); syncBatchSelectAll(); return; }
   $("batchColumnChecklist").innerHTML = `<p class="muted">Loading columns…</p>`;
   try {
     const payloads = await Promise.all(files.map(async (filename) => {
-      const [csvPayload, geography] = await Promise.all([request(editorFileUrl(filename)), request(`/api/geography-options?projectId=${encodeURIComponent(state.selectedProject.id)}&filename=${encodeURIComponent(filename)}`)]);
-      return [filename, csvPayload, geography];
+      const [csvPayload, baselinePayload, geography] = await Promise.all([request(editorFileUrl(filename)), request(baselineEditorFileUrl(filename)), request(`/api/geography-options?projectId=${encodeURIComponent(state.selectedProject.id)}&filename=${encodeURIComponent(filename)}`)]);
+      return [filename, csvPayload, baselinePayload, geography];
     }));
     const currentFileSignature = [...state.batchSelectedFiles].sort().join("\n");
     if (requestId !== state.batchColumnsRequestId || sessionOwner !== state.batchSessionOwner || scenarioId !== state.editorVariationId || !batchSessionMatches(scenarioId) || state.editorMode !== "scenario" || fileSignature !== currentFileSignature) return;
-    payloads.forEach(([filename, csvPayload, geography]) => { state.batchFiles[filename] = csvPayload; state.batchGeographies[filename] = geography; });
-    Object.keys(state.batchFiles).filter((name) => !files.includes(name)).forEach((name) => { delete state.batchFiles[name]; delete state.batchGeographies[name]; });
+    payloads.forEach(([filename, csvPayload, baselinePayload, geography]) => { state.batchFiles[filename] = csvPayload; state.batchBaselineFiles[filename] = baselinePayload; state.batchGeographies[filename] = geography; });
+    Object.keys(state.batchFiles).filter((name) => !files.includes(name)).forEach((name) => { delete state.batchFiles[name]; delete state.batchBaselineFiles[name]; delete state.batchGeographies[name]; });
     const years = new Set(); payloads.forEach(([,csvPayload]) => { const index = csvPayload.columns.indexOf("Year"); if (index >= 0) csvPayload.rows.forEach((row) => years.add(row[index])); });
     const sortedYears = [...years].sort();
     $("batchYear").innerHTML = sortedYears.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
     $("batchYear").value = sortedYears.includes(priorYear) ? priorYear : sortedYears.includes("2045") ? "2045" : sortedYears[0] || "";
+    delete $("batchYear").dataset.draftYear;
     $("batchColumnChecklist").innerHTML = payloads.map(([filename,csvPayload]) => `<section class="batch-column-group"><header><strong>${escapeHtml(filename)}</strong><button class="text-button" type="button" data-select-file-columns="${escapeHtml(filename)}">Select all</button></header>${numericColumns(csvPayload).map((column) => `<label class="check-option"><input type="checkbox" data-batch-column-file="${escapeHtml(filename)}" data-batch-column="${escapeHtml(column)}" ${state.batchSelectedColumns.get(filename)?.has(column)?"checked":""}><span>${escapeHtml(column)}</span></label>`).join("") || `<span class="muted">No editable numeric columns.</span>`}</section>`).join("");
     document.querySelectorAll("[data-batch-column-file]").forEach((box) => {
       box.checked = state.batchSelectedColumns.get(box.dataset.batchColumnFile)?.has(box.dataset.batchColumn) || false;
-      box.addEventListener("change",()=>{const selected=state.batchSelectedColumns.get(box.dataset.batchColumnFile)||new Set();if(box.checked)selected.add(box.dataset.batchColumn);else selected.delete(box.dataset.batchColumn);state.batchSelectedColumns.set(box.dataset.batchColumnFile,selected);syncBatchSelectAll()});
+      box.addEventListener("change",()=>{const selected=state.batchSelectedColumns.get(box.dataset.batchColumnFile)||new Set();if(box.checked)selected.add(box.dataset.batchColumn);else selected.delete(box.dataset.batchColumn);state.batchSelectedColumns.set(box.dataset.batchColumnFile,selected);syncBatchSelectAll();persistBatchDraft()});
     });
-    document.querySelectorAll("[data-select-file-columns]").forEach((button) => button.addEventListener("click", () => { const boxes = [...document.querySelectorAll(`[data-batch-column-file="${CSS.escape(button.dataset.selectFileColumns)}"]`)], select = boxes.some((box) => !box.checked),selected=new Set(); boxes.forEach((box) => { box.checked = select;if(select)selected.add(box.dataset.batchColumn); });state.batchSelectedColumns.set(button.dataset.selectFileColumns,selected); button.textContent = select ? "Clear" : "Select all"; syncBatchSelectAll(); }));
+    document.querySelectorAll("[data-select-file-columns]").forEach((button) => button.addEventListener("click", () => { const boxes = [...document.querySelectorAll(`[data-batch-column-file="${CSS.escape(button.dataset.selectFileColumns)}"]`)], select = boxes.some((box) => !box.checked),selected=new Set(); boxes.forEach((box) => { box.checked = select;if(select)selected.add(box.dataset.batchColumn); });state.batchSelectedColumns.set(button.dataset.selectFileColumns,selected); button.textContent = select ? "Clear" : "Select all"; syncBatchSelectAll(); persistBatchDraft(); }));
+    updateBatchDraftGuidance();
     renderBatchLocationTypes(); syncBatchSelectAll();
   } catch (error) { if(requestId===state.batchColumnsRequestId&&sessionOwner===state.batchSessionOwner&&batchSessionMatches(scenarioId))$("batchColumnChecklist").innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`; }
 }
@@ -3099,22 +4449,49 @@ function rowMatchesBatch(row, csvPayload, geography, type, selected) {
 }
 async function applyBatchChanges() {
   const grouped=Object.fromEntries([...state.batchSelectedColumns].filter(([filename,columns])=>state.batchSelectedFiles.has(filename)&&columns.size).map(([filename,columns])=>[filename,[...columns]])), valueText = $("batchValue").value.trim(), value = Number(valueText), operation = $("batchOperation").value;
-  if (!Object.keys(grouped).length || !valueText || !Number.isFinite(value) || !operation || !$("batchYear").value) return notify("Choose files, columns, a year, an operation, and a numeric value.", "error");
+  if (!Object.keys(grouped).length || !valueText || !Number.isFinite(value) || !operation || operation === MIXED_EDITOR_VALUE || !$("batchYear").value) return notify("Choose files, columns, a year, a specific operation, and a numeric value.", "error");
   const type = $("batchLocationType").value, locations = [...state.batchSelectedLocations];
+  if (!type || type === MIXED_EDITOR_VALUE) return notify("Choose one location type before applying another change.", "error");
   if (type !== "all" && !locations.length) return notify("Choose at least one location or use Select all locations.", "error");
-  setBusy($("applyBatchChanges"), true, "Applying…");
+  const button = $("applyBatchChanges");
+  if (button.disabled) return;
+  setBusy(button, true, "Checking…");
   try {
-    let changed = 0, saved = 0, skipped = [], rounded = new Set();
+    const requestedFromBaseline = $("batchFromBaseline").checked;
+    let overlap = 0;
     for (const [filename, columns] of Object.entries(grouped)) {
-      const csvPayload = state.batchFiles[filename], geography = state.batchGeographies[filename];
+      const csvPayload = state.batchFiles[filename], baselinePayload = state.batchBaselineFiles[filename], geography = state.batchGeographies[filename];
+      if (!csvPayload || !baselinePayload || (type !== "all" && !geography?.levels?.some((level) => level.id === type && level.compatible))) continue;
+      const yearIndex = csvPayload.columns.indexOf("Year");
+      csvPayload.rows.forEach((row, rowIndex) => {
+        if (yearIndex >= 0 && row[yearIndex] !== $("batchYear").value) return;
+        if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return;
+        columns.forEach((column) => {
+          const index = csvPayload.columns.indexOf(column);
+          if (Number.isFinite(Number(row[index])) && rowsDifferAt(csvPayload.rows, baselinePayload.rows, rowIndex, index)) overlap++;
+        });
+      });
+    }
+    const basis = requestedFromBaseline ? "baseline" : await chooseOverlappingOperation(overlap);
+    if (basis === "cancel") return;
+    setBusy(button, false); setBusy(button, true, "Applying…");
+    let changed = 0, saved = 0, skipped = [], rounded = new Set();
+    const batchId = globalThis.crypto?.randomUUID?.() || `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const operationId = newOperationId("batch");
+    for (const [filename, columns] of Object.entries(grouped)) {
+      const csvPayload = state.batchFiles[filename], baselinePayload = state.batchBaselineFiles[filename], geography = state.batchGeographies[filename];
       if (type !== "all" && !geography?.levels?.some((level) => level.id === type && level.compatible)) { skipped.push(filename); continue; }
       const yearIndex = csvPayload.columns.indexOf("Year");
       integerColumns(csvPayload, columns).forEach((column) => rounded.add(column));
-      csvPayload.rows.forEach((row) => { if (yearIndex >= 0 && row[yearIndex] !== $("batchYear").value) return; if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return; columns.forEach((column) => { const index = csvPayload.columns.indexOf(column), current = Number(row[index]); if (!Number.isFinite(current)) return; let next = calculateValue(current, operation, value); if (column.toLowerCase().includes("prop")) next = Math.min(1, next); row[index] = calculatedValue(next, "batch", csvPayload, column); changed++; }); });
-      await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename, columns:csvPayload.columns, rows:csvPayload.rows}); saved++;
+      csvPayload.rows.forEach((row,rowIndex) => { if (yearIndex >= 0 && row[yearIndex] !== $("batchYear").value) return; if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return; columns.forEach((column) => { const index = csvPayload.columns.indexOf(column), sourceRow = basis === "baseline" ? baselinePayload?.rows?.[rowIndex] : row, current = Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; let next = calculateValue(current, operation, value); if (column.toLowerCase().includes("prop")) next = Math.min(1, next); row[index] = calculatedValue(next, "batch", csvPayload, column); changed++; }); });
+      const nextOperation={operationId,source:"batch",batchId,basis,columns:[...columns],operation,value,year:$("batchYear").value,allLocations:type==="all",geographyType:type,geographyLabel:type==="all"?"all locations":`${locations.length} selected locations`,locations:[...locations],rounding:operationRounding(csvPayload,columns,"batch")};
+      const priorOperations=(activeEditorVariation()?.overlays||[]).find((item)=>item.fileName===filename)?.editOperations||[];
+      await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename, columns:csvPayload.columns, rows:csvPayload.rows,editOperations:operationsWithBaselineOverride(priorOperations,nextOperation)}); saved++;
     }
-    notify(`Saved ${saved} file changes and changed ${changed} values${skipped.length ? `; skipped ${skipped.length} incompatible files` : ""}.${rounded.size ? ` Whole-number count fields were rounded: ${[...rounded].join(", ")}.` : ""}`, "success"); await refreshState({quiet:true}); resetBatchDraft(state.editorVariationId);
-  } catch (error) { notify(error.message, "error"); } finally { setBusy($("applyBatchChanges"), false); }
+    $("batchFromBaseline").checked=false;
+    renderBatchBaselineChoice();
+    notify(`Saved ${saved} file changes and changed ${changed} values${basis === "baseline" ? " from the untouched baseline" : ""}${skipped.length ? `; skipped ${skipped.length} incompatible files` : ""}.${rounded.size ? ` Whole-number count fields were rounded: ${[...rounded].join(", ")}.` : ""}`, "success"); persistBatchDraft(); await refreshState({quiet:true});
+  } catch (error) { notify(error.message, "error"); } finally { setBusy(button, false); }
 }
 
 $("editorFile").addEventListener("change", async (event) => {
@@ -3123,33 +4500,48 @@ $("editorFile").addEventListener("change", async (event) => {
   const changed = await guardUnsaved(() => loadEditorFile(next));
   if (!changed) event.target.value = state.editorFileName;
 });
-$("editorLocationField").addEventListener("change", () => { state.editorSelectedLocations = new Set(); renderEditorLocations(); renderCsv(); });
-$("editorLocationSearch").addEventListener("input", renderEditorLocations);
+$("editorLocationField").addEventListener("change", () => { state.editorSelectedLocations = new Set(); state.editorMixedScopes = []; state.editorScopeUnavailable = false; renderEditorLocations(); renderCsv(); updateFileDraftGuidance(); persistFileDraft(); });
+$("editorLocationSearch").addEventListener("input", () => { renderEditorLocations(); persistFileDraft(); });
 $("editorSelectAllLocations").addEventListener("change", (event) => {
   const values = selectedGeographyLevel(state.editorGeography, $("editorLocationField"))?.values || [];
-  state.editorSelectedLocations = event.target.checked ? new Set(values.map((item) => item.value)) : new Set(); renderEditorLocations(); renderCsv();
+  state.editorSelectedLocations = event.target.checked ? new Set(values.map((item) => item.value)) : new Set(); renderEditorLocations(); renderCsv(); persistFileDraft();
 });
 $("applyEditorChange").addEventListener("click", applyEditorChange);
-$("resetEditorFile").addEventListener("click", () => { if (!state.csv) return; state.editorUndo.push(editorSnapshot()); state.editorRedo = []; state.csv.rows = state.editorOriginalRows.map((row) => [...row]); $("editorNotes").value = state.editorSavedNotes; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); });
+$("clearEditorSelections").addEventListener("click", () => { renderEditorControls({year:$("editorYear").value}); persistFileDraft(); notify("Single-file selections cleared. Saved scenario changes were not removed.", "success"); });
+$("resetEditorFile").addEventListener("click", () => { if (!state.csv) return; state.editorUndo.push(editorSnapshot()); state.editorRedo = []; state.csv.rows = state.editorOriginalRows.map((row) => [...row]);state.editorPendingOperations=structuredClone(state.editorSavedOperations); renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); });
 $("undoEditorChange").addEventListener("click", undoEditor);
 $("redoEditorChange").addEventListener("click", redoEditor);
-$("editorNotes").addEventListener("input", recomputeEditorDirty);
-$("editorSelectAllColumns").addEventListener("change", (event) => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = event.target.checked; }); syncEditorColumnSelectAll(); });
-$("clearEditorColumns").addEventListener("click", () => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = false; }); syncEditorColumnSelectAll(); });
-$("saveScenarioNote").addEventListener("click", async () => {
-  const scenario = activeEditorVariation(); if (!scenario || !state.selectedProject) return;
-  setBusy($("saveScenarioNote"), true, "Saving…");
-  try { await post("/api/projects/variations/update", {projectId:state.selectedProject.id, variationId:scenario.id, scenarioNote:$("scenarioNote").value}); await refreshState({quiet:true}); notify("Scenario note saved.", "success"); }
-  catch (error) { notify(error.message, "error"); } finally { setBusy($("saveScenarioNote"), false); }
-});
+$("editorNotes").addEventListener("input", (event) => scheduleNoteAutosave("file", event.currentTarget.value));
+$("editorNotes").addEventListener("blur", () => saveNoteNow("file"));
+$("editorSelectAllColumns").addEventListener("change", (event) => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = event.target.checked; }); syncEditorColumnSelectAll(); persistFileDraft(); });
+$("clearEditorColumns").addEventListener("click", () => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = false; }); syncEditorColumnSelectAll(); persistFileDraft(); });
+$("editorOperation").addEventListener("change", () => { updateFileDraftGuidance(); persistFileDraft(); });
+$("editorYear").addEventListener("change", persistFileDraft);
+$("editorValue").addEventListener("input", () => { $("editorValue").placeholder = ""; updateFileDraftGuidance(); persistFileDraft(); });
+$("scenarioNote").addEventListener("input", (event) => scheduleNoteAutosave("scenario", event.currentTarget.value));
+$("scenarioNote").addEventListener("blur", () => saveNoteNow("scenario"));
 $("applyBatchChanges").addEventListener("click", applyBatchChanges);
-$("batchSelectAllColumns").addEventListener("change", (event) => { const grouped=new Map();document.querySelectorAll("[data-batch-column-file]").forEach((box) => { box.checked = event.target.checked;const selected=grouped.get(box.dataset.batchColumnFile)||new Set();if(event.target.checked)selected.add(box.dataset.batchColumn);grouped.set(box.dataset.batchColumnFile,selected); });state.batchSelectedColumns=grouped;syncBatchSelectAll(); });
-$("batchLocationType").addEventListener("change", () => { state.batchSelectedLocations = new Set(); renderBatchLocations(); });
-$("batchLocationSearch").addEventListener("input", renderBatchLocations);
+$("batchSelectAllColumns").addEventListener("change", (event) => { const grouped=new Map();document.querySelectorAll("[data-batch-column-file]").forEach((box) => { box.checked = event.target.checked;const selected=grouped.get(box.dataset.batchColumnFile)||new Set();if(event.target.checked)selected.add(box.dataset.batchColumn);grouped.set(box.dataset.batchColumnFile,selected); });state.batchSelectedColumns=grouped;syncBatchSelectAll();persistBatchDraft(); });
+$("batchLocationType").addEventListener("change", () => { state.batchSelectedLocations = new Set(); state.batchMixedScopes = []; state.batchDraftScopeUnavailable = false; state.batchDraftGeographyType = $("batchLocationType").value; renderBatchLocations(); updateBatchDraftGuidance(); persistBatchDraft(); });
+$("batchLocationSearch").addEventListener("input", () => { renderBatchLocations(); persistBatchDraft(); });
 $("batchSelectAllLocations").addEventListener("change", (event) => {
   const values = batchLocationValues();
-  state.batchSelectedLocations = event.target.checked ? values : new Set(); renderBatchLocations();
+  state.batchSelectedLocations = event.target.checked ? values : new Set(); renderBatchLocations(); persistBatchDraft();
 });
+$("batchOperation").addEventListener("change", () => { updateBatchDraftGuidance(); persistBatchDraft(); });
+$("batchYear").addEventListener("change", persistBatchDraft);
+$("batchValue").addEventListener("input", () => { $("batchValue").placeholder = ""; updateBatchDraftGuidance(); persistBatchDraft(); });
+function renderBatchBaselineChoice(){
+  const fromBaseline=$("batchFromBaseline").checked;
+  const text=fromBaseline
+    ? "Untouched baseline values — replace earlier changes within the selected files, columns, year, and locations."
+    : "Current scenario values — apply this operation on top of changes already saved.";
+  $("batchBaselineDescription").textContent=text;
+  $("batchBaselineHelp").setAttribute("aria-label",text);
+  $("batchBaselineHelp").querySelector("[role=tooltip]").textContent=text;
+}
+$("batchFromBaseline").addEventListener("change",()=>{renderBatchBaselineChoice();persistBatchDraft();});
+$("clearBatchSelections").addEventListener("click", () => { resetBatchDraft(state.editorVariationId, true); notify("Batch selections cleared. Saved scenario changes were not removed.", "success"); });
 function setScenarioSidebarWidth(width) {
   const workspace = $("inputEditor");
   const availableWidth = workspace.getBoundingClientRect().width || window.innerWidth;
@@ -3189,9 +4581,10 @@ $("cancelScenarioDialog").addEventListener("click", () => $("scenarioDialog").cl
 $("scenarioDialogForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const name = $("scenarioDialogName").value.trim(); if (!name || !state.selectedProject) return;
+  const duplicateFrom=$("scenarioDialog").dataset.duplicateFrom||"",source=state.selectedProject.variations.find((item)=>item.id===duplicateFrom),sourceType=source?scenarioEditSource(source):"",sourceMode=state.editorMode,sourceFile=state.editorFileName;
   setBusy($("confirmScenarioDialog"), true, "Saving…");
   try {
-    const scenario = await post("/api/projects/variations", {projectId:state.selectedProject.id,name,duplicateFrom:$("scenarioDialog").dataset.duplicateFrom || ""});
+    const scenario = await post("/api/projects/variations", {projectId:state.selectedProject.id,name,duplicateFrom});
     const projectId = state.selectedProject.id;
     $("scenarioDialog").close();
     // Do not stamp the new scenario id onto the previous batch draft before
@@ -3199,8 +4592,12 @@ $("scenarioDialogForm").addEventListener("submit", async (event) => {
     // the first Batch Change visit starts from an entirely clean state.
     clearBatchDraftState("");
     await refreshState({quiet:true}); selectProject(projectId);
-    state.editorVariationId = scenario.id; state.editorMode = "file"; clearEditorFile();
-    renderScenarioTree(); renderEditorPage(); notify(`Created scenario ${scenario.name}.`, "success");
+    state.editorVariationId=scenario.id;
+    const copied=activeEditorVariation(),copiedFiles=(copied?.overlays||[]).map((item)=>item.fileName).sort((a,b)=>a.localeCompare(b));
+    const openFile=sourceType==="single_file"||(sourceType==="mixed"&&sourceMode==="file");
+    if(duplicateFrom&&openFile&&copiedFiles.length)await openOverlay(scenario.id,copiedFiles.includes(sourceFile)?sourceFile:copiedFiles[0]);
+    else openScenarioTools(scenario.id);
+    notify(`${duplicateFrom?"Copied":"Created"} scenario ${scenario.name}.`, "success");
   } catch (error) { notify(error.message,"error"); } finally { setBusy($("confirmScenarioDialog"), false); }
 });
 
@@ -3212,6 +4609,57 @@ $("projectEditForm").addEventListener("submit", async (event) => {
     const project = await post("/api/projects/update", {projectId,name:$("projectEditName").value}); dialog.close();
     await refreshState({quiet:true}); if (state.selectedProject?.id === projectId) selectProject(projectId); notify(`Updated ${project.name}.`, "success");
   } catch (error) { notify(error.message,"error"); } finally { setBusy(event.currentTarget.querySelector('button[type="submit"], button:not([type])'), false); }
+});
+$("cancelProjectCopy").addEventListener("click", () => $("projectCopyDialog").close());
+function showCopyComplete(projectId, variationIds, summary={}){
+  const project=state.data?.projects?.find((item)=>item.id===projectId),ids=variationIds||[];
+  const pending=ids.filter((id)=>project?.variations?.find((item)=>item.id===id)?.resultStatus!=="current");
+  const current=ids.filter((id)=>!pending.includes(id));
+  const dialog=$("copyCompleteDialog");dialog.dataset.projectId=projectId;dialog.dataset.pendingVariationIds=JSON.stringify(pending);
+  $("copyCompleteSummary").textContent=`Copied ${ids.length} scenario${ids.length===1?"":"s"} and ${Number(summary.resultsCopied||0)} independent result${Number(summary.resultsCopied||0)===1?"":"s"}${summary.bytesCopied?` (${humanBytes(summary.bytesCopied)})`:""}. ${current.length} scenario${current.length===1?" has":"s have"} a current reusable result.`;
+  $("copyCompleteRunMessage").textContent=pending.length?`${pending.length} copied scenario${pending.length===1?" needs":"s need"} a run. Review Runs will select only those scenarios${project?.requiresBaseline?" and the required baseline":""}.`:"Every copied scenario already has a current result. You can still choose Run again from the Run page.";
+  $("reviewCopiedRuns").hidden=!pending.length;dialog.showModal();
+}
+async function waitForCopyOperation(operation){
+  state.copyOperationId=operation.id;const dialog=$("copyProgressDialog");$("cancelCopyOperation").disabled=false;$("copyProgress").removeAttribute("value");$("copyProgressMessage").textContent="Preparing copy…";$("copyProgressDetail").textContent="Completed results are copied into independent project storage.";if(!dialog.open)dialog.showModal();
+  while(state.copyOperationId===operation.id){
+    const status=await request(`/api/projects/copy/status?id=${encodeURIComponent(operation.id)}`);
+    $("copyProgressMessage").textContent=status.message||"Copying…";
+    if(status.totalBytes>0){$("copyProgress").value=Math.min(100,status.completedBytes/status.totalBytes*100);$("copyProgressDetail").textContent=`${humanBytes(status.completedBytes)} of ${humanBytes(status.totalBytes)} copied.`}else $("copyProgress").removeAttribute("value");
+    if(status.state==="succeeded"){state.copyOperationId="";dialog.close();return status.result}
+    if(status.state==="failed"){state.copyOperationId="";dialog.close();throw new Error(status.message||"Copy failed")}
+    if(status.state==="cancelled"){state.copyOperationId="";dialog.close();throw new Error("Copy cancelled")}
+    await new Promise((resolve)=>setTimeout(resolve,250));
+  }
+  throw new Error("Copy cancelled");
+}
+$("cancelCopyOperation").addEventListener("click",async()=>{if(!state.copyOperationId)return;$("copyProgressMessage").textContent="Cancelling copy…";$("cancelCopyOperation").disabled=true;try{await post("/api/projects/copy/cancel",{id:state.copyOperationId})}catch(error){notify(error.message,"error")}finally{$("cancelCopyOperation").disabled=false}});
+$("reviewCopiedRuns").addEventListener("click",()=>{const dialog=$("copyCompleteDialog"),projectId=dialog.dataset.projectId,pending=JSON.parse(dialog.dataset.pendingVariationIds||"[]"),project=state.data?.projects?.find((item)=>item.id===projectId);switchPage("runPage",{restoreScroll:false});$("runProject").value=projectId;state.runSelectionProjectId=projectId;state.runSelectedVariationIds=new Set(pending);state.runForceRerunIds=new Set();state.runBaselineSelected=Boolean(project?.requiresBaseline);renderRunSelections()});
+$("projectCopyForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const dialog = $("projectCopyDialog"), projectId = dialog.dataset.projectId, name = $("projectCopyName").value.trim();
+  if (!projectId || !name) return;
+  const button = event.currentTarget.querySelector('button[type="submit"], button:not([type])');
+  setBusy(button, true, "Copying…");
+  try {
+    const operation = await post("/api/projects/copy/start", {projectId, name});
+    dialog.close();const project = await waitForCopyOperation(operation);
+    await refreshState({quiet:true});state.expandedProjectIds.add(project.id);renderProjects();
+    notify(`Copied ${project.name} with independent completed-result snapshots and no run history.`, "success");
+    showCopyComplete(project.id,(project.variations||[]).map((item)=>item.id),project.copySummary||{});
+  } catch (error) { notify(error.message, "error"); } finally { setBusy(button, false); }
+});
+$("cancelScenarioCopy").addEventListener("click",()=>$("scenarioCopyDialog").close());
+document.querySelectorAll('[name="scenarioCopyDestination"]').forEach((control)=>control.addEventListener("change",()=>{const existing=control.value==="existing"&&control.checked;$("scenarioCopyTargetProject").disabled=!existing;$("scenarioCopyNewProjectName").disabled=existing}));
+$("scenarioCopyForm").addEventListener("submit",async(event)=>{
+  event.preventDefault();const dialog=$("scenarioCopyDialog"),sourceProjectId=dialog.dataset.sourceProjectId,variationIds=JSON.parse(dialog.dataset.variationIds||"[]"),mode=document.querySelector('[name="scenarioCopyDestination"]:checked')?.value;
+  const destination=mode==="existing"?{projectId:$("scenarioCopyTargetProject").value}:{name:$("scenarioCopyNewProjectName").value.trim()};
+  if(!(destination.projectId||destination.name))return notify("Choose a destination project.","error");
+  const blockedMessage=scenarioCopyBlockedMessage(sourceProjectId,variationIds);if(blockedMessage)return notify(blockedMessage,"error");
+  const destinationBlocked=destinationCopyBlockedMessage(destination.projectId);if(destinationBlocked){const status=$("scenarioCopyDestinationStatus");status.hidden=false;status.textContent=destinationBlocked;return notify(destinationBlocked,"error")}
+  const button=$("confirmScenarioCopy");setBusy(button,true,"Copying…");
+  try{const operation=await post("/api/projects/variations/copy/start",{sourceProjectId,variationIds,destination});dialog.close();const result=await waitForCopyOperation(operation);state.projectScenarioSelections.set(sourceProjectId,new Set());await refreshState({quiet:true});state.expandedProjectIds.add(result.project.id);renderProjects();notify(`Copied ${result.variations.length} scenario${result.variations.length===1?"":"s"} to ${result.project.name}.`,"success");showCopyComplete(result.project.id,result.variations.map((item)=>item.id),result.copySummary||{})}
+  catch(error){notify(error.message,"error")}finally{setBusy(button,false)}
 });
 $("cancelBaselineRename").addEventListener("click", () => $("baselineRenameDialog").close());
 $("baselineRenameForm").addEventListener("submit", async (event) => {
@@ -3244,22 +4692,83 @@ $("projectPurgeForm").addEventListener("submit", async (event) => {
   catch (error) { notify(error.message, "error"); } finally { setBusy(button, false); }
 });
 
+function automaticSummarySearchText(file) {
+  const details = file.automaticSummaryDetails;
+  if (!details) return String(file.automaticSummary || "");
+  return [file.automaticSummary, details.filename, details.ordered ? "applied operations in order" : "", ...(details.groups || []).flatMap((group) => [
+    group.otherChanges ? "other saved changes" : "",
+    group.allVariables ? "all variables" : "",
+    (group.variables || []).join(" "),
+    group.change,
+    group.basis === "baseline" ? "from baseline" : "",
+    group.locations?.text,
+    group.locations?.effectiveText,
+    ...(group.locations?.names || []),
+  ])].filter(Boolean).join(" ");
+}
+function renderAutomaticSummaryFile(file) {
+  const details = file.automaticSummaryDetails;
+  if (!details?.groups?.length) return `<section class="automatic-summary-file" role="listitem"><h4>${escapeHtml(file.filename)}</h4><p>${escapeHtml(file.automaticSummary || "Changed")}</p></section>`;
+  const multiple = details.groups.length > 1, ordered = Boolean(details.ordered);
+  const hasOtherChanges = details.groups.some((group) => group.otherChanges);
+  let operationNumber = 0;
+  const groups = details.groups.map((group) => {
+    const variables = group.allVariables ? "All variables" : (group.variables || []).join(", ") || "Values";
+    const groupTitle = group.otherChanges ? "Other saved changes" : ordered ? `Operation ${++operationNumber}` : hasOtherChanges ? "Applied operation" : "";
+    return `<div class="automatic-summary-group ${multiple ? "automatic-summary-group-nested" : ""}">
+      ${groupTitle ? `<p class="automatic-summary-operation-title"><strong>${escapeHtml(groupTitle)}</strong></p>` : ""}
+      <p><strong>${multiple ? ((group.variables || []).length === 1 ? "Variable" : "Variables") : "Variables"}:</strong> ${escapeHtml(variables)}</p>
+      <p><strong>Change:</strong> ${escapeHtml(group.change || "Changed")}</p>
+      <p class="automatic-summary-locations"><strong>Locations:</strong> ${escapeHtml(group.locations?.text || "No changed locations")}</p>
+      ${group.locations?.effectiveText ? `<p class="automatic-summary-effective"><strong>Effective differences:</strong> ${escapeHtml(group.locations.effectiveText)}</p>` : ""}
+    </div>`;
+  }).join("");
+  return `<section class="automatic-summary-file" role="listitem"><h4>${escapeHtml(details.filename || file.filename)}</h4>${ordered ? `<p class="automatic-summary-order-heading"><strong>Effective operations, in order:</strong> From-baseline entries replace prior effects on their targeted cells; other entries compound from the preceding scenario values.</p>` : ""}<div class="automatic-summary-file-details">${groups}</div></section>`;
+}
+function reviewAuditRows(file) {
+  if (Array.isArray(file.auditRows)) return file.auditRows;
+  const grouped = new Map();
+  (file.changes || []).forEach((change) => {
+    const key=String(change.row),row=grouped.get(key)||{row:change.row,geo:change.geo,year:change.year,cells:[]};
+    row.cells.push({column:change.column,before:change.before,after:change.after});grouped.set(key,row);
+  });
+  return [...grouped.values()];
+}
+function reviewAuditColumns(file, rows) {
+  if (Array.isArray(file.auditColumns)) return file.auditColumns;
+  return [...new Set(rows.flatMap((row)=>(row.cells||[]).map((cell)=>cell.column).filter((column)=>!['Geo','Year'].includes(column))))];
+}
+function auditRowMatches(row, query) {
+  return !query || [row.row,row.geo,row.year,...(row.cells||[]).flatMap((cell)=>[cell.column,cell.before,cell.after])]
+    .some((value)=>String(value??"").toLowerCase().includes(query));
+}
+function renderAuditCell(row, column) {
+  const cell=(row.cells||[]).find((item)=>item.column===column);
+  if(!cell)return `<td class="audit-unchanged" aria-label="Not changed">—</td>`;
+  const before=roundedValue(cell.before,column),after=roundedValue(cell.after,column);
+  return `<td class="audit-changed" aria-label="Changed from ${escapeHtml(before)} to ${escapeHtml(after)}"><span class="audit-value"><small>Before</small>${escapeHtml(before)}</span><span class="audit-arrow" aria-hidden="true">→</span><span class="audit-value"><small>After</small>${escapeHtml(after)}</span></td>`;
+}
 function renderReview() {
   const review = state.review, query = $("reviewSearch").value.trim().toLowerCase();
   if (!review) { $("reviewContent").className = "review-content empty-state"; $("reviewContent").textContent = "Choose a project in Editor or Setup."; return; }
   const validation = review.validation || {valid:false,errors:["Validation unavailable"],warnings:[]};
   $("reviewValidation").innerHTML = `<section class="validation-card ${validation.valid ? "valid" : "invalid"}"><strong>${validation.valid ? "Project is ready to run" : "Resolve validation errors before running"}</strong>${(validation.errors || []).map((item) => `<p>${escapeHtml(item)}</p>`).join("")}${(validation.warnings || []).map((item) => `<p class="muted">Warning: ${escapeHtml(item)}</p>`).join("")}</section>`;
   $("continueToRun").disabled = !validation.valid;
-  $("reviewProjectTitle").textContent = `Review ${review.projectName}`;
+  $("reviewProjectTitle").textContent = review.hypercube ? `Review ${review.hypercube.name}` : `Review ${review.projectName}`;
   const scenarios = review.scenarios.map((scenario) => {
     const files = scenario.files.map((file) => {
-      const changes = file.changes.filter((change) => !query || [file.filename, change.geo, change.year, change.column, change.before, change.after].some((value) => String(value).toLowerCase().includes(query)));
-      if (query && !changes.length && !file.filename.toLowerCase().includes(query) && !file.notes.toLowerCase().includes(query)) return "";
-      return `<section class="review-file"><h3>${escapeHtml(file.filename)}</h3><div class="review-summary"><span class="pill">${file.changedRows} rows</span><span class="pill">${file.changedCells} cells</span><span class="pill">Years: ${escapeHtml(file.years.join(", ") || "—")}</span><span class="pill">Locations: ${file.geographies.length}</span></div>${file.notes ? `<p class="muted">Notes: ${escapeHtml(file.notes)}</p>` : ""}<div class="table-wrap review-table"><table><thead><tr><th>Row</th><th>Location</th><th>Year</th><th>Column</th><th>Before</th><th>After</th></tr></thead><tbody>${changes.map((change) => `<tr><td>${change.row}</td><td>${escapeHtml(change.geo)}</td><td>${escapeHtml(change.year)}</td><td>${escapeHtml(change.column)}</td><td>${escapeHtml(roundedValue(change.before, change.column))}</td><td>${escapeHtml(roundedValue(change.after, change.column))}</td></tr>`).join("") || `<tr><td colspan="6">No matching changes.</td></tr>`}</tbody></table></div></section>`;
+      const auditRows=reviewAuditRows(file),columns=reviewAuditColumns(file,auditRows),matchingRows=auditRows.filter((row)=>auditRowMatches(row,query));
+      const metadataMatch=!query||file.filename.toLowerCase().includes(query)||file.notes.toLowerCase().includes(query)||automaticSummarySearchText(file).toLowerCase().includes(query);
+      if(query&&!matchingRows.length&&!metadataMatch)return"";
+      const rows=query?matchingRows:auditRows,shown=Number(file.auditRowsShown??auditRows.length),truncated=Boolean(file.auditTruncated)||(shown<Number(file.changedRows||0));
+      const table=`<div class="table-wrap review-table changed-row-table"><table><thead><tr><th>Row</th><th>Location</th><th>Year</th>${columns.map((column)=>`<th>${escapeHtml(column)}</th>`).join("")}</tr></thead><tbody>${rows.map((row)=>`<tr><td>${row.row}</td><td>${escapeHtml(row.geo)}</td><td>${escapeHtml(row.year)}</td>${columns.map((column)=>renderAuditCell(row,column)).join("")}</tr>`).join("")||`<tr><td colspan="${Math.max(3,columns.length+3)}">No matching changed rows.</td></tr>`}</tbody></table></div>`;
+      return `<details class="review-file" ${query?"open":""}><summary><span class="review-file-heading"><span><small class="review-audit-label">Changed-row audit</small><h3>${escapeHtml(file.filename)}</h3></span>${editSourceMarker(file.editSource)}</span><span class="review-summary"><span class="pill">${file.changedRows} changed rows</span><span class="pill">${file.changedCells} changed cells</span></span></summary><div class="review-file-body">${file.notes?`<p class="muted">Notes: ${escapeHtml(file.notes)}</p>`:""}${truncated?`<p class="notice guidance-notice">Showing ${shown.toLocaleString()} of ${Number(file.changedRows||0).toLocaleString()} changed rows.</p>`:""}${table}</div></details>`;
     }).join("");
-    if (query && !files && !scenario.name.toLowerCase().includes(query)) return "";
+    if (query && !files && !scenario.name.toLowerCase().includes(query) && !String(scenario.automaticSummary||"").toLowerCase().includes(query) && !String(scenario.automaticSummaryHeadline||"").toLowerCase().includes(query) && !String(scenario.scenarioNote||"").toLowerCase().includes(query)) return "";
     const open = Boolean(query) || state.reviewExpandedScenarioIds.has(scenario.id);
-    return `<details class="review-scenario" data-review-scenario="${escapeHtml(scenario.id)}" ${open ? "open" : ""}><summary><span class="review-scenario-title">${escapeHtml(scenario.name)}</span><span class="review-summary"><span class="pill">${scenario.fileCount} saved files</span><span class="pill">${scenario.changedRows} changed rows</span><span class="pill">${scenario.changedCells} changed cells</span></span></summary><div class="review-scenario-body">${scenario.scenarioNote ? `<p class="scenario-note-display"><strong>Scenario note:</strong> ${escapeHtml(scenario.scenarioNote)}</p>` : ""}${files || `<p class="muted">No saved file changes. This scenario currently matches the baseline inputs.</p>`}</div></details>`;
+    const automaticSummary = scenario.automaticSummary ? `<details class="automatic-summary" ${query ? "open" : ""}><summary><span class="automatic-summary-heading"><strong>Automatic summary</strong></span></summary><div class="automatic-summary-files" role="list">${scenario.files.filter((file)=>file.automaticSummary).map(renderAutomaticSummaryFile).join("")}</div></details>` : "";
+    const headline = scenario.automaticSummaryHeadline || scenario.automaticSummary || "No saved changes";
+    return `<details class="review-scenario" data-review-scenario="${escapeHtml(scenario.id)}" ${open ? "open" : ""}><summary><span class="review-scenario-heading"><span class="review-scenario-title">${escapeHtml(scenario.name)} ${editSourceMarker(scenario.editSource,false)}</span><span class="review-scenario-headline">${escapeHtml(headline)}</span></span><span class="review-summary"><span class="pill">${scenario.fileCount} saved files</span><span class="pill">${scenario.changedRows} changed rows</span><span class="pill">${scenario.changedCells} changed cells</span></span></summary><div class="review-scenario-body">${automaticSummary}${scenario.scenarioNote ? `<p class="scenario-note-display"><strong>Scenario note:</strong> ${escapeHtml(scenario.scenarioNote)}</p>` : ""}${files || `<p class="muted">No saved file changes. This scenario currently matches the baseline inputs.</p>`}</div></details>`;
   }).join("");
   $("reviewContent").className = "review-content";
   const baselineDescription = state.selectedProject?.baseline?.strategy === "existing" ? "Existing completed result used as the comparison reference." : "Untouched project inputs used as the comparison reference.";
@@ -3272,46 +4781,76 @@ function renderReview() {
 async function loadProjectReview() {
   if (!state.selectedProject) { state.review = null; renderReview(); return; }
   $("reviewContent").className = "review-content empty-state"; $("reviewContent").textContent = "Calculating saved changes…";
-  try { state.review = await request(`/api/project-review?projectId=${encodeURIComponent(state.selectedProject.id)}`); state.reviewedScenarioIds = state.review.scenarios.map((scenario) => scenario.id); renderReview(); }
+  try { const hypercube = state.reviewHypercubeId ? `&hypercubeId=${encodeURIComponent(state.reviewHypercubeId)}` : ""; state.review = await request(`/api/project-review?projectId=${encodeURIComponent(state.selectedProject.id)}${hypercube}`); state.reviewedScenarioIds = state.review.scenarios.map((scenario) => scenario.id); renderReview(); }
   catch (error) { $("reviewContent").textContent = error.message; $("continueToRun").disabled = true; }
 }
 $("reviewSearch").addEventListener("input", renderReview);
 $("continueToRun").addEventListener("click", () => {
   if (!state.selectedProject || !state.review?.validation?.valid) return;
-  switchPage("runPage"); $("runProject").value = state.selectedProject.id;
-  state.runSelectionProjectId = state.selectedProject.id; state.runSelectedVariationIds = new Set(state.reviewedScenarioIds); state.runBaselineSelected = false; renderRunSelections();
+  switchPage("runPage", {restoreScroll:false}); $("runProject").value = state.selectedProject.id;
+  state.runSelectionProjectId = state.selectedProject.id; state.runSelectedVariationIds = new Set(state.reviewedScenarioIds); state.runBaselineSelected = Boolean(state.selectedProject.requiresBaseline); renderRunSelections();
 });
 $("editorProjectSelect").addEventListener("change", async (event) => {
   const changed = await guardUnsaved(() => selectProject(event.target.value));
   if (!changed) event.target.value = state.selectedProject?.id || "";
 });
+$("reviewProjectSelect").addEventListener("change", async (event) => {
+  const changed = await guardUnsaved(async () => {
+    state.reviewHypercubeId = "";
+    selectProject(event.target.value);
+    await loadProjectReview();
+  });
+  if (!changed) event.target.value = state.selectedProject?.id || "";
+});
 $("openCreateSetup").addEventListener("click", () => switchCreateSubpage("createSetup"));
 document.querySelectorAll("[data-create-subpage]").forEach((button) => button.addEventListener("click", () => switchCreateSubpage(button.dataset.createSubpage)));
+$("hypercubeSafetyDialog").addEventListener("close", () => {
+  if ($("hypercubeSafetyDialog").returnValue !== "open") return;
+  state.hypercubeSafetyAcknowledged = true;
+  switchPage("hypercubePage");
+  switchHypercubeSubpage(state.activeHypercubeSubpage);
+});
+$("hypercubeSafetyResources")?.addEventListener("click",()=>{$("hypercubeSafetyDialog").close("back");openSettings("settingsResources")});
+$("hypercubeProject").addEventListener("change",async(event)=>{const next=event.target.value,changed=await flushHypercubeAutosave();if(!changed){event.target.value=state.hypercubeProjectId;return}closeLocationPopovers();state.hypercubeProjectId=next;state.hypercubeHydratedProjectId="";if(next)selectProject(next,false);state.hypercubeAxes=[];state.hypercubeSelectedLocations=new Set();state.hypercubePreview=null;state.hypercubeLocationSearch="";state.hypercubeFiles=new Map();invalidateHypercubePreview();renderHypercubeSetup()});
+$("addHypercubeAxis").addEventListener("click",addHypercubeAxis);
+$("hypercubeYear").addEventListener("change",()=>{state.hypercubeScopeDraft.year=$("hypercubeYear").value;setHypercubeDirty();invalidateHypercubePreview();renderHypercubeLocations()});
+$("hypercubeGeographyType").addEventListener("change",()=>{state.hypercubeScopeDraft.geographyType=$("hypercubeGeographyType").value;state.hypercubeSelectedLocations=new Set();state.hypercubeLocationSearch="";setHypercubeDirty();invalidateHypercubePreview();renderHypercubeLocations()});
+$("hypercubeLocationTrigger").addEventListener("click",()=>{const opening=!state.hypercubeLocationPopoverOpen;if(opening)closeLocationPopovers("hypercubeLocationPopover");setHypercubeLocationPopoverOpen(opening,{focusSearch:opening})});
+$("hypercubeLocationSearch").addEventListener("input",(event)=>{state.hypercubeLocationSearch=event.target.value;renderHypercubeLocations()});
+$("hypercubeSelectAllLocations").addEventListener("click",()=>{state.hypercubeSelectedLocations=new Set(hypercubeLocationOptions().map(([value])=>value));setHypercubeDirty();invalidateHypercubePreview();renderHypercubeLocations()});
+$("hypercubeClearLocations").addEventListener("click",()=>{state.hypercubeSelectedLocations=new Set();setHypercubeDirty();invalidateHypercubePreview();renderHypercubeLocations()});
+$("retryHypercubeSave").addEventListener("click",()=>saveHypercubeDraft({announce:true,flush:true}));
+$("previewHypercube").addEventListener("click",previewHypercube);
+$("generateHypercube").addEventListener("click",generateHypercube);
+$("cancelHypercube").addEventListener("click",async()=>{if(!state.hypercubeOperationId)return;try{await post("/api/projects/hypercubes/cancel",{id:state.hypercubeOperationId})}catch(error){notify(error.message,"error")}});
 
 $("runProject").addEventListener("change", () => { renderRunSelections(); syncMenuContext(); });
 $("openRunDialog").addEventListener("click", () => {
   if (!$("runProject").value) return notify("Choose a project first.", "error");
   const names=selectedRunNames(); if(!names.length)return notify("Select at least one baseline or scenario.","error");
-  $("runDialogSelectionSummary").textContent=`This batch will contain exactly ${names.length} run${names.length===1?"":"s"}: ${names.join(", ")}.`;
   const native=state.data?.runtime?.adapter==="native";
+  const preferred=native?"queued":state.desktop?.resources?.defaultRunMode||"queued";
+  $("queuedRunMode").hidden=false;
   $("parallelRunMode").hidden=native;
-  $("queuedRunModeHelp").textContent=native?"One VE_Runtime run at a time.":"One runtime job at a time. Recommended for predictable memory use.";
-  const preferred=native?"queued":state.desktop?.resources?.defaultRunMode||"queued",radio=document.querySelector(`input[name="runMode"][value="${preferred}"]`);if(radio)radio.checked=true;
+  const radio=document.querySelector(`input[name="runMode"][value="${preferred}"]`);if(radio)radio.checked=true;
+  const queueMessage=" This batch joins the combined workspace queue and will not overlap another submitted batch.";
+  $("runDialogSelectionSummary").textContent=names.length>10?`This batch will contain exactly ${names.length.toLocaleString()} runs.${queueMessage}`:`This batch will contain exactly ${names.length} run${names.length===1?"":"s"}: ${names.join(", ")}.${queueMessage}`;
   $("runDialog").showModal();
 });
 $("confirmRun").addEventListener("click", async (event) => {
   event.preventDefault();
   const variationIds = [...state.runSelectedVariationIds];
   const includeBaseline = state.runBaselineSelected;
-  const mode = state.data?.runtime?.adapter === "native" ? "queued" : document.querySelector('input[name="runMode"]:checked').value;
+  const mode = state.data?.runtime?.adapter === "native" ? "queued" : document.querySelector('input[name="runMode"]:checked')?.value || "queued";
   if (!variationIds.length && !includeBaseline) return notify("Select at least one run.", "error");
   setBusy($("confirmRun"), true, "Starting…");
   try {
-    const batch = await post("/api/batches", { projectId: $("runProject").value, variationIds, includeBaseline, mode });
+    const batch = await post("/api/batches", { projectId: $("runProject").value, variationIds, includeBaseline, mode,forceRerunVariationIds:[...state.runForceRerunIds] });
     $("runDialog").close();
-    notify(`Started ${batch.jobs.length} ${mode} runs.`, "success");
+    const reused=batch.reusedResults?.length||0;
+    notify(batch.jobs.length?`Added ${batch.jobs.length} run${batch.jobs.length === 1 ? "" : "s"} to the combined queue as one ${mode} batch${reused?`; reused ${reused} current result${reused===1?"":"s"}`:""}.`:`No run was needed; reused ${reused} current result${reused===1?"":"s"}.`, "success");
     await refreshState({ quiet: true });
-    selectJob(batch.jobs[0].id,{automatic:true});
+    if(batch.jobs[0])selectJob(batch.jobs[0].id,{automatic:true});
   } catch (error) { notify(error.message, "error"); } finally { setBusy($("confirmRun"), false); }
 });
 
@@ -3422,10 +4961,7 @@ $("pullRuntime").addEventListener("click", async () => {
   try { await openSettings("settingsRuntime"); } catch (error) { notify(error.message,"error"); }
 });
 $("startDockerDesktop").addEventListener("click", event => startDockerAndVerify(event.currentTarget));
-$("verifyRuntime").addEventListener("click", async () => {
-  setBusy($("verifyRuntime"), true, "Verifying…");
-  try { const result=await verifyAndSaveRuntime(); notify(`${result.runtimeVersion || "VisionEval runtime"} verified.`, "success"); await refreshState({quiet:true}); } catch (error) { notify(error.message, "error"); } finally { setBusy($("verifyRuntime"), false); }
-});
+$("verifyRuntime").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).catch(()=>{}));
 
 async function verifyAndSaveRuntime() {
   const native = state.data?.runtime?.adapter === "native";
@@ -3453,7 +4989,7 @@ function compareElapsedText() {
 }
 
 function setCompareControlsDisabled(disabled) {
-  ["referenceDatastore", "comparisonOne", "comparisonTwo", "loadComparison", "compareTable", "compareVariable", "compareYear", "comparePageSize", "runComparison", "findChangedOutputs", "generateDashboard", "generateMap"].forEach((id) => { if ($(id)) $(id).disabled = disabled; });
+  ["compareReference", "compareComparison", "mapReference", "mapComparison", "dashboardReference", "dashboardComparison", "compareTable", "compareVariable", "compareYear", "comparePageSize", "runComparison", "findChangedOutputs", "generateDashboard", "generateMap"].forEach((id) => { if ($(id)) $(id).disabled = disabled; });
 }
 
 function renderCompareActivity() {
@@ -3527,51 +5063,75 @@ $("stopCompareActivity").addEventListener("click", async () => {
   state.compareController?.abort();
 });
 
-$("loadComparison").addEventListener("click", async () => {
-  const ids = [$("referenceDatastore").value, $("comparisonOne").value, $("comparisonTwo").value].filter(Boolean);
-  if (!ids.length || new Set(ids).size !== ids.length) return notify("Choose a reference. Any comparison results must be different datastores.", "error");
-  setBusy($("loadComparison"), true, "Loading…");
-  try {
-    const payload = await withCompareActivity("Loading comparison data", "Scanning the selected datastore variables and model years.", async () => {
-      const result = await request(`/api/comparison/variables?ids=${encodeURIComponent(ids.join(","))}`);
-      setCompareActivityPhase("Preparing comparison controls", `Found ${result.variables.length} comparable variables.`);
-      await nextPaint();
-      state.comparisonIds = ids; state.variables = result.variables; state.lastComparison=null; state.comparisonScan=null; state.comparisonScanId=""; state.dashboardPayload=null; state.dashboardDirty=true; state.dashboardInputSignature=""; state.mapPayload=null; state.mapDirty=true; state.mapInputSignature=""; state.exportFilterField="";state.exportFilterValues.clear();state.fullExportVariableKeys.clear();
-      resetCompareResults();
-      renderVariableSelectors(); switchSubpage("compareData");
-      await loadScanGeoOptions();
-      return result;
-    });
-    syncSingleDatastoreControls();
-    notify(`Loaded ${payload.variables.length} variables.`, "success");
-  } catch (error) { notify(error.message, "error"); } finally { setBusy($("loadComparison"), false); }
-});
+function rememberComparisonPair(ids){if(ids.length)state.recentComparisonPair=[...ids];}
+function syncResultPairOptions(referenceId,comparisonId){
+  const reference=$(referenceId),comparison=$(comparisonId);if(!reference||!comparison)return;
+  [...reference.options].forEach((option)=>{option.disabled=Boolean(option.value&&option.value===comparison.value&&option.value!==reference.value);});
+  [...comparison.options].forEach((option)=>{option.disabled=Boolean(option.value&&option.value===reference.value&&option.value!==comparison.value);});
+}
+function syncComparePairOptions(){syncResultPairOptions("compareReference","compareComparison");syncResultPairOptions("mapReference","mapComparison");syncResultPairOptions("dashboardReference","dashboardComparison");}
+function captureCompareViewState(){return{table:$("compareTable").value,variable:$("compareVariable").value,year:$("compareYear").value,mode:$("compareMode").value,pageSize:$("comparePageSize").value};}
+function comparisonOptionsKey(view,ids){return `${view}:${ids.map((id)=>{const record=state.data?.catalog?.find((item)=>item.id===id);return `${id}@${record?.registrationFingerprint||record?.completedAt||record?.registeredAt||''}`;}).join(',')}`;}
+async function comparisonOptions(view,ids){
+  const key=comparisonOptionsKey(view,ids),cached=state.comparisonOptionsCache.get(key);
+  state.comparisonOptionControllers[view]?.abort();
+  state.comparisonOptionRequestKeys[view]=key;
+  if(cached)return cached;
+  const controller=new AbortController();state.comparisonOptionControllers[view]=controller;
+  const labels={compare:"Finding common variables and years",map:"Preparing map-compatible outputs",dashboard:"Finding common variables and years"};
+  const load=async()=>{setCompareActivityPhase("Reading output inventory","Using the fingerprinted Datastore inventory.");const result=await request(`/api/comparison/options?view=${encodeURIComponent(view)}&ids=${encodeURIComponent(ids.join(","))}`,{signal:controller.signal});setCompareActivityPhase(labels[view],`Found ${(result.variables||[]).length} compatible outputs.`);await nextPaint();return result;};
+  let payload;
+  if(state.compareActivity?.status==="running")payload=await load();
+  else payload=await withCompareActivity("Loading comparison metadata",labels[view],load);
+  if(state.comparisonOptionRequestKeys[view]!==key)throw new DOMException("Obsolete comparison request","AbortError");
+  state.comparisonOptionsCache.set(key,payload);return payload;
+}
+async function loadCompareSelection(){
+  const preferences=captureCompareViewState();
+  const ids=[$("compareReference").value,$("compareComparison").value].filter(Boolean);
+  state.comparisonSelectionInitialized=true;
+  syncComparePairOptions();
+  if(!ids.length){state.comparisonIds=[];state.variables=[];renderVariableSelectors(preferences);return;}
+  if(new Set(ids).size!==ids.length){syncComparePairOptions();return notify("Reference and comparison must be different results.","error");}
+  try{
+    const payload=await comparisonOptions("compare",ids);
+    if(state.comparisonOptionRequestKeys.compare!==comparisonOptionsKey('compare',ids))return;
+    state.comparisonIds=ids;state.variables=payload.variables||[];state.lastComparison=null;state.comparisonScan=null;state.comparisonScanId="";
+    rememberComparisonPair(ids);resetCompareResults();renderVariableSelectors(preferences);await loadScanGeoOptions();syncSingleDatastoreControls();
+  }catch(error){if(error.name!=="AbortError")notify(error.message,"error");}
+}
+[$("compareReference"),$("compareComparison")].forEach((control)=>control.addEventListener("change",()=>{syncComparePairOptions();loadCompareSelection();}));
 
-function renderVariableSelectors() {
+function renderVariableSelectors(preferences={}) {
   const tables = [...new Set(state.variables.map((item) => item.table))];
   $("compareTable").innerHTML = tables.map((table) => `<option>${escapeHtml(table)}</option>`).join("");
-  renderVariablesForTable(); renderDashboardControls();
+  if(tables.includes(preferences.table))$("compareTable").value=preferences.table;
+  renderVariablesForTable(preferences);
 }
-function renderVariablesForTable() {
+function renderVariablesForTable(preferences={}) {
   const variables = state.variables.filter((item) => item.table === $("compareTable").value);
   $("compareVariable").innerHTML = variables.map((item) => `<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join("");
+  if(variables.some((item)=>item.name===preferences.variable))$("compareVariable").value=preferences.variable;
   const micro = ["Household","Vehicle","Worker"].includes($("compareTable").value);
   $("compareModeField").hidden = !micro;
   if (!micro) $("compareMode").value = "records";
+  else if(["records","aggregate"].includes(preferences.mode))$("compareMode").value=preferences.mode;
   else if (!state.lastComparison || state.lastComparison.table !== $("compareTable").value) $("compareMode").value = "aggregate";
-  renderYears();
+  if(preferences.pageSize&&[...$("comparePageSize").options].some((option)=>option.value===preferences.pageSize))$("comparePageSize").value=preferences.pageSize;
+  renderYears(preferences.year);
 }
-function renderYears() {
+function renderYears(preferredYear="") {
   const item = state.variables.find((variable) => variable.table === $("compareTable").value && variable.name === $("compareVariable").value);
-  $("compareYear").innerHTML = (item?.years || []).map((year) => `<option value="${year}" ${year === "2045" ? "selected" : ""}>${year}</option>`).join("");
+  const years=item?.years||[],selected=years.includes(preferredYear)?preferredYear:years.includes("2045")?"2045":years[0]||"";
+  $("compareYear").innerHTML = years.map((year) => `<option value="${year}" ${year === selected ? "selected" : ""}>${year}</option>`).join("");
   state.compareOffset = 0; renderCompareExplanation(item); loadCompareGeoOptions();
 }
 function renderCompareExplanation(item = state.variables.find((variable) => variable.table === $("compareTable").value && variable.name === $("compareVariable").value)) {
   if (!item) { $("compareExplanation").innerHTML = `<p class="muted">Choose an output variable to see its definition and units.</p>`; return; }
   $("compareExplanation").innerHTML = `<div class="compare-explanation-grid"><div><p class="step">Output explanation</p><h3>${escapeHtml(item.table)} / ${escapeHtml(item.name)}</h3><p>${escapeHtml(item.description || "No output description is available.")}</p></div><dl class="compare-explanation-meta"><div><dt>Units</dt><dd>${escapeHtml(item.units || "Unspecified")}</dd></div><div><dt>Produced by</dt><dd>${escapeHtml(item.module || "Not recorded")}</dd></div><div><dt>Table</dt><dd>${escapeHtml(item.table)}</dd></div></dl></div>${item.metadataWarning ? `<p class="unit-warning"><strong>Unit review needed:</strong> ${escapeHtml(item.metadataWarning)}${item.proposedUnit ? ` Proposed label: ${escapeHtml(item.proposedUnit)}.` : ""}</p>` : ""}`;
 }
-$("compareTable").addEventListener("change", renderVariablesForTable);
-$("compareVariable").addEventListener("change", renderYears);
+$("compareTable").addEventListener("change",()=>renderVariablesForTable());
+$("compareVariable").addEventListener("change",()=>renderYears());
 $("compareMode").addEventListener("change", () => { state.compareOffset = 0; resetCompareResults(); });
 $("compareYear").addEventListener("change", () => { state.compareOffset = 0; loadCompareGeoOptions(); loadScanGeoOptions(); });
 
@@ -3722,9 +5282,25 @@ async function loadScanGeoOptions() {
 }
 
 const locationSelectorConfigs={};
-function closeLocationPopovers(except="") { document.querySelectorAll("[data-location-popover]").forEach((item)=>{if(item.id!==except)item.hidden=true;});document.querySelectorAll(".location-selector-trigger").forEach((button)=>{if(button.getAttribute("aria-controls")!==except)button.setAttribute("aria-expanded","false");}); }
-document.addEventListener("click",(event)=>{if(!event.target.closest(".location-selector"))closeLocationPopovers();});
-document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeLocationPopovers();});
+function setHypercubeLocationPopoverOpen(open,{focusSearch=false,returnFocus=false}={}) {
+  state.hypercubeLocationPopoverOpen=Boolean(open);
+  const popover=$("hypercubeLocationPopover"),trigger=$("hypercubeLocationTrigger");
+  if(popover)popover.hidden=!state.hypercubeLocationPopoverOpen;
+  if(trigger)trigger.setAttribute("aria-expanded",String(state.hypercubeLocationPopoverOpen));
+  if(focusSearch&&state.hypercubeLocationPopoverOpen)$("hypercubeLocationSearch")?.focus();
+  if(returnFocus&&!state.hypercubeLocationPopoverOpen)trigger?.focus();
+}
+function closeLocationPopovers(except="",{returnFocus=false}={}) {
+  const focusedTrigger=[...document.querySelectorAll(".location-selector-trigger[aria-expanded='true']")].find((button)=>button.getAttribute("aria-controls")!==except);
+  document.querySelectorAll("[data-location-popover]").forEach((item)=>{if(item.id!==except)item.hidden=true;});
+  document.querySelectorAll(".location-selector-trigger").forEach((button)=>{if(button.getAttribute("aria-controls")!==except)button.setAttribute("aria-expanded","false");});
+  if(except!=="hypercubeLocationPopover")state.hypercubeLocationPopoverOpen=false;
+  if(returnFocus)focusedTrigger?.focus();
+}
+function eventInsideLocationPopover(event){const target=event.target;return Boolean(target?.closest?.(".location-selector-trigger")||target?.closest?.("[data-location-popover]"));}
+document.addEventListener("pointerdown",(event)=>{if(!eventInsideLocationPopover(event))closeLocationPopovers();},true);
+document.addEventListener("focusin",(event)=>{if(!eventInsideLocationPopover(event))closeLocationPopovers();});
+document.addEventListener("keydown",(event)=>{if(event.key==="Escape"&&document.querySelector(".location-selector-trigger[aria-expanded='true']")){event.preventDefault();closeLocationPopovers("",{returnFocus:true});}});
 function configureLocationSelector(config){locationSelectorConfigs[config.prefix]=config;renderLocationSelector(config.prefix);}
 function renderLocationSelector(prefix,open=false,focusSearch=false){
   const config=locationSelectorConfigs[prefix],container=$(config.containerId);if(!config||!container)return;
@@ -3736,8 +5312,7 @@ function renderLocationSelector(prefix,open=false,focusSearch=false){
   const popoverId=`${prefix}LocationPopover`;
   container.innerHTML=`<div class="location-selector"><label>Location level<select id="${prefix}LocationLevel"><option value="">${config.allowAll?"All locations":"Choose a level"}</option>${levels.map((item)=>`<option value="${escapeHtml(item.field)}" ${item.field===config.field?"selected":""}>${escapeHtml(item.label)}</option>`).join("")}</select></label><div class="location-selector-field"><span class="field-label">Locations</span><button id="${prefix}LocationTrigger" class="location-selector-trigger" type="button" aria-haspopup="dialog" aria-controls="${popoverId}" aria-expanded="${open}" ${level?"":"disabled"}>${escapeHtml(summary)}</button><div id="${popoverId}" class="location-popover" data-location-popover ${open?"":"hidden"}><div class="location-popover-toolbar"><input id="${prefix}LocationSearch" type="search" value="${escapeHtml(config.search||"")}" placeholder="Search ${escapeHtml((level?.label||"locations").toLowerCase())}"><div class="location-popover-actions"><button id="${prefix}SelectVisible" class="text-button" type="button">Select visible</button><button id="${prefix}ClearLocations" class="text-button" type="button">Clear</button></div></div><div class="location-popover-list">${visible.map((item)=>`<label class="check-option"><input type="checkbox" data-location-prefix="${prefix}" value="${escapeHtml(item.value)}" ${config.values.has(item.value)?"checked":""}><span>${escapeHtml(item.label)}</span></label>`).join("")||`<p class="muted">No matching locations.</p>`}</div></div></div>${config.note?`<p class="location-selector-note">${escapeHtml(config.note)}</p>`:""}</div>`;
   $(prefix+"LocationLevel").addEventListener("change",(event)=>{const value=event.target.value;config.field=value;config.search="";config.setField(value);config.values.clear();config.setSearch("");config.onChange();renderLocationSelector(prefix);});
-  $(prefix+"LocationTrigger").addEventListener("click",(event)=>{event.stopPropagation();const popover=$(popoverId),willOpen=popover.hidden;closeLocationPopovers(willOpen?popoverId:"");popover.hidden=!willOpen;event.currentTarget.setAttribute("aria-expanded",String(willOpen));if(willOpen)$(prefix+"LocationSearch").focus();});
-  $(popoverId).addEventListener("click",(event)=>event.stopPropagation());
+  $(prefix+"LocationTrigger").addEventListener("click",(event)=>{const popover=$(popoverId),willOpen=popover.hidden;closeLocationPopovers(willOpen?popoverId:"");popover.hidden=!willOpen;event.currentTarget.setAttribute("aria-expanded",String(willOpen));if(willOpen)$(prefix+"LocationSearch").focus();});
   $(prefix+"LocationSearch").addEventListener("input",(event)=>{config.search=event.target.value;config.setSearch(config.search);renderLocationSelector(prefix,true,true);});
   container.querySelectorAll(`[data-location-prefix="${prefix}"]`).forEach((box)=>box.addEventListener("change",()=>{box.checked?config.values.add(box.value):config.values.delete(box.value);config.onChange();renderLocationSelector(prefix,true); }));
   $(prefix+"SelectVisible").addEventListener("click",()=>{visible.forEach((item)=>config.values.add(item.value));config.onChange();renderLocationSelector(prefix,true);});
@@ -3776,9 +5351,10 @@ function iqrComparison(reference, comparison, referenceLabel, comparisonLabel) {
 function syncSingleDatastoreControls() {
   const single = state.comparisonIds.length === 1;
   $("runComparison").textContent = single ? "Update View" : "Update Comparison";
-  ["changedOnly","directionalDeltas","findChangedOutputs","generateDashboard"].forEach((id) => { $(id).disabled = state.comparisonIds.length < 2; });
+  ["changedOnly","directionalDeltas","findChangedOutputs"].forEach((id) => { $(id).disabled = state.comparisonIds.length < 2; });
   if (single) { $("changedOnly").checked = false; $("directionalDeltas").checked = false; }
   renderChangeDiscoveryControls();
+  syncDashboardGenerateAvailability();
 }
 $("showCompareStats").addEventListener("change",()=>state.lastComparison&&renderComparisonStats(state.lastComparison));
 $("directionalDeltas").addEventListener("change",()=>state.lastComparison&&renderComparison(state.lastComparison));
@@ -3815,7 +5391,7 @@ async function runChangeScan() {
   if(state.comparisonIds.length<2)return notify("Load comparison results first.","error");
   const useSelected=state.comparisonScanScope==="selected";
   if(useSelected&&(!state.scanFilterField||!state.scanFilterValues.size))return notify("Select at least one location or switch the scan scope to All locations.","error");
-  const [reference,...comparisons]=state.comparisonIds, title=useSelected?"Finding changes in selected locations":"Finding changed outputs";
+  const [reference,...comparisons]=state.comparisonIds, title=useSelected?"Finding changes in selected locations":"Finding all changes";
   try{
     startCompareActivity(title,"Checking saved scan results. The first scan may need to prepare reusable comparison caches from the workspace RDA files.");
     const operation=await post("/api/comparison/scans/start",{reference,comparisons,year:$("compareYear").value,filterField:useSelected?state.scanFilterField:"",filterValues:useSelected?[...state.scanFilterValues]:[]});
@@ -3955,6 +5531,8 @@ async function saveBackendExport(kind, paramsOverride=null, filenameOverride="")
     "comparison-map-csv":{params:comparisonMapExportParams,filename:compareExportFilename("comparison map data","csv"),route:"/api/comparison/export-map-csv"},
     "dashboard-pdf":{params:dashboardExportParams,filename:compareExportFilename("percent-change chart","pdf"),route:"/api/comparison/export-dashboard-pdf"},
     "dashboard-csv":{params:dashboardExportParams,filename:compareExportFilename("percent-change chart","csv"),route:"/api/comparison/export-dashboard-csv"},
+    "hypercube-analysis-csv":{params:()=>new URLSearchParams({payload:JSON.stringify(hypercubeAnalysisRequest())}),filename:compareExportFilename("hypercube analysis","csv"),route:"/api/hypercube-analysis/export.csv"},
+    "hypercube-case-zip":{params:()=>new URLSearchParams(),filename:"hypercube-case.zip",route:"/api/hypercube-exports/download"},
   }[kind];
   if(!configuration)return;
   const query=(paramsOverride||configuration.params()).toString(),filename=filenameOverride||configuration.filename,invoke=window.__TAURI_INTERNALS__?.invoke;
@@ -3965,9 +5543,10 @@ async function saveBackendExport(kind, paramsOverride=null, filenameOverride="")
 function dashboardExportParams(){const settings=dashboardDisplaySettings(),palette=comparisonPalettes().chart;return new URLSearchParams({dashboardToken:state.dashboardPayload?.dashboardToken||"",sortBy:settings.sortBy,displayMode:settings.displayMode,threshold:String(settings.threshold),count:String(settings.count),hideZero:String(settings.hideZero),increaseColor:palette.increase,decreaseColor:palette.decrease,neutralColor:palette.neutral});}
 
 function workbookRequest(kind, override={}) {
+  if(kind==="hypercube-analysis")return{kind,analysisRequest:override.analysisRequest||hypercubeAnalysisRequest()};
   if(kind==="full-variables")return{kind,format:override.format,reference:state.comparisonIds[0],comparisons:state.comparisonIds.slice(1),year:$("fullExportYear").value,variableKeys:[...state.fullExportVariableKeys]};
   if(kind==="dashboard")return{kind,dashboardToken:state.dashboardPayload?.dashboardToken||"",...dashboardDisplaySettings(),palette:comparisonPalettes().chart};
-  if(kind==="comparison-map")return{kind,mapToken:state.mapPayload?.mapToken||"",scopeIds:[...comparisonMapScopeIds()],scopeLabel:"Project geography"};
+  if(kind==="comparison-map")return override.request||{kind,mapToken:state.mapPayload?.mapToken||"",scopeIds:[...comparisonMapScopeIds()],scopeLabel:"Project geography"};
   if (kind === "change-scan") {
     const [reference,...comparisons]=state.comparisonIds;
     return {kind,reference,comparisons,year:override.result?.year||$("compareYear").value,filterField:override.result?.filterField||"",filterValues:override.result?.filterValues||[],scanId:override.scanId||""};
@@ -3976,22 +5555,24 @@ function workbookRequest(kind, override={}) {
 }
 
 async function exportArtifact(kind, override={}) {
-  if(kind==="dashboard"){
-    if(!state.dashboardPayload?.dashboardToken||state.dashboardDirty)return notify("Generate the chart before exporting it.","error");
+  if(kind==="hypercube-analysis"){
+    if(!override.request&&!state.hypercubeAnalysis.matrix)return notify("Update the Hypercube analysis before exporting it.","error");
+  } else if(kind==="dashboard"){
+    if(!override.request&&(!state.dashboardPayload?.dashboardToken||state.dashboardDirty))return notify("Generate the chart before exporting it.","error");
   } else if(kind==="comparison-map") {
-    if(!state.mapPayload?.mapToken||state.mapDirty)return notify("Generate the map before exporting it.","error");
+    if(!override.request&&(!state.mapPayload?.mapToken||state.mapDirty))return notify("Generate the map before exporting it.","error");
   } else if (kind === "change-scan") {
     if (!override.scanId || !override.result) return notify("Prepare the changed-output scan before exporting.", "error");
   } else if(kind==="full-variables"){
-    if(!state.fullExportVariableKeys.size)return notify("Select at least one output to export.","error");
-  } else if (!state.lastComparison) {
+    if(!override.request&&!state.fullExportVariableKeys.size)return notify("Select at least one output to export.","error");
+  } else if (!override.request&&!state.lastComparison) {
     return notify("Run a comparison before exporting the current view.", "error");
   }
   $("compareExportDialog").close();
-  const isZip=kind==="full-variables"&&override.format==="csv-zip",artifactLabel=isZip?"CSV ZIP":kind==="comparison-map"?"map workbook":"Excel workbook";
+  const isZip=kind==="full-variables"&&override.format==="csv-zip",artifactLabel=isZip?"CSV ZIP":kind==="comparison-map"?"map workbook":kind==="hypercube-analysis"?"Hypercube analysis workbook":"Excel workbook";
   startCompareActivity(`Preparing ${artifactLabel}`, "Querying the selected comparison data.");
   try {
-    const operation=await post("/api/comparison/exports/start",workbookRequest(kind,override)); state.comparisonExportOperationId=operation.id;
+    const operation=await post("/api/comparison/exports/start",override.request||workbookRequest(kind,override)); state.comparisonExportOperationId=operation.id;
     let status=operation;
     while(["waiting","running"].includes(status.state)){
       setCompareActivityPhase(status.phase==="workbook"?`Formatting ${artifactLabel}`:isZip?"Packaging CSV files":"Querying comparison data",status.message||`Preparing ${artifactLabel}.`);
@@ -4014,37 +5595,40 @@ async function exportArtifact(kind, override={}) {
   }finally{state.comparisonExportOperationId="";}
 }
 
-async function prepareChangedOutputExport(scope,format){
-  const selected=scope==="selected",filterField=selected?state.exportFilterField:"",filterValues=selected?[...state.exportFilterValues]:[];
+async function prepareChangedOutputExport(scope,format,snapshot=null){
+  const selected=scope==="selected",filterField=snapshot?.filterField??(selected?state.exportFilterField:""),filterValues=snapshot?.filterValues??(selected?[...state.exportFilterValues]:[]);
   if(selected&&(!filterField||!filterValues.length))return notify("Choose at least one export location.","error");
   $("compareExportDialog").close();startCompareActivity("Preparing changed-output export","Checking the scan cache.");
   try{
-    const [reference,...comparisons]=state.comparisonIds,operation=await post("/api/comparison/scans/start",{reference,comparisons,year:$("compareYear").value,filterField,filterValues});state.comparisonScanOperationId=operation.id;let status=operation;
+    const [reference,...comparisons]=snapshot?.ids||state.comparisonIds,year=snapshot?.year||$("compareYear").value,operation=await post("/api/comparison/scans/start",{reference,comparisons,year,filterField,filterValues});state.comparisonScanOperationId=operation.id;let status=operation;
     while(["waiting","running"].includes(status.state)){const progress=status.progress||{};setCompareActivityPhase("Preparing changed-output export",progress.total?`Scanning ${progress.completed||0} of ${progress.total}${progress.table?`: ${progress.table} / ${progress.variable}`:""}`:status.message||"Preparing scan.");await new Promise((resolve)=>setTimeout(resolve,500));status=await request(`/api/comparison/scans/status?id=${encodeURIComponent(operation.id)}`);}
     if(status.state==="cancelled")throw new DOMException("Stopped","AbortError");if(status.state!=="succeeded")throw new Error(status.message||"Changed-output scan failed");
     finishCompareActivity("succeeded","Changed-output data ready",status.cached?"Loaded a matching cached scan.":"The changed-output scan completed.");
-    if(format==="csv")return saveBackendExport("comparison-scan-csv",changeSummaryParams(operation.id,status.result),compareExportFilename(`${scope} locations changed outputs`,"csv"));
-    return exportArtifact("change-scan",{scanId:operation.id,result:status.result});
+    const params=new URLSearchParams({reference,comparisons:comparisons.join(","),year:status.result?.year||year,filterField:status.result?.filterField||filterField,scanId:operation.id});if((status.result?.filterValues||filterValues).length)params.set("filterValue",(status.result?.filterValues||filterValues).join("|"));
+    if(format==="csv")return saveBackendExport("comparison-scan-csv",params,compareExportFilename(`${scope} locations changed outputs`,"csv"));
+    return exportArtifact("change-scan",{scanId:operation.id,result:status.result,request:{kind:"change-scan",reference,comparisons,year,filterField,filterValues,scanId:operation.id}});
   }catch(error){if(state.compareActivity?.status==="running")finishCompareActivity("failed",error.name==="AbortError"?"Export stopped":"Export failed",error.name==="AbortError"?"The export was stopped.":error.message);if(error.name!=="AbortError")notify(error.message,"error");}
   finally{state.comparisonScanOperationId="";}
 }
 
-$("exportCurrentWorkbook").addEventListener("click",()=>exportArtifact("current"));
+$("exportCurrentWorkbook").addEventListener("click",()=>enqueueArtifactExport("Compare Excel","current"));
 function startVisibleBackendExport(kind) {
   $("compareExportDialog").close();
-  saveBackendExport(kind).catch((error)=>notify(error.message||String(error),"error"));
+  const params=kind==="comparison-current-csv"?comparisonExportParams(false):comparisonExportParams(true);
+  enqueueBackendExport("Compare CSV",kind,params);
 }
 $("exportCurrentComparison").addEventListener("click",()=>startVisibleBackendExport("comparison-current-csv"));
-$("exportAllChangedCsv").addEventListener("click",()=>prepareChangedOutputExport("all","csv"));
-$("exportAllChangedWorkbook").addEventListener("click",()=>prepareChangedOutputExport("all","xlsx"));
-$("exportSelectedChangedCsv").addEventListener("click",()=>prepareChangedOutputExport("selected","csv"));
-$("exportSelectedChangedWorkbook").addEventListener("click",()=>prepareChangedOutputExport("selected","xlsx"));
+function enqueueChangedOutputExport(scope,format){const selected=scope==="selected",snapshot={ids:[...state.comparisonIds],year:$("compareYear").value,filterField:selected?state.exportFilterField:"",filterValues:selected?[...state.exportFilterValues]:[]};enqueueExport(`Changed outputs ${format.toUpperCase()}`,()=>prepareChangedOutputExport(scope,format,snapshot));}
+$("exportAllChangedCsv").addEventListener("click",()=>enqueueChangedOutputExport("all","csv"));
+$("exportAllChangedWorkbook").addEventListener("click",()=>enqueueChangedOutputExport("all","xlsx"));
+$("exportSelectedChangedCsv").addEventListener("click",()=>enqueueChangedOutputExport("selected","csv"));
+$("exportSelectedChangedWorkbook").addEventListener("click",()=>enqueueChangedOutputExport("selected","xlsx"));
 $("fullExportYear").addEventListener("change",()=>{state.fullExportVariableKeys.clear();renderFullExportVariableList();});
 $("fullExportVariableSearch").addEventListener("input",(event)=>{state.fullExportVariableQuery=event.target.value;renderFullExportVariableList();});
 $("selectFullExportVariables").addEventListener("click",()=>{document.querySelectorAll("[data-full-export-variable]").forEach((box)=>state.fullExportVariableKeys.add(box.dataset.fullExportVariable));renderFullExportVariableList();});
 $("clearFullExportVariables").addEventListener("click",()=>{state.fullExportVariableKeys.clear();renderFullExportVariableList();});
-$("exportFullVariablesZip").addEventListener("click",()=>exportArtifact("full-variables",{format:"csv-zip"}));
-$("exportFullVariablesWorkbook").addEventListener("click",()=>exportArtifact("full-variables",{format:"xlsx"}));
+$("exportFullVariablesZip").addEventListener("click",()=>enqueueArtifactExport("Compare CSV ZIP","full-variables",{format:"csv-zip"}));
+$("exportFullVariablesWorkbook").addEventListener("click",()=>enqueueArtifactExport("Compare Excel","full-variables",{format:"xlsx"}));
 
 function humanBytes(value) {
   const bytes=Number(value)||0, units=["B","KB","MB","GB","TB"]; let amount=bytes,index=0;
@@ -4056,20 +5640,118 @@ function runtimeProfile() {
   return (state.desktop?.runtimeProfiles || []).find((item) => item.id === state.desktop?.activeRuntimeProfileId);
 }
 
+function runtimeSetupSnapshot() {
+  const runtime = state.data?.runtime || {};
+  const profile = runtimeProfile();
+  const native = runtime.adapter === "native";
+  const verified = Boolean(profile?.verified && runtime.imagePresent && (native || (runtime.digestMatches !== false && runtime.provenanceMatches !== false)));
+  return {runtime, profile, native, verified};
+}
+
+function setRuntimeSetupStatus(element, message, tone = "") {
+  if (!element) return;
+  const icon = tone === "success" ? "✓" : tone === "error" ? "!" : tone === "progress" ? "…" : "";
+  element.className = `runtime-setup-status ${tone}`.trim();
+  element.innerHTML = icon ? `<span class="runtime-setup-status-icon" aria-hidden="true">${icon}</span><span>${escapeHtml(message)}</span>` : escapeHtml(message);
+}
+
+function styleRuntimeAction(button, {hidden = false, enabled = true, label, primary = false, disabledReason = ""} = {}) {
+  if (!button) return;
+  button.hidden = hidden;
+  if (label) button.textContent = label;
+  button.classList.toggle("secondary", !primary);
+  setButtonAvailability(button, enabled, disabledReason);
+}
+
+function renderRuntimeSetupControls() {
+  const {runtime, native, verified} = runtimeSetupSnapshot();
+  const busy = state.runtimeSetupPhase === "installing" || state.runtimeSetupPhase === "verifying";
+  if (native) {
+    const canVerify = Boolean(runtime.imagePresent && runtime.executable);
+    styleRuntimeAction($("onboardingVerify"), {enabled:canVerify, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose the runtime paths first."});
+    styleRuntimeAction($("settingsVerifyRuntime"), {enabled:canVerify, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose the runtime paths first."});
+    return;
+  }
+
+  const imagePresent = Boolean(runtime.imagePresent);
+  const canVerify = Boolean(runtime.running && imagePresent && !busy);
+  const failed = state.runtimeSetupPhase === "failed";
+  const message = state.runtimeSetupMessage || (!verified && runtime.error) || (verified
+    ? "Runtime installed, verified, and connected."
+    : imagePresent
+      ? "The runtime image is installed but still needs verification."
+      : !runtime.installed
+        ? "Docker Desktop is not installed. Install it before adding the VisionEval runtime."
+        : runtime.running
+          ? "Docker is ready. Install the pinned VisionEval runtime to enable runs."
+          : "Docker Desktop is installed but stopped. Install runtime will start it and continue.");
+  const tone = busy ? "progress" : verified ? "success" : failed || runtime.error ? "error" : "";
+  setRuntimeSetupStatus($("onboardingRuntimeStatus"), message, tone);
+  setRuntimeSetupStatus($("settingsRuntimeStatus"), message, tone);
+
+  const installLabel = busy && state.runtimeSetupPhase === "installing" ? "Installing…" : failed || imagePresent ? "Retry installation" : "Install runtime";
+  const installEnabled = Boolean(runtime.installed && !busy);
+  const installReason = !runtime.installed ? "Install Docker Desktop before installing the VisionEval runtime." : busy ? "Runtime setup is in progress." : "";
+  styleRuntimeAction($("onboardingInstallRuntime"), {hidden:verified, enabled:installEnabled, label:installLabel, primary:!imagePresent, disabledReason:installReason});
+  styleRuntimeAction($("settingsInstallRuntime"), {hidden:verified, enabled:installEnabled, label:installLabel, primary:!imagePresent, disabledReason:installReason});
+
+  const verifyLabel = busy && state.runtimeSetupPhase === "verifying" ? "Verifying…" : verified ? "Verify again" : "Verify runtime";
+  const verifyReason = !runtime.running ? "Start Docker Desktop before verifying the runtime." : !imagePresent ? "Install the pinned runtime image first." : busy ? "Runtime setup is in progress." : "";
+  styleRuntimeAction($("onboardingVerify"), {hidden:!imagePresent, enabled:canVerify, label:verifyLabel, primary:imagePresent&&!verified, disabledReason:verifyReason});
+  styleRuntimeAction($("settingsVerifyRuntime"), {hidden:!imagePresent, enabled:canVerify, label:verifyLabel, primary:imagePresent&&!verified, disabledReason:verifyReason});
+
+  if ($("onboardingSkip")) {
+    $("onboardingSkip").hidden = verified;
+    setButtonAvailability($("onboardingSkip"), !busy, busy ? "Runtime setup is in progress." : "");
+  }
+  if ($("onboardingRuntimeGuide")) setButtonAvailability($("onboardingRuntimeGuide"), !busy, busy ? "Runtime setup is in progress." : "");
+  if ($("onboardingStartDocker")) $("onboardingStartDocker").hidden = verified || !runtime.installed || runtime.running;
+  if ($("settingsStartDocker")) $("settingsStartDocker").hidden = verified || !runtime.installed || runtime.running;
+}
+
 function maybeShowOnboarding() {
-  if (!window.__TAURI_INTERNALS__?.invoke || state.onboardingShown || (state.desktop?.onboardingVersion || 0) >= 1) return;
+  if (!window.__TAURI_INTERNALS__?.invoke || state.desktop?.upgradeNoticePending || state.onboardingShown || (state.desktop?.onboardingVersion || 0) >= 1) return;
   state.onboardingShown = true;
-  const runtime=state.data?.runtime||{};
-  const native=runtime.adapter==="native",profile=runtimeProfile();
-  $("onboardingNativePaths").hidden=!native;
-  $("onboardingVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
-  $("onboardingVeHome").value=profile?.veHomePath||runtime.veHome||runtime.image||"";
-  $("onboardingRscript").value=profile?.rscriptPath||runtime.executable||"";
+  const {runtime,native,profile}=runtimeSetupSnapshot();
+  if(native&&$("onboardingNativePaths")){
+    $("onboardingNativePaths").hidden=false;
+    $("onboardingVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
+    $("onboardingVeHome").value=profile?.veHomePath||runtime.veHome||runtime.image||"";
+    $("onboardingRscript").value=profile?.rscriptPath||runtime.executable||"";
+  }
   $("onboardingRuntimeHelp").textContent=native?"Choose the VE_RUNTIME folder used to launch VisionEval. Workbench will detect VE_HOME and its matching Rscript when possible.":"macOS uses the verified VisionEval Docker runtime.";
-  $("onboardingRuntimeStatus").textContent=native?(runtime.error||((runtime.imagePresent&&runtime.executable)?"Runtime paths detected. Verify them to enable runs.":"Choose VE_RUNTIME first. You can review or override the detected VE_HOME and Rscript paths.")):runtime.error||(!runtime.installed?"Docker Desktop is not installed. You can skip and set it up later.":!runtime.running?"Docker Desktop is installed but its engine is stopped. Start Docker Desktop, then verify.":runtime.imagePresent?`Found ${runtime.image}. Verify it to save its digest.`:"No compatible local Docker runtime was found. Open Runtime setup for installation commands.");
-  $("onboardingStartDocker").hidden=native||!runtime.installed||runtime.running;
-  $("onboardingVerify").disabled=native?!($("onboardingVeRuntime").value&&$("onboardingVeHome").value&&$("onboardingRscript").value):!(runtime.running&&runtime.imagePresent);
+  $("onboardingRuntimeStatus").textContent=native?(runtime.error||((runtime.imagePresent&&runtime.executable)?"Runtime paths detected. Verify them to enable runs.":"Choose VE_RUNTIME first. You can review or override the detected VE_HOME and Rscript paths.")):runtime.error||(!runtime.installed?"Docker Desktop is not installed. You can skip and set it up later.":runtime.imagePresent?`Found ${runtime.image}. Verify it or select Install runtime to reinstall the pinned image.`:runtime.running?"Docker is ready. Select Install runtime to download, verify, and connect the pinned image.":"Docker Desktop is installed but stopped. Install runtime will start it and continue.");
+  if($("onboardingInstallRuntime"))setButtonAvailability($("onboardingInstallRuntime"),Boolean(runtime.installed),"Install Docker Desktop before installing the VisionEval runtime.");
+  if($("onboardingStartDocker"))$("onboardingStartDocker").hidden=native||!runtime.installed||runtime.running;
+  const canVerify=native?Boolean($("onboardingVeRuntime")?.value&&$("onboardingVeHome")?.value&&$("onboardingRscript")?.value):Boolean(runtime.running&&runtime.imagePresent);
+  setButtonAvailability($("onboardingVerify"),canVerify,native?"Choose the VE_RUNTIME, VE_HOME, and Rscript paths first.":!runtime.running?"Start Docker Desktop, then return to verify the runtime.":"Select Install runtime first, then verify it again if needed.");
+  renderRuntimeSetupControls();
   $("onboardingDialog").showModal();
+}
+
+function maybeShowUpgradeNotice() {
+  if (!window.__TAURI_INTERNALS__?.invoke || !state.desktop?.upgradeNoticePending || state.upgradeNoticeShown) return;
+  state.upgradeNoticeShown = true;
+  const dialog=$("upgradeNoticeDialog");
+  if(!dialog.open)dialog.showModal();
+  $("upgradeReviewAssets").focus();
+}
+
+async function acknowledgeUpgradeNotice() {
+  await window.__TAURI_INTERNALS__.invoke("acknowledge_upgrade_notice");
+  state.desktop.upgradeNoticePending=false;
+}
+
+async function finishUpgradeNotice(action="dismiss") {
+  const dialog=$("upgradeNoticeDialog");
+  try {
+    await acknowledgeUpgradeNotice();
+    if(dialog.open)dialog.close();
+    if(action==="assets")await openSettings("settingsAssets");
+    if(action==="whats-new")await openDocumentationReader("whats-new",$("upgradeReadWhatsNew"));
+  } catch(error) {
+    notify(error.message||String(error),"error");
+  }
 }
 
 function closeWorkspaceMenus(except=null) {
@@ -4093,11 +5775,17 @@ function renderSettingsWorkspaces() {
   document.querySelectorAll("[data-trash-workspace]").forEach((button)=>button.addEventListener("click",async()=>{const item=recents[Number(button.dataset.trashWorkspace)];closeWorkspaceMenus();if(!await confirmWorkbench(`Move ${item.name} to Trash?\n\nThis moves the complete workspace folder, including its projects, assets, runs, and results. You can recover it from Trash until Trash is emptied.`))return;try{await window.__TAURI_INTERNALS__.invoke("trash_workspace",{id:item.id,path:item.path});state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");renderSettingsWorkspaces();notify("Workspace moved to Trash.","success")}catch(error){notify(String(error),"error")}}));
 }
 
-$("onboardingVerify").addEventListener("click",async()=>{setBusy($("onboardingVerify"),true,"Verifying…");try{await verifyAndSaveRuntime();$("onboardingRuntimeStatus").textContent="Runtime verified. This profile will be checked quickly on future launches.";notify("Local runtime profile saved.","success");}catch(error){$("onboardingRuntimeStatus").textContent=error.message;notify(error.message,"error");}finally{setBusy($("onboardingVerify"),false)}});
-$("onboardingStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
+$("onboardingVerify").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).catch(()=>{}));
+if($("onboardingInstallRuntime"))$("onboardingInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget,$("onboardingRuntimeStatus")).catch(()=>{}));
+if($("onboardingStartDocker"))$("onboardingStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
+$("onboardingRuntimeGuide").addEventListener("click",()=>$("runtimeGuideDialog").showModal());
+$("upgradeReviewAssets").addEventListener("click",()=>finishUpgradeNotice("assets"));
+$("upgradeReadWhatsNew").addEventListener("click",()=>finishUpgradeNotice("whats-new"));
+$("upgradeDismiss").addEventListener("click",()=>finishUpgradeNotice());
+$("upgradeNoticeDialog").addEventListener("cancel",event=>{event.preventDefault();finishUpgradeNotice()});
 function updateNativeVerifyAvailability(){
-  $("onboardingVerify").disabled=!($("onboardingVeRuntime").value&&$("onboardingVeHome").value&&$("onboardingRscript").value);
-  $("settingsVerifyRuntime").disabled=!($("settingsVeRuntime").value&&$("settingsVeHome").value&&$("settingsRscript").value);
+  if($("onboardingVeRuntime"))$("onboardingVerify").disabled=!($("onboardingVeRuntime").value&&$("onboardingVeHome").value&&$("onboardingRscript").value);
+  if($("settingsVeRuntime"))$("settingsVerifyRuntime").disabled=!($("settingsVeRuntime").value&&$("settingsVeHome").value&&$("settingsRscript").value);
 }
 
 function renderAggregateComparison(payload) {
@@ -4126,125 +5814,91 @@ async function discoverNativePaths(prefix){
   notify(detected.veHome&&detected.rscript?"VE_HOME and Rscript were detected. Review them, then verify.":"VE_RUNTIME selected. Review the advanced paths before verification.",detected.veHome&&detected.rscript?"success":"");
 }
 async function chooseNativePath(inputId, command, discoverPrefix=""){try{const path=await window.__TAURI_INTERNALS__.invoke(command);if(path){$(inputId).value=path;if(discoverPrefix)await discoverNativePaths(discoverPrefix);else updateNativeVerifyAvailability()}}catch(error){notify(String(error),"error")}}
-$("onboardingChooseVeRuntime").addEventListener("click",()=>chooseNativePath("onboardingVeRuntime","choose_folder","onboarding"));
-$("onboardingChooseVeHome").addEventListener("click",()=>chooseNativePath("onboardingVeHome","choose_folder"));
-$("onboardingChooseRscript").addEventListener("click",()=>chooseNativePath("onboardingRscript","choose_rscript"));
-$("settingsChooseVeRuntime").addEventListener("click",()=>chooseNativePath("settingsVeRuntime","choose_folder","settings"));
-$("settingsChooseVeHome").addEventListener("click",()=>chooseNativePath("settingsVeHome","choose_folder"));
-$("settingsChooseRscript").addEventListener("click",()=>chooseNativePath("settingsRscript","choose_rscript"));
-$("onboardingSkip").addEventListener("click",()=>{$("onboardingRuntimeStatus").textContent="Runtime setup skipped. Run remains unavailable; all other tabs continue to work.";notify("Runtime setup skipped for now.")});
+if($("onboardingChooseVeRuntime"))$("onboardingChooseVeRuntime").addEventListener("click",()=>chooseNativePath("onboardingVeRuntime","choose_folder","onboarding"));
+if($("onboardingChooseVeHome"))$("onboardingChooseVeHome").addEventListener("click",()=>chooseNativePath("onboardingVeHome","choose_folder"));
+if($("onboardingChooseRscript"))$("onboardingChooseRscript").addEventListener("click",()=>chooseNativePath("onboardingRscript","choose_rscript"));
+if($("settingsChooseVeRuntime"))$("settingsChooseVeRuntime").addEventListener("click",()=>chooseNativePath("settingsVeRuntime","choose_folder","settings"));
+if($("settingsChooseVeHome"))$("settingsChooseVeHome").addEventListener("click",()=>chooseNativePath("settingsVeHome","choose_folder"));
+if($("settingsChooseRscript"))$("settingsChooseRscript").addEventListener("click",()=>chooseNativePath("settingsRscript","choose_rscript"));
+$("onboardingSkip").addEventListener("click",()=>{state.runtimeSetupPhase="idle";state.runtimeSetupMessage="Runtime setup skipped. Run remains unavailable; all other tabs continue to work.";renderRuntimeSetupControls();notify("Runtime setup skipped for now.")});
 $("finishOnboarding").addEventListener("click",async()=>{try{await window.__TAURI_INTERNALS__.invoke("complete_onboarding");state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");$("onboardingDialog").close();notify("Workspace setup complete.","success");renderAll()}catch(error){notify(String(error),"error")}});
 
-function settingsFormValues() {
-  const optionalPrecision=(id)=>$(id).value===""?null:Number($(id).value);
-  return {
-    workspace: {
-      defaultTemplateId:$("defaultTemplate").value,
-      defaultInputLibraryId:$("defaultLibrary").value,
-      defaultInputExplanationId:$("defaultInputExplanations").value,
-      retainFullExports:$("retainExports").checked,
-      checkVisionEvalUpdates:false,
-      numericPrecision:{default:Number($("precisionDefault").value),singleFile:optionalPrecision("precisionSingleFile"),batch:optionalPrecision("precisionBatch"),output:optionalPrecision("precisionOutput"),percentage:optionalPrecision("precisionPercentage")},
-    },
-    desktop: {
-      theme:$("appearanceSetting").value,
-      defaultRunMode:$("defaultRunMode").value,
-      memoryLimitGb:$("memoryLimit").value===""?null:Number($("memoryLimit").value),
-      notificationsEnabled:$("notificationsEnabled").checked,
-      notificationSuccessThresholdSeconds:Number($("notificationSuccessThreshold").value||60),
-      autoStartDocker:$("autoStartDocker").checked,
-      comparisonPalettes:readComparisonPalettes(),
-      masterComparisonPalette:masterComparisonPalette(),
-      useMasterComparisonPalette:Boolean(state.desktop.useMasterComparisonPalette),
-    },
-  };
-}
-
-function settingsSaveOutcome(before, after, native) {
-  if (!before || JSON.stringify(before)===JSON.stringify(after)) return {message:"No settings changes to save."};
-  const previous={...before.desktop}, current={...after.desktop};
-  const launchOnly=[], refreshRequired=[];
-  if(!native && previous.autoStartDocker!==current.autoStartDocker)launchOnly.push("runtime startup preference");
-  if(!native && previous.memoryLimitGb!==current.memoryLimitGb)refreshRequired.push("process memory limit");
-  for(const key of ["autoStartDocker","memoryLimitGb"]){delete previous[key];delete current[key]}
-  const immediate=JSON.stringify(before.workspace)!==JSON.stringify(after.workspace)||JSON.stringify(previous)!==JSON.stringify(current);
-  if(!launchOnly.length&&!refreshRequired.length)return {message:"Settings saved and applied."};
-  const parts=["Settings saved."];
-  if(immediate)parts.push("Other changes were applied immediately.");
-  if(launchOnly.length)parts.push(`${launchOnly.join(" and ")} will be used the next time Workbench opens.`);
-  if(refreshRequired.length)parts.push(`Refresh Workbench to apply the ${refreshRequired.join(" and ")}.`);
-  return {message:parts.join(" "),refreshRequired};
-}
-
-function settingsRefreshAction(setting="saved backend settings") {
-  const blocked=Number(state.desktop?.blockingJobCount||0)>0;
-  return {label:"Refresh Workbench",handler:refreshWorkbenchFromSettings,disabled:blocked,disabledReason:blocked?"Refresh is unavailable while runs are active or waiting.":"",setting};
-}
-
-async function refreshWorkbenchFromSettings() {
-  const button=$("settingsRefreshWorkbench");
-  try {
-    state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");
-    if(Number(state.desktop?.blockingJobCount||0)>0){
-      showSettingsNotice("Refresh is unavailable while runs are active or waiting.","error",settingsRefreshAction());
-      return;
-    }
-    setBusy(button,true,"Refreshing…");
-    showSettingsNotice("Refreshing the Windows backend and reconnecting Workbench…","");
-    const url=await window.__TAURI_INTERNALS__.invoke("restart_backend");
-    window.location.replace(url);
-  } catch(error) {
-    showSettingsNotice(`Workbench could not refresh: ${String(error)}`,"error",settingsRefreshAction());
-  } finally {
-    if(button&&!button.hidden)setBusy(button,false);
+function updateParallelMemoryGuide(){
+  const runs=Math.max(1,Number($("maxConcurrentRuns")?.value||1));
+  const runtime=state.data?.runtime||{},availableBytes=Number(runtime.dockerMemoryBytes||0),availableGb=availableBytes/1024**3;
+  if(runtime.adapter==="native"){
+    $("dockerMemory").textContent="Windows native runs are serialized so the connected VE_Runtime is used by only one run at a time.";
+    $("parallelMemoryGuide").textContent="Standard and Hypercube batches share one FIFO runtime slot. Later batches begin automatically when the active batch finishes or is stopped.";
+    $("parallelMemoryGuide").classList.remove("warning-notice");
+    $("memoryLimitGuide").textContent="Docker memory limits do not apply to the Windows native runtime. Monitor Windows memory and disk use for large regional models.";
+    $("memoryLimitGuide").classList.remove("warning-text");
+    return;
+  }
+  const formatGb=(value)=>Number(value).toLocaleString(undefined,{maximumFractionDigits:1});
+  const runWords=["Zero","One","Two","Three","Four","Five","Six","Seven","Eight"];
+  const runLabel=runWords[runs]||String(runs);
+  const mpoLow=runs*2.5,mpoHigh=runs*3.5;
+  const allocationAssessment=availableBytes?(availableGb<mpoLow?`The current ${humanBytes(availableBytes)} Docker allocation is below the planning range; runs may fail or be killed for memory pressure.`:availableGb<=mpoHigh?`The current ${humanBytes(availableBytes)} Docker allocation is tight.`:`The current ${humanBytes(availableBytes)} Docker allocation is above the planning range, although actual use varies.`):"Docker Desktop allocation is unavailable while its engine is stopped.";
+  $("dockerMemory").textContent=runtime.adapter==="native"?"Windows native runs are serialized so the connected VE_Runtime is used by only one run at a time.":availableBytes?`Docker Desktop allocation: ${humanBytes(availableBytes)} shared by all active containers.`:"Docker Desktop allocation is unavailable while its engine is stopped.";
+  $("parallelMemoryGuide").textContent=`MPO/regional models: ${runLabel} concurrent MPO run${runs===1?"":"s"} may use approximately ${formatGb(mpoLow)}–${formatGb(mpoHigh)} GB of Docker memory (2.5–3.5 GB per active run). ${allocationAssessment}`;
+  $("parallelMemoryGuide").classList.toggle("warning-notice",Boolean(availableBytes&&availableGb<=mpoHigh));
+  const cap=Number($("memoryLimit")?.value||0),capGuide=$("memoryLimitGuide");
+  if(!cap){
+    capGuide.textContent="No Workbench limit—each run can use the shared Docker allocation. Concurrency reserves no memory.";
+    capGuide.classList.remove("warning-text");
+  }else{
+    const aggregate=cap*runs,capRisk=cap<2.5?" This is below the MPO/regional planning range and may terminate a run.":"";
+    capGuide.textContent=`Workbench passes ${formatGb(cap)} GB as Docker’s --memory limit for each new run. ${runs} run${runs===1?"":"s"} could use up to ${formatGb(aggregate)} GB, but all still share ${availableBytes?humanBytes(availableBytes):"Docker Desktop’s allocation"}. The limit does not reserve memory, does not increase Docker’s allocation, can terminate a run that reaches it, and does not affect containers already running.${capRisk}`;
+    capGuide.classList.toggle("warning-text",Boolean(capRisk||(availableBytes&&aggregate>availableGb)));
   }
 }
-
 async function openSettings(page="settingsWorkspace") {
   if (!window.__TAURI_INTERNALS__?.invoke) return notify("Settings are available in the desktop app.","error");
-  clearSettingsNotice();
   state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");
   state.desktop.comparisonPalettes=storedComparisonPalettes();
   applyComparisonPalettes();
   renderComparisonPaletteSettings();
   const workspaceSettings=state.data?.workspaceSettings||{};
   renderSettingsWorkspaces();
-  const templates=state.data?.templates||[],libraries=state.data?.inputLibraries||[],explanations=state.data?.inputExplanations||[];
-  $("defaultTemplate").innerHTML=`<option value="">No default</option>${templates.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;
-  $("defaultLibrary").innerHTML=`<option value="">No default</option>${libraries.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;
-  $("defaultInputExplanations").innerHTML=`<option value="">Built-in module metadata</option>${explanations.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}`;
-  selectedOption($("defaultTemplate"),workspaceSettings.defaultTemplateId||"");selectedOption($("defaultLibrary"),workspaceSettings.defaultInputLibraryId||"");selectedOption($("defaultInputExplanations"),workspaceSettings.defaultInputExplanationId||"");
+  const libraries=state.data?.inputLibraries||[],explanations=state.data?.inputExplanations||[];
+  $("defaultLibrary").innerHTML=`<option value="">No default</option>${libraries.map(item=>`<option value="${escapeHtml(item.id)}" ${item.pairingStatus === "paired" ? "" : "disabled"}>${escapeHtml(item.name)}${item.pairingStatus === "paired" ? "" : " · package repair required"}</option>`).join("")}`;
+  $("defaultInputExplanations").innerHTML=`<option value="">Built-in module metadata</option>${explanations.map(item=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.familyConflict?" · ⚠ different catalog":""}</option>`).join("")}`;
+  selectedOption($("defaultLibrary"),workspaceSettings.defaultInputLibraryId||"");selectedOption($("defaultInputExplanations"),workspaceSettings.defaultInputExplanationId||"");
   const precision={default:2,singleFile:null,batch:null,output:null,percentage:null,...(workspaceSettings.numericPrecision||{})};
   $("precisionDefault").value=precision.default;
   const precisionOptions=`<option value="">Use default</option>${Array.from({length:9},(_,value)=>`<option value="${value}">${value} decimal place${value===1?"":"s"}</option>`).join("")}`;
   [["precisionSingleFile","singleFile"],["precisionBatch","batch"],["precisionOutput","output"],["precisionPercentage","percentage"]].forEach(([id,key])=>{$(id).innerHTML=precisionOptions;$(id).value=precision[key]==null?"":String(precision[key]);});
   renderInstalledAssetGroups();
   $("retainExports").checked=workspaceSettings.retainFullExports!==false;
-  $("checkVisionEvalUpdates").checked=false;
-  $("appearanceSetting").value=state.desktop.theme||"light";$("notificationsEnabled").checked=Boolean(state.desktop.notificationsEnabled);$("notificationSuccessThreshold").value=String(state.desktop.notificationSuccessThresholdSeconds||60);$("defaultRunMode").value=state.desktop.resources?.defaultRunMode||"queued";$("autoStartDocker").checked=state.desktop.autoStartDocker!==false;$("memoryLimit").value=state.desktop.resources?.memoryLimitGb??"";
+  renderUpdateSettings(state.data?.updates||{...workspaceSettings.updateChecks,statuses:workspaceSettings.updateChecks?.statuses||{}});
+  $("appearanceSetting").value=state.desktop.theme||"system";$("notificationsEnabled").checked=Boolean(state.desktop.notificationsEnabled);$("notificationSuccessThreshold").value=String(state.desktop.notificationSuccessThresholdSeconds||60);$("defaultRunMode").value=state.desktop.resources?.defaultRunMode||"queued";$("autoStartDocker").checked=state.desktop.autoStartDocker!==false;$("memoryLimit").value=state.desktop.resources?.memoryLimitGb??"";
   const runtime=state.data?.runtime||{},profile=runtimeProfile();
   const native=runtime.adapter==="native";
   $("notificationsPlatformLabel").textContent=native?"Show Windows notifications for background work":"Show macOS notifications for background work";
-  $("notificationsPlatformHelp").textContent=`Successful work notifies only after the selected delay. Failures notify immediately. ${native?"Windows":"macOS"} notifications stay silent while Workbench is focused because the status is already visible here.`;
-  $("defaultRunMode").innerHTML=native?'<option value="queued">Queued — one at a time</option>':'<option value="queued">Queued</option><option value="parallel">Parallel</option>';
+  $("notificationsPlatformHelp").textContent=`Successful model runs notify only after the selected delay. Compare and Hypercube operations notify when complete. Failures notify immediately. Other routine ${native?"Windows":"macOS"} notifications stay silent while Workbench is focused.`;
   $("defaultRunMode").value=native?"queued":state.desktop.resources?.defaultRunMode||"queued";
   $("defaultRunMode").disabled=native;
-  $("maxConcurrentRuns").value=native?"1":"2";
-  $("autoStartRuntimeLabel").hidden=native;
-  $("memoryLimitLabel").hidden=native;
-  $("settingsNativePaths").hidden=!native;
-  $("settingsVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
-  $("settingsVeHome").value=profile?.veHomePath||runtime.veHome||runtime.image||"";
-  $("settingsRscript").value=profile?.rscriptPath||runtime.executable||"";
+  $("maxConcurrentRuns").value=String(native?1:(state.desktop.resources?.maxConcurrentRuns||2));
+  $("maxConcurrentRuns").disabled=native;
+  $("autoStartDocker").closest("label").hidden=native;
+  $("memoryLimit").closest("label").hidden=native;
+  if(native&&$("settingsNativePaths")){
+    $("settingsNativePaths").hidden=false;
+    $("settingsVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
+    $("settingsVeHome").value=profile?.veHomePath||runtime.veHome||runtime.image||"";
+    $("settingsRscript").value=profile?.rscriptPath||runtime.executable||"";
+  }
   const digest=profile?.imageDigest||"Not verified";
-  $("settingsRuntimeSummary").innerHTML=[["Adapter",profile?.adapter||"Not configured"],["Platform",profile?`${profile.platform} / ${profile.architecture}`:"—"],["Image",profile?.imageReference||runtime.image||"—"],["Release",`${runtime.imageReleaseTag||"VisionEval"}${runtime.imageRevision?` · ${runtime.imageRevision.slice(0,12)}`:""}`],["Compatibility",runtime.imageCompatibilityPatch?"Workbench compatibility verified":"Not detected"],["Last verified",profile?.verifiedAt||"Never"]].map(([label,value])=>`<div class="runtime-fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`).join("")+`<div class="runtime-fact digest"><small>Digest</small><div class="runtime-digest"><code title="${escapeHtml(digest)}">${escapeHtml(digest)}</code><button id="copyRuntimeDigest" type="button" class="secondary" ${digest==="Not verified"?"disabled":""}>Copy Digest</button></div></div>`;
-  if(native) $("settingsRuntimeSummary").innerHTML=[["Adapter","Native VisionEval"],["Version",profile?.runtimeVersion||"Not verified"],["VE_RUNTIME",profile?.veRuntimePath||runtime.veRuntime||"—"],["VE_HOME",profile?.veHomePath||runtime.veHome||runtime.image||"—"],["Rscript",profile?.rscriptPath||runtime.executable||"—"],["Run mode","Queued / one at a time"],["Last verified",profile?.verifiedAt||"Never"]].map(([label,value])=>`<div class="runtime-fact"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`).join("");
-  $("settingsStartDocker").hidden=native||!runtime.installed||runtime.running;
-  $("settingsVerifyRuntime").disabled=native?!($("settingsVeRuntime").value&&$("settingsVeHome").value&&$("settingsRscript").value):!runtime.running||!runtime.imagePresent;
+  const ready=runtimeSetupSnapshot().verified,statusLabel=ready?'Ready':runtime.installed?'Needs attention':'Not configured',statusClass=ready?'success':runtime.installed?'warning':'neutral',image=profile?.imageReference||runtime.image||'—',shortImage=image.length>54?`${image.slice(0,31)}…${image.slice(-18)}`:image,shortDigest=digest.length>36?`${digest.slice(0,19)}…${digest.slice(-12)}`:digest;
+  $("settingsRuntimeSummary").className='settings-runtime-overview';
+  $("settingsRuntimeSummary").innerHTML=`<section class="runtime-readiness ${statusClass}"><div><small>Runtime status</small><h4>${escapeHtml(statusLabel)}</h4><p>${escapeHtml(ready?'VisionEval is verified and ready for model runs.':runtime.error||'Complete runtime setup and verification before running models.')}</p></div><div class="runtime-primary-facts"><span><small>VisionEval</small><strong>${escapeHtml(native?(profile?.runtimeVersion||'Not verified'):(runtime.imageReleaseTag||'Not verified'))}</strong></span><span><small>Adapter</small><strong>${escapeHtml(native?'Native':profile?.adapter||runtime.adapter||'—')}</strong></span><span><small>Architecture</small><strong>${escapeHtml(profile?.architecture||runtime.hostArchitecture||'—')}</strong></span><span><small>Verified</small><strong>${escapeHtml(profile?.verifiedAt||'Never')}</strong></span></div></section><details class="settings-disclosure"><summary>Image identity</summary><dl class="runtime-detail-list"><dt>Image</dt><dd><code title="${escapeHtml(image)}">${escapeHtml(shortImage)}</code></dd><dt>Digest</dt><dd><code title="${escapeHtml(digest)}">${escapeHtml(shortDigest)}</code> <button id="copyRuntimeDigest" type="button" class="secondary" ${digest==='Not verified'?'disabled':''}>Copy full digest</button></dd><dt>Release</dt><dd>${escapeHtml(runtime.imageReleaseTag||'—')} ${runtime.imageRevision?`· ${escapeHtml(runtime.imageRevision.slice(0,12))}`:''}</dd></dl></details><details class="settings-disclosure"><summary>Verification</summary><p>${escapeHtml(runtime.imageCompatibilityPatch?'Workbench compatibility verified.':'Compatibility has not been verified.')}</p></details><details class="settings-disclosure"><summary>Advanced details</summary><dl class="runtime-detail-list"><dt>Platform</dt><dd>${escapeHtml(profile?`${profile.platform} / ${profile.architecture}`:'—')}</dd>${native?`<dt>VE_RUNTIME</dt><dd>${escapeHtml(profile?.veRuntimePath||runtime.veRuntime||'—')}</dd><dt>VE_HOME</dt><dd>${escapeHtml(profile?.veHomePath||runtime.veHome||'—')}</dd><dt>Rscript</dt><dd>${escapeHtml(profile?.rscriptPath||runtime.executable||'—')}</dd>`:''}</dl></details>`;
+  if($("settingsInstallRuntime"))setButtonAvailability($("settingsInstallRuntime"),Boolean(runtime.installed),"Install Docker Desktop before installing the VisionEval runtime.");
+  if($("settingsStartDocker"))$("settingsStartDocker").hidden=native||!runtime.installed||runtime.running;
+  $("settingsVerifyRuntime").disabled=native?!($("settingsVeRuntime")?.value&&$("settingsVeHome")?.value&&$("settingsRscript")?.value):!runtime.running||!runtime.imagePresent;
   if($("copyRuntimeDigest")) $("copyRuntimeDigest").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(digest);notify("Runtime digest copied.","success")}catch(error){notify("The digest could not be copied.","error")}});
-  $("dockerMemory").textContent=native?"The connected VE_Runtime is reserved for one run at a time.":runtime.dockerMemoryBytes?`The runtime service reports ${humanBytes(runtime.dockerMemoryBytes)} available.`:"Runtime memory information is unavailable while its service is stopped.";
-  $("resourceRuntimeHelp").textContent=native?"Windows manages process memory for the native VE_Runtime connection.":"Resource changes take effect after Workbench refreshes its backend.";
-  switchSettingsPage(page);state.settingsSnapshot=JSON.parse(JSON.stringify(settingsFormValues()));lockSettingsBackgroundScroll();applySettingsDialogPreferredSize();if(!$("settingsDialog").open)$("settingsDialog").showModal();requestAnimationFrame(applySettingsDialogPreferredSize);
+  updateParallelMemoryGuide();
+  renderRuntimeSetupControls();
+  switchSettingsPage(page);if(!$("settingsDialog").open)$("settingsDialog").showModal();
 }
 function renderInstalledAssetGroups(){
   const explanations=state.data?.inputExplanations||[],regions=state.data?.regionPackages||[],libraries=state.data?.inputLibraries||[],templates=state.data?.templates||[];
@@ -4253,12 +5907,13 @@ function renderInstalledAssetGroups(){
   const group=(title,items,kind)=>`<details class="asset-group" ${kind==="regions"&&items.length?"open":""}><summary><span>${escapeHtml(title)}</span><span class="pill">${items.length}</span></summary><div class="asset-list">${items.length?items.map(item=>{
     const assetKind=kindFor[kind],dependency=dependencies.get(`${assetKind}:${item.id}`)||{projects:[],related:[],isDefault:false,removable:true};
     const usage=dependency.projects.length?`Used by ${dependency.projects.map(project=>`${project.name} (${project.status})`).join(", ")}`:dependency.isDefault?"Current default; removing it will clear the default.":dependency.related.length?`Paired with ${dependency.related.map(value=>value.name).join(", ")}`:"Not used by a project.";
-    const detail=kind==="explanations"?(item.description||`${item.fileCount||0} guides`):kind==="regions"?`${item.coverage||"Regional"} · version ${item.version||"unknown"}`:kind==="libraries"?`${item.fileCount||0} CSV files`:`${(item.inputFiles||[]).length} input files`;
+    const detail=kind==="explanations"?`${item.description||`${item.fileCount||0} guides`}${item.providerCount>1?` · ${item.providerCount} equivalent providers`:""}${item.familyConflict?" · Warning: another provider has different guidance":""}`:kind==="regions"?`${item.coverage||"Regional"} · version ${item.version||"unknown"}`:kind==="libraries"?`${item.fileCount||0} CSV files`:`${(item.inputFiles||[]).length} input files`;
     return `<article class="asset-row"><div><strong>${escapeHtml(item.name||item.id)}</strong><small>${escapeHtml(detail)}</small><small class="asset-usage">${escapeHtml(usage)}</small></div><button type="button" class="secondary" data-archive-asset="${escapeHtml(item.id)}" data-asset-kind="${assetKind}" ${dependency.removable?"":`disabled title="${escapeHtml(usage)}"`}>Remove</button></article>`;
   }).join(""):`<p class="muted">None installed.</p>`}</div></details>`;
   const archived=state.data?.assets?.archived||[];
-  const archivedGroup=`<details class="asset-group"><summary><span>Removed assets</span><span class="pill">${archived.length}</span></summary><div class="asset-list">${archived.length?archived.map(item=>`<article class="asset-row"><div><strong>${escapeHtml(item.name||item.id)}</strong><small>${escapeHtml(item.kind)} · ${item.daysRemaining} days remaining</small></div><div class="asset-row-actions"><button type="button" class="secondary" data-restore-asset="${escapeHtml(item.archiveId)}">Restore</button><button type="button" class="danger" data-purge-asset="${escapeHtml(item.archiveId)}">Delete now</button></div></article>`).join(""):`<p class="muted">None.</p>`}</div></details>`;
-  $("installedAssetGroups").innerHTML=group("Regional data packages",regions,"regions")+group("Input explanations",explanations,"explanations")+group("InputLibraries",libraries,"libraries")+group("Model templates",templates,"templates")+archivedGroup;
+  const archivedKindLabel=(kind)=>({"input-library":"Input Library","model-template":"Model package","input-explanations":"Input explanations","regional-data":"Regional data package"}[kind]||"Asset");
+  const archivedGroup=`<details class="asset-group"><summary><span>Removed assets</span><span class="pill">${archived.length}</span></summary><div class="asset-list">${archived.length?archived.map(item=>`<article class="asset-row"><div><strong>${escapeHtml(item.name||item.id)}</strong><small>${escapeHtml(archivedKindLabel(item.kind))} · ${item.daysRemaining} days remaining</small></div><div class="asset-row-actions"><button type="button" class="secondary" data-restore-asset="${escapeHtml(item.archiveId)}">Restore</button><button type="button" class="danger" data-purge-asset="${escapeHtml(item.archiveId)}">Delete now</button></div></article>`).join(""):`<p class="muted">None.</p>`}</div></details>`;
+  $("installedAssetGroups").innerHTML=group("Regional data packages",regions,"regions")+group("Input explanations",explanations,"explanations")+group("Input Libraries",libraries,"libraries")+group("Model packages",templates,"templates")+archivedGroup;
   document.querySelectorAll("[data-archive-asset]").forEach(button=>button.addEventListener("click",async()=>{
     const dependency=dependencies.get(`${button.dataset.assetKind}:${button.dataset.archiveAsset}`),includeRelated=Boolean(dependency?.related?.length);
     const relatedText=includeRelated?`\n\nIts generated pair (${dependency.related.map(item=>item.name).join(", ")}) will be removed with it.`:"";
@@ -4269,82 +5924,246 @@ function renderInstalledAssetGroups(){
   document.querySelectorAll("[data-restore-asset]").forEach(button=>button.addEventListener("click",async()=>{try{await post("/api/assets/restore",{archiveId:button.dataset.restoreAsset});await refreshState({quiet:true});await openSettings("settingsAssets");notify("Asset restored.","success")}catch(error){notify(error.message||String(error),"error")}}));
   document.querySelectorAll("[data-purge-asset]").forEach(button=>button.addEventListener("click",async()=>{if(!await confirmWorkbench("Delete this removed asset permanently? This cannot be undone."))return;try{await post("/api/assets/purge",{archiveId:button.dataset.purgeAsset});await refreshState({quiet:true});await openSettings("settingsAssets");notify("Removed asset permanently deleted.","success")}catch(error){notify(error.message||String(error),"error")}}));
 }
-function documentationDirectory(path){const parts=String(path||"").split("/");parts.pop();return parts.join("/")}
-function documentationPath(basePath,href){const raw=String(href||"").split("#",1)[0];if(!raw||/^[a-z][a-z0-9+.-]*:/i.test(raw)||raw.startsWith("#"))return raw;const parts=`${documentationDirectory(basePath)}/${raw}`.split("/"),output=[];for(const part of parts){if(!part||part===".")continue;if(part==="..")output.pop();else output.push(part)}return output.join("/")||"README.md"}
-function markdownLite(markdown,pagePath="README.md"){
-  const lines=String(markdown||"").split(/\r?\n/),html=[];let list=null;const close=()=>{if(list){html.push(`</${list}>`);list=null}};
-  const inline=(value)=>escapeHtml(value).replace(/`([^`]+)`/g,"<code>$1</code>").replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>").replace(/!\[([^\]]*)\]\(([^)]+)\)/g,(_m,alt,href)=>{const target=documentationPath(pagePath,href);return /^[a-z][a-z0-9+.-]*:/i.test(target)?"":`<img src="/api/documentation/asset?path=${encodeURIComponent(target)}" alt="${escapeHtml(alt)}">`}).replace(/\[([^\]]+)\]\(([^)]+)\)/g,(_m,label,href)=>{const target=documentationPath(pagePath,href);return /^[a-z][a-z0-9+.-]*:/i.test(target)?`<a href="${escapeHtml(target)}" target="_blank" rel="noreferrer">${label}</a>`:`<a href="#" data-doc-path="${escapeHtml(target)}">${label}</a>`});
-  for(const line of lines){const text=line.trim();if(!text){close();continue}const heading=text.match(/^(#{1,3})\s+(.+)$/);if(heading){close();html.push(`<h${heading[1].length}>${inline(heading[2])}</h${heading[1].length}>`);continue}const bullet=text.match(/^[-*]\s+(.+)$/),ordered=text.match(/^\d+\.\s+(.+)$/);if(bullet||ordered){const kind=bullet?"ul":"ol";if(list!==kind){close();html.push(`<${kind}>`);list=kind}html.push(`<li>${inline((bullet||ordered)[1])}</li>`);continue}close();html.push(`<p>${inline(text)}</p>`)}close();return html.join("")
+let documentationCatalog=null,documentationReaderReturnFocus=null,documentationPdfModule=null,documentationPdf=null,documentationRenderToken=0,documentationZoom=1;
+function documentationById(documentId){return documentationCatalog?.documents?.find(item=>item.id===documentId)||null}
+async function loadDocumentationCatalog(){
+  const library=$("settingsDocumentationLibrary");library.innerHTML='<p class="muted">Loading documentation…</p>';
+  try{
+    documentationCatalog=await request("/api/documentation/catalog");
+    const documents=documentationCatalog.documents||[];
+    library.innerHTML=documents.length?documents.map(document=>`<article class="documentation-card" role="listitem"><div><span class="documentation-card-kind">PDF · Version ${escapeHtml(document.version)}</span><h4>${escapeHtml(document.title)}</h4><p>${escapeHtml(document.description)}</p><small>${Number(document.pageCount)||0} ${Number(document.pageCount)===1?"page":"pages"}</small></div><div class="documentation-card-actions"><button type="button" data-read-document="${escapeHtml(document.id)}">Read in Workbench</button><button type="button" class="secondary" data-preview-document="${escapeHtml(document.id)}">Open in Preview</button></div></article>`).join(""):'<p class="muted">No documents are installed.</p>';
+  }catch(error){library.innerHTML=`<div class="notice error-notice"><strong>Documentation is unavailable.</strong><p>${escapeHtml(error.message||String(error))}</p></div>`}
 }
-async function loadSettingsDocumentation(path="README.md"){const body=$("settingsDocumentationBody");body.classList.add("empty-state");body.textContent="Loading user guide…";try{const payload=await request(`/api/documentation/page?path=${encodeURIComponent(path)}`);body.classList.remove("empty-state");body.innerHTML=`<div class="doc-nav" role="toolbar" aria-label="Documentation navigation"><button type="button" class="secondary" data-doc-path="README.md">Guide home</button><span class="muted" aria-current="page">${escapeHtml(payload.path||path)}</span></div><div class="documentation-content">${markdownLite(payload.body||"",payload.path||path)}</div>`}catch(error){body.textContent=error.message||String(error)}}
+async function openDocumentationInPreview(documentId){
+  if(!documentationById(documentId))throw new Error("That document is not available.");
+  const invoke=window.__TAURI_INTERNALS__?.invoke;
+  if(invoke)return invoke("open_documentation_document",{documentId});
+  window.open(`/api/documentation/document?id=${encodeURIComponent(documentId)}`,"_blank","noopener");
+}
+async function loadDocumentationPdfModule(){
+  if(!documentationPdfModule){
+    documentationPdfModule=import("/vendor/pdfjs/pdf.min.mjs").then(module=>{module.GlobalWorkerOptions.workerSrc="/vendor/pdfjs/pdf.worker.min.mjs";return module});
+  }
+  return documentationPdfModule;
+}
+async function renderDocumentationPdf({resetScroll=false}={}){
+  const pdf=documentationPdf,pages=$("documentationReaderPages"),status=$("documentationReaderStatus"),token=++documentationRenderToken;
+  if(!pdf)return;
+  const priorScroll=resetScroll?0:pages.scrollTop,pdfPage=await pdf.getPage(1),unscaled=pdfPage.getViewport({scale:1}),available=Math.max(280,pages.clientWidth-72),fitScale=Math.min(available/unscaled.width,1.8),cssScale=fitScale*documentationZoom,pixelRatio=Math.min(window.devicePixelRatio||1,2);
+  pages.replaceChildren();pages.hidden=false;status.hidden=false;status.className="documentation-reader-status";status.textContent=`Preparing ${pdf.numPages===1?"page":`${pdf.numPages} pages`}…`;
+  for(let pageNumber=1;pageNumber<=pdf.numPages;pageNumber+=1){
+    if(token!==documentationRenderToken)return;
+    const page=pageNumber===1?pdfPage:await pdf.getPage(pageNumber),cssViewport=page.getViewport({scale:cssScale}),renderViewport=page.getViewport({scale:cssScale*pixelRatio}),surface=document.createElement("section"),canvas=document.createElement("canvas"),label=document.createElement("span");
+    surface.className="documentation-reader-page";surface.setAttribute("aria-label",`Page ${pageNumber} of ${pdf.numPages}`);surface.style.width=`${Math.round(cssViewport.width)}px`;surface.style.minHeight=`${Math.round(cssViewport.height)}px`;
+    canvas.width=Math.ceil(renderViewport.width);canvas.height=Math.ceil(renderViewport.height);canvas.setAttribute("aria-hidden","true");
+    label.className="documentation-reader-page-number";label.textContent=`${pageNumber} / ${pdf.numPages}`;surface.append(canvas,label);pages.append(surface);
+    await page.render({canvasContext:canvas.getContext("2d",{alpha:false}),viewport:renderViewport}).promise;
+    status.textContent=`Loading page ${pageNumber} of ${pdf.numPages}…`;
+  }
+  if(token!==documentationRenderToken)return;
+  status.hidden=true;pages.scrollTop=Math.min(priorScroll,Math.max(0,pages.scrollHeight-pages.clientHeight));
+}
+function setDocumentationZoom(next){documentationZoom=Math.max(.65,Math.min(1.75,next));renderDocumentationPdf().catch(showDocumentationReaderError)}
+function showDocumentationReaderError(error){const status=$("documentationReaderStatus");status.hidden=false;status.className="documentation-reader-status error-notice";status.innerHTML=`<strong>The document could not be displayed.</strong><p>${escapeHtml(error.message||String(error))}</p><p>You can still try Open in Preview.</p>`}
+async function openDocumentationReader(documentId,trigger=document.activeElement){
+  if(!documentationCatalog)await loadDocumentationCatalog();
+  const document=documentationById(documentId);if(!document)throw new Error("That document is not available.");
+  const dialog=$("documentationReaderDialog"),pages=$("documentationReaderPages"),status=$("documentationReaderStatus");
+  documentationReaderReturnFocus=trigger instanceof HTMLElement?trigger:null;
+  dialog.dataset.documentId=documentId;$("documentationReaderTitle").textContent=document.title;pages.setAttribute("aria-label",document.title);pages.hidden=true;pages.replaceChildren();documentationPdf=null;documentationZoom=1;documentationRenderToken+=1;
+  status.hidden=false;status.className="documentation-reader-status";status.textContent="Loading document…";
+  if(!dialog.open)dialog.showModal();
+  try{
+    const documentUrl=`/api/documentation/document?id=${encodeURIComponent(documentId)}`;
+    const response=await fetch(documentUrl,{cache:"no-store"});
+    if(!response.ok)throw new Error(await response.text()||`Request failed (${response.status})`);
+    const contentType=response.headers.get("content-type")||"";if(contentType&&!contentType.includes("pdf"))throw new Error("Workbench received an invalid documentation file.");
+    const pdfjs=await loadDocumentationPdfModule(),data=await response.arrayBuffer();
+    documentationPdf=await pdfjs.getDocument({data}).promise;
+    if(dialog.dataset.documentId!==documentId)return;
+    await renderDocumentationPdf({resetScroll:true});
+  }catch(error){showDocumentationReaderError(error)}
+}
+function closeDocumentationReader(){documentationRenderToken+=1;const dialog=$("documentationReaderDialog");if(dialog.open)dialog.close()}
 function diagnosticsOptions(){return{includeResults:Boolean($("diagnosticsIncludeResults").checked),includeCache:Boolean($("diagnosticsIncludeCache").checked)}}
 function diagnosticFilename(job){const safe=(value)=>String(value||"run").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,48)||"run";return `visioneval-diagnostics-${safe(job?.projectName)}-${safe(jobDisplayName(job))}.zip`}
-async function exportRunDiagnostics(jobId){const job=state.data?.jobs?.find(item=>item.id===jobId);if(!job)return notify("Select a run before exporting diagnostics.","error");const options=diagnosticsOptions(),params=new URLSearchParams({jobId,includeResults:String(options.includeResults),includeCache:String(options.includeCache)});const route=`/api/diagnostics/run?${params}`,invoke=window.__TAURI_INTERNALS__?.invoke;if(invoke){const saved=await invoke("save_backend_export",{exportKind:"diagnostics-run",query:params.toString(),filename:diagnosticFilename(job)});if(saved)notify(`Saved ${saved}.`,"success");return}const link=document.createElement("a");link.href=route;link.download=diagnosticFilename(job);link.click()}
-async function loadDiagnosticsSettings(){const runsEl=$("diagnosticsRuns"),errorsEl=$("diagnosticsErrors");runsEl.textContent="Loading failed runs…";errorsEl.textContent="Loading recent app errors…";try{const[runsPayload,errorsPayload]=await Promise.all([request("/api/diagnostics/runs?state=failed"),request("/api/diagnostics/errors")]),runs=runsPayload.runs||[],errors=errorsPayload.errors||[];runsEl.innerHTML=runs.length?runs.map(job=>`<article class="asset-row"><div><strong>${escapeHtml(jobDisplayName(job))}</strong><small>${escapeHtml(job.projectName||"Unknown project")} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(job.message||"")}</small></div><button type="button" class="secondary" data-diagnostics-run="${escapeHtml(job.id)}">Export diagnostics</button></article>`).join(""):"No failed runs are available.";runsEl.querySelectorAll("[data-diagnostics-run]").forEach(button=>button.addEventListener("click",()=>exportRunDiagnostics(button.dataset.diagnosticsRun).catch(error=>notify(error.message,"error"))));errorsEl.innerHTML=errors.length?errors.slice().reverse().map(error=>`<article class="asset-row"><div><strong>${escapeHtml(error.message||"Unknown app error")}</strong><small>${escapeHtml(error.source||"app")} · ${formatTime(error.timestamp)}</small></div></article>`).join(""):"No recent app errors are recorded."}catch(error){runsEl.textContent=error.message||String(error);errorsEl.textContent="Diagnostics could not be loaded."}}
-function switchSettingsPage(page){document.querySelectorAll(".settings-page").forEach(item=>item.classList.toggle("active",item.id===page));document.querySelectorAll("[data-settings-page]").forEach(item=>item.classList.toggle("active",item.dataset.settingsPage===page));if(page==="settingsStorage")loadStorageReport();if(page==="settingsDiagnostics")loadDiagnosticsSettings();if(page==="settingsDocumentation")loadSettingsDocumentation()}
+function exportRunDiagnostics(jobId){const job=state.data?.jobs?.find(item=>item.id===jobId);if(!job)return notify("Select a run before exporting diagnostics.","error");const options=diagnosticsOptions(),params=new URLSearchParams({jobId,includeResults:String(options.includeResults),includeCache:String(options.includeCache)}),filename=diagnosticFilename(job);enqueueExport("Diagnostic bundle",async()=>{const route=`/api/diagnostics/run?${params}`,invoke=window.__TAURI_INTERNALS__?.invoke;if(invoke){const saved=await invoke("save_backend_export",{exportKind:"diagnostics-run",query:params.toString(),filename});if(saved)notify(`Saved ${saved}.`,"success");return saved||null}const link=document.createElement("a");link.href=route;link.download=filename;link.click();return filename;});}
+async function loadDiagnosticsSettings(){
+  const runsEl=$("diagnosticsRuns"),errorsEl=$("diagnosticsErrors");
+  runsEl.textContent="Loading failed runs…";errorsEl.textContent="Loading recent app errors…";
+  try{
+    const[runsPayload,errorsPayload]=await Promise.all([request("/api/diagnostics/runs?state=failed"),request("/api/diagnostics/errors")]),runs=runsPayload.runs||[],errors=errorsPayload.errors||[];
+    runsEl.innerHTML=runs.length?runs.map(job=>`<article class="asset-row"><div><strong>${escapeHtml(jobDisplayName(job))}</strong><small>${escapeHtml(job.projectName||"Unknown project")} · ${formatTime(job.createdAt)}</small><small>${escapeHtml(job.message||"")}</small></div><button type="button" class="secondary" data-diagnostics-run="${escapeHtml(job.id)}">Export diagnostics</button></article>`).join(""):"No failed runs are available.";
+    runsEl.querySelectorAll("[data-diagnostics-run]").forEach(button=>button.addEventListener("click",()=>exportRunDiagnostics(button.dataset.diagnosticsRun)));
+    errorsEl.innerHTML=errors.length?errors.slice().reverse().map(error=>`<article class="asset-row"><div><strong>${escapeHtml(error.message||"Unknown app error")}</strong><small>${escapeHtml(error.source||"app")} · ${formatTime(error.timestamp)}</small></div></article>`).join(""):"No recent app errors are recorded.";
+  }catch(error){runsEl.textContent=error.message||String(error);errorsEl.textContent="Diagnostics could not be loaded."}
+}
+function updateCheckControls(){
+  const enabled=$("automaticUpdateChecks").checked,sourceInputs=[$("updateSourceVisionEval"),$("updateSourceRuntime"),$("updateSourceWorkbench")];
+  if(enabled&&!sourceInputs.some(input=>input.checked))sourceInputs.forEach(input=>{input.checked=true});
+}
+function updateCheckSettingsFromControls(){return{automatic:$("automaticUpdateChecks").checked,sources:{visioneval:$("updateSourceVisionEval").checked,runtimeImage:$("updateSourceRuntime").checked,workbench:$("updateSourceWorkbench").checked}}}
+function updateStatusLabel(status){return({current:"Up to date",update_available:"Update available",install_required:"Not installed",unavailable:"Unable to check",not_selected:"Not selected",not_checked:"Not checked"})[status]||"Not checked"}
+function renderUpdateSettings(payload=state.data?.updates){
+  if(!payload)return;
+  const settings=state.data?.workspaceSettings?.updateChecks||payload;
+  $("automaticUpdateChecks").checked=Boolean(settings.automatic);
+  $("updateSourceVisionEval").checked=settings.sources?.visioneval!==false;
+  $("updateSourceRuntime").checked=settings.sources?.runtimeImage!==false;
+  $("updateSourceWorkbench").checked=settings.sources?.workbench!==false;
+  $("automaticUpdateChecks").disabled=Boolean(payload.administrativelyDisabled);
+  const last=payload.lastCheckedAt||settings.lastCheckedAt;
+  $("updatesLastChecked").textContent=payload.administrativelyDisabled?"Update checks were disabled by an administrator.":last?`Last checked ${formatTime(last)}.`:"Never checked.";
+  const statuses=payload.statuses||{};
+  $("updateStatusList").innerHTML=["workbench","runtimeImage","visioneval"].map(source=>{
+    const item=statuses[source]||{status:"not_checked",message:"This source has not been checked yet."},link=item.releaseNotesUrl||item.url||"";
+    const canInstall=source==="runtimeImage"&&["update_available","install_required"].includes(item.status)&&item.runtimeProfile&&!item.requiresWorkbenchVersion;
+    const canRestore=source==="runtimeImage"&&Boolean(state.data?.runtime?.runtimeProfiles?.previous);
+    const actions=[link?`<button type="button" class="secondary" data-update-url="${escapeHtml(link)}">${["update_available","install_required"].includes(item.status)?"View release":"Release notes"}</button>`:"",canInstall?`<button type="button" data-install-runtime-update>${item.status==="install_required"?"Install Runtime":"Install Runtime Update"}</button>`:"",canRestore?`<button type="button" class="secondary" data-restore-runtime>Restore Previous Runtime</button>`:""].filter(Boolean).join("");
+    const profile=item.runtimeProfile||{},detail=source==="runtimeImage"&&profile.digest?`<small>Trusted digest ${escapeHtml(profile.digest)}</small>`:"";
+    return `<article class="update-status-card ${escapeHtml(item.status||"not_checked")}"><div class="update-status-heading"><div><strong>${escapeHtml(updateSourceLabels[source])}</strong><span class="update-status-badge">${escapeHtml(updateStatusLabel(item.status))}</span></div><div class="update-status-actions">${actions}</div></div><p>${escapeHtml(item.message||"")}</p>${item.installedVersion||item.availableVersion?`<dl><div><dt>Installed</dt><dd>${escapeHtml(item.installedVersion||"Unknown")}</dd></div><div><dt>Available</dt><dd>${escapeHtml(item.availableVersion||"Unknown")}</dd></div></dl>`:""}${detail}</article>`;
+  }).join("");
+  $("checkUpdatesNow").disabled=Boolean(payload.checking||payload.administrativelyDisabled);
+  $("checkUpdatesNow").textContent=payload.checking?"Checking…":"Check Now";
+  renderUpdateIndicator(payload);
+}
+async function openUpdateUrl(url){
+  if(!/^https:\/\/github\.com\//.test(String(url||"")))return notify("Workbench blocked an untrusted update link.","error");
+  try{await window.__TAURI_INTERNALS__.invoke("open_external_url",{url})}catch(error){notify(`Could not open the release page: ${error}`,"error")}
+}
+async function checkUpdatesNow(){
+  const button=$("checkUpdatesNow");setBusy(button,true,"Checking…");
+  try{
+    const updateChecks=updateCheckSettingsFromControls();
+    await post("/api/settings",{updateChecks});
+    const sources=Object.entries(updateChecks.sources).filter(([,selected])=>selected).map(([source])=>source);
+    const payload=await post("/api/updates/check",{sources});
+    state.data.workspaceSettings.updateChecks={...updateChecks,lastCheckedAt:payload.lastCheckedAt,statuses:payload.statuses};state.data.updates=payload;
+    renderUpdateSettings(payload);notify(availableUpdateStatuses(payload).length?"Update check complete. An update or runtime setup action is available.":"Update check complete.","success");
+  }catch(error){notify(error.message||String(error),"error")}
+  finally{setBusy(button,false)}
+}
+async function persistDesktopRuntimeProfile(result){
+  if(!window.__TAURI_INTERNALS__?.invoke)return;
+  const profile=result?.activeProfile||state.data?.runtime?.runtimeProfiles?.active||{};
+  await window.__TAURI_INTERNALS__.invoke("save_runtime_profile",{profile:{
+    id:"",name:`${profile.visionEvalVersion||"Verified"} Docker runtime`,adapter:"docker",platform:"darwin",architecture:profile.architecture||"arm64",
+    imageReference:profile.reference||result.image||"",imageDigest:profile.digest||result.digest||"",runtimeVersion:profile.visionEvalVersion||result.runtimeVersion||"Compatible VisionEval runtime",verified:true,
+    verifiedAt:result.verifiedAt||new Date().toISOString(),verificationMessage:"The immutable digest, VisionEval provenance, architecture, doctor, and household-ID alignment checks passed.",remoteStatus:"ghcr",
+  }});
+  state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");
+}
+async function installRuntimeUpdate(button){
+  const item=state.data?.updates?.statuses?.runtimeImage||{},profile=item.runtimeProfile||{};
+  if(!profile.reference)return notify("Check for updates before installing the runtime.","error");
+  const download=profile.downloadSizeBytes?humanBytes(profile.downloadSizeBytes):"an unreported amount",storage=profile.storageSizeBytes?humanBytes(profile.storageSizeBytes):"an unreported amount";
+  const firstInstall=item.status==="install_required";
+  const prompt=firstInstall?`Install ${profile.visionEvalVersion||item.availableVersion} as the Workbench runtime?\n\nDownload: ${download}\nApproximate local Docker storage: ${storage}\n\nWorkbench will verify the immutable digest and runtime checks before activating it.`:`Replace the active ${item.installedVersion||"VisionEval"} runtime with ${profile.visionEvalVersion||item.availableVersion}?\n\nDownload: ${download}\nApproximate local Docker storage: ${storage}\n\nWorkbench will verify the immutable digest and runtime checks, and keep the current runtime for rollback. No active or waiting runs may exist.`;
+  const approved=await confirmWorkbench(prompt,{title:firstInstall?"Install runtime?":"Install runtime update?",confirmLabel:firstInstall?"Install Runtime":"Install Runtime Update",danger:false});
+  if(!approved)return;
+  setBusy(button,true,"Installing…");
+  try{
+    const operation=await post("/api/runtime/install/start",{source:"update"}),result=await waitForRuntimeInstallation(operation.id);
+    await persistDesktopRuntimeProfile(result);await refreshState({quiet:true});renderUpdateSettings();renderRuntime();notify(`${profile.visionEvalVersion||"The runtime update"} is verified and active.`,"success");
+  }catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}
+}
+async function restorePreviousRuntime(button){
+  const previous=state.data?.runtime?.runtimeProfiles?.previous;
+  if(!previous)return notify("No previous verified runtime is available.","error");
+  if(!await confirmWorkbench(`Restore ${previous.visionEvalVersion||"the previous verified runtime"}? The current verified runtime will remain available for rollback.`,{title:"Restore previous runtime?",confirmLabel:"Restore Runtime",danger:false}))return;
+  setBusy(button,true,"Restoring…");
+  try{const result=await post("/api/runtime/restore-previous",{});await persistDesktopRuntimeProfile(result);await refreshState({quiet:true});renderUpdateSettings();renderRuntime();notify(`${result.activeProfile?.visionEvalVersion||"The previous runtime"} is active.`,"success")}catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}
+}
+function switchSettingsPage(page){document.querySelectorAll(".settings-page").forEach(item=>item.classList.toggle("active",item.id===page));document.querySelectorAll("[data-settings-page]").forEach(item=>item.classList.toggle("active",item.dataset.settingsPage===page));if(page==="settingsStorage")loadStorageReport();if(page==="settingsDiagnostics")loadDiagnosticsSettings();if(page==="settingsDocumentation")loadDocumentationCatalog();if(page==="settingsUpdates")renderUpdateSettings()}
 document.querySelectorAll("[data-settings-page]").forEach(button=>button.addEventListener("click",()=>switchSettingsPage(button.dataset.settingsPage)));
-$('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);$('refreshDocumentation').addEventListener('click',()=>loadSettingsDocumentation());$('settingsDocumentationBody').addEventListener('click',(event)=>{const link=event.target.closest('[data-doc-path]');if(!link)return;event.preventDefault();loadSettingsDocumentation(link.dataset.docPath||'README.md')});
+$("automaticUpdateChecks").addEventListener("change",updateCheckControls);
+[$("updateSourceVisionEval"),$("updateSourceRuntime"),$("updateSourceWorkbench")].forEach(input=>input.addEventListener("change",updateCheckControls));
+$("checkUpdatesNow").addEventListener("click",checkUpdatesNow);
+$("updateStatusList").addEventListener("click",event=>{const link=event.target.closest("[data-update-url]");if(link)return openUpdateUrl(link.dataset.updateUrl);const install=event.target.closest("[data-install-runtime-update]");if(install)return installRuntimeUpdate(install);const restore=event.target.closest("[data-restore-runtime]");if(restore)return restorePreviousRuntime(restore)});
+$('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);
+$('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),preview=event.target.closest('[data-preview-document]');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(preview)openDocumentationInPreview(preview.dataset.previewDocument).catch(error=>notify(error.message||String(error),'error'))});
+$('documentationReaderClose').addEventListener('click',closeDocumentationReader);
+$('documentationReaderZoomOut').addEventListener('click',()=>setDocumentationZoom(documentationZoom-.15));
+$('documentationReaderFit').addEventListener('click',()=>setDocumentationZoom(1));
+$('documentationReaderZoomIn').addEventListener('click',()=>setDocumentationZoom(documentationZoom+.15));
+$('documentationReaderPreview').addEventListener('click',()=>openDocumentationInPreview($('documentationReaderDialog').dataset.documentId).catch(error=>notify(error.message||String(error),'error')));
+$('documentationReaderDialog').addEventListener('close',()=>{documentationRenderToken+=1;documentationPdf?.destroy?.();documentationPdf=null;$('documentationReaderPages').replaceChildren();const target=documentationReaderReturnFocus;documentationReaderReturnFocus=null;if(target?.isConnected)requestAnimationFrame(()=>target.focus())});
+let documentationResizeTimer;window.addEventListener('resize',()=>{if(!$('documentationReaderDialog').open||!documentationPdf)return;clearTimeout(documentationResizeTimer);documentationResizeTimer=setTimeout(()=>renderDocumentationPdf().catch(showDocumentationReaderError),180)});
 async function loadStorageReport(){try{const report=await request("/api/storage");$("storageReport").innerHTML=metric("Workspace",humanBytes(report.workspaceBytes))+metric("Model runs",humanBytes(report.categories.models))+metric("Datastores",humanBytes(report.runs.reduce((sum,item)=>sum+item.datastoreBytes,0)))+metric("Full CSV exports",humanBytes(report.runs.reduce((sum,item)=>sum+item.exportBytes,0)))+metric("Comparison cache",`${humanBytes(report.comparisonCache?.bytes||0)} · ${report.comparisonCache?.entries||0} tables`);}catch(error){$("storageReport").innerHTML=`<p class="muted">${escapeHtml(error.message)}</p>`}}
 async function clearComparisonCache(rebuild=false){const button=$(rebuild?"rebuildComparisonCache":"clearComparisonCache");setBusy(button,true,"Clearing…");try{await post(rebuild?"/api/comparison/cache/rebuild":"/api/comparison/cache/clear",{});state.lastComparison=null;await loadStorageReport();notify(rebuild?"Comparison cache cleared and will rebuild on next use.":"Comparison cache cleared.","success");}catch(error){notify(error.message,"error");}finally{setBusy(button,false);}}
 $("clearComparisonCache").addEventListener("click",()=>clearComparisonCache(false));
 $("rebuildComparisonCache").addEventListener("click",()=>clearComparisonCache(true));
 async function changeWorkspace(path){try{await window.__TAURI_INTERNALS__.invoke("switch_workspace",{path});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error")}}
-window.requestWorkbenchQuit=async()=>{try{let result=await post("/api/runtime/shutdown",{cancelActive:false});if(result.requiresConfirmation){const names=(result.jobs||[]).map(job=>job.name).join(", ");if(!await confirmWorkbench(`VisionEval is still running${names?`: ${names}`:""}. Stop these Workbench runs and quit?`))return;result=await post("/api/runtime/shutdown",{cancelActive:true})}if(!result.ok){notify((result.failures||[]).map(item=>item.message).join("; ")||"Workbench could not safely stop the active runtime.","error");return}await window.__TAURI_INTERNALS__.invoke("complete_quit")}catch(error){notify(`Workbench could not quit safely: ${error}`,"error")}};
+window.requestWorkbenchQuit=async()=>{try{if(!await flushHypercubeAutosave())return;let inventory=await request('/api/operations/active');if(inventory.active){const labels={model_run:'model run',hypercube_generation:'Hypercube generation',hypercube_analysis:'Hypercube analysis',hypercube_discovery:'responsive-output discovery',hypercube_index:'Hypercube summary index',comparison:'comparison',comparison_scan:'change scan',export:'export',project_copy:'project copy',runtime_installation:'runtime installation'},summary=Object.entries(inventory.counts||{}).map(([kind,count])=>`${count} ${labels[kind]||kind}${count===1?'':'s'}`).join(', ');if(!await confirmWorkbench(`Workbench is still processing: ${summary}.\n\nStop owned work safely and quit?`,{title:'Work is still active',confirmLabel:'Stop Work and Quit',cancelLabel:'Keep Working'}))return;const stopped=await post('/api/operations/stop-all',{});if(!stopped.ok){notify((stopped.failures||[]).map(item=>item.message).join('; ')||'Workbench could not safely stop all work.','error');return}for(let attempt=0;attempt<60;attempt++){await new Promise((resolve)=>setTimeout(resolve,250));inventory=await request('/api/operations/active');if(!inventory.active)break;}if(inventory.active){notify('Some work has not reached a safe stopping point. Workbench will remain open.','error');return;}}await window.__TAURI_INTERNALS__.invoke('complete_quit')}catch(error){notify(`Workbench could not quit safely: ${error}`,'error')}};
+
+async function pollActiveOperationBadge(){
+  try{const inventory=await request('/api/operations/active'),hypercube=(inventory.operations||[]).some((item)=>['hypercube_generation','hypercube_analysis','hypercube_discovery','hypercube_index'].includes(item.kind));if(!$('hypercubePrimaryActivity').dataset.local)$('hypercubePrimaryActivity').hidden=!hypercube;}
+  catch(_error){}
+  finally{setTimeout(pollActiveOperationBadge,2500)}
+}
 $("closeSettings").addEventListener("click",()=>$("settingsDialog").close());
-$("settingsDialog").addEventListener("close",unlockSettingsBackgroundScroll);
-$("settingsDialogResizer").addEventListener("pointerdown",(event)=>{
-  if(event.button!==0)return;
-  const handle=event.currentTarget,rect=$("settingsDialog").getBoundingClientRect(),startX=event.clientX,startY=event.clientY,controller=new AbortController();
-  handle.classList.add("resizing");handle.setPointerCapture?.(event.pointerId);
-  window.addEventListener("pointermove",(moveEvent)=>{moveEvent.preventDefault();setSettingsDialogPreferredSize(rect.width+moveEvent.clientX-startX,rect.height+moveEvent.clientY-startY,{persist:false})},{signal:controller.signal});
-  const finish=()=>{localStorage.setItem(SETTINGS_DIALOG_SIZE_KEY,JSON.stringify(settingsDialogPreferredSize));controller.abort();handle.classList.remove("resizing")};
-  window.addEventListener("pointerup",finish,{signal:controller.signal,once:true});window.addEventListener("pointercancel",finish,{signal:controller.signal,once:true});
+$("resetPreferences").addEventListener("click",async(event)=>{
+  if(!await confirmWorkbench("Restore all Workbench preferences to their defaults? Workspaces, installed packages, projects, results, and the VisionEval runtime will not be changed.",{title:"Reset settings to defaults?",confirmLabel:"Reset settings"}))return;
+  const button=event.currentTarget;setBusy(button,true,"Resetting…");
+  try{
+    const result=await window.__TAURI_INTERNALS__.invoke("reset_preferences");
+    localStorage.setItem("visioneval-theme","light");
+    localStorage.removeItem("visioneval-scenario-sidebar-width");
+    localStorage.removeItem("visioneval-app-zoom");
+    $("inputEditor")?.querySelector(".input-editor-workspace")?.style.removeProperty("--scenario-sidebar-width");
+    await window.__TAURI_INTERNALS__.invoke("set_app_zoom",{scale:1});
+    state.desktop=result.desktop;applyTheme("light",false);applyComparisonPalettes();
+    if(result.restartRequired&&!result.deferred){
+      sessionStorage.setItem("visioneval-settings-reset-message","Settings were restored to their defaults. Workspaces, packages, projects, results, and runtime profiles were preserved.");
+      const url=await window.__TAURI_INTERNALS__.invoke("restart_backend");window.location.replace(url);return;
+    }
+    await refreshState({quiet:true});await openSettings("settingsReset");
+    notify(result.deferred?"Settings were restored. Resource changes will apply after active and waiting runs finish and Workbench restarts.":"Settings were restored to their defaults.","success");
+  }catch(error){notify(String(error),"error");setBusy(button,false)}
 });
-$("settingsDialogResizer").addEventListener("keydown",(event)=>{
-  if(event.key==="Home"){event.preventDefault();resetSettingsDialogSize();return}
-  if(!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(event.key))return;
-  event.preventDefault();const rect=$("settingsDialog").getBoundingClientRect(),step=event.shiftKey?48:16;
-  setSettingsDialogPreferredSize(rect.width+(event.key==="ArrowRight"?step:event.key==="ArrowLeft"?-step:0),rect.height+(event.key==="ArrowDown"?step:event.key==="ArrowUp"?-step:0));
-});
+$("repairWorkspace").addEventListener("click",async(event)=>{const button=event.currentTarget;setBusy(button,true,"Repairing…");try{const result=await post("/api/workspace/repair",{});await refreshState({quiet:true});await openSettings("settingsReset");notify(`Workspace repaired. ${result.abandonedStagingRemoved||0} abandoned staging item(s) removed${result.pathWarnings?.length?`; ${result.pathWarnings.length} path warning(s) remain`:""}. No settings save is required.`,result.pathWarnings?.length?"":"success")}catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}});
+$("archiveAllProjects").addEventListener("click",async()=>{if(!await confirmWorkbench("Archive every active project? They can be restored for 30 days."))return;try{const result=await post("/api/projects/archive-all",{});await refreshState({quiet:true});await openSettings("settingsReset");notify(`Archived ${result.archived.length} project${result.archived.length===1?"":"s"}.`,"success")}catch(error){notify(error.message||String(error),"error")}});
+$("wipeProjectData").addEventListener("click",async(event)=>{const button=event.currentTarget,confirmation="DELETE ALL PROJECTS";if(!await confirmWorkbench("This permanently deletes every project and its owned runs and results. Installed assets and standalone imported results remain.",{title:"Permanently wipe project data?",confirmLabel:"Wipe projects",requiredPhrase:confirmation}))return;setBusy(button,true,"Wiping…");try{const result=await post("/api/projects/wipe-all",{confirmation});await refreshState({quiet:true});await openSettings("settingsReset");notify(`Permanently removed ${result.wipedProjects.length} projects. Installed assets were preserved.`,"success")}catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}});
+$("factoryResetWorkspace").addEventListener("click",async(event)=>{const button=event.currentTarget,confirmation="FACTORY RESET";if(!await confirmWorkbench("The entire current workspace will be moved to Trash and a fresh workspace will be created at the same location. The installed app, preferences, and VisionEval runtime image remain.",{title:"Factory reset Workbench?",confirmLabel:"Factory reset",requiredPhrase:confirmation}))return;setBusy(button,true,"Resetting…");try{await window.__TAURI_INTERNALS__.invoke("factory_reset_workspace",{confirmation});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error");setBusy(button,false)}});
 document.addEventListener("pointerdown",(event)=>{if(!event.target.closest(".workspace-action-menu"))closeWorkspaceMenus();});
 document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeWorkspaceMenus();});
 document.querySelectorAll("[data-reveal-workspace-location]").forEach(button=>button.addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:button.dataset.revealWorkspaceLocation}).catch(error=>notify(String(error),"error"))));
 $("revealWorkspaceRoot").addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:"root"}).catch(error=>notify(String(error),"error")));
 $("switchWorkspace").addEventListener("click",async()=>{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)changeWorkspace(path)});
 $("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(!path)return;await window.__TAURI_INTERNALS__.invoke("move_workspace",{destination:path});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error")}});
-$("settingsVerifyRuntime").addEventListener("click",async()=>{setBusy($("settingsVerifyRuntime"),true,"Verifying…");try{await verifyAndSaveRuntime();await refreshState({quiet:true});await openSettings("settingsRuntime");showSettingsNotice("Runtime profile verified. Refresh Workbench to use the verified VE_Runtime connection.","success",settingsRefreshAction("verified VE_Runtime connection"))}catch(error){showSettingsNotice(error.message||String(error),"error")}finally{setBusy($("settingsVerifyRuntime"),false)}});
-$("settingsStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
+$("settingsVerifyRuntime").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
+if($("settingsInstallRuntime"))$("settingsInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
+if($("settingsStartDocker"))$("settingsStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
 $("testNotification").addEventListener("click",async()=>{if(!state.desktop?.notificationsEnabled)return notify("Save Settings with notifications enabled first.","error");try{const result=await window.__TAURI_INTERNALS__.invoke("send_workbench_notification",{title:"VisionEval Workbench test",body:"Notifications are configured correctly.",outcome:"test",elapsedSeconds:0,force:true});notify(result?.shown?"Test notification sent.":"Enable notifications and save Settings first.",result?.shown?"success":"error")}catch(error){notify(String(error),"error")}});
 $("openRuntimeGuide").addEventListener("click",()=>$("runtimeGuideDialog").showModal());
 async function copyRuntimeCommands(sourceId, label) {
   try { await navigator.clipboard.writeText($(sourceId).innerText); notify(`${label} copied.`,"success"); }
   catch(error) { notify(`The ${label.toLowerCase()} could not be copied.`,"error"); }
 }
-if($("copyWindowsRuntimeInstallCommands")) $("copyWindowsRuntimeInstallCommands").addEventListener("click",()=>copyRuntimeCommands("windowsRuntimeInstallCommands","Windows runtime commands"));
-if($("copyWindowsRuntimeAdvancedCommands")) $("copyWindowsRuntimeAdvancedCommands").addEventListener("click",()=>copyRuntimeCommands("windowsRuntimeAdvancedCommands","Windows verification commands"));
-$("settingsImportLibrary").addEventListener("click",async()=>{try{const source=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(!source)return;const result=await post("/api/setup/input-library",{source});await refreshState({quiet:true});await openSettings("settingsAssets");notify(`Imported ${result.copied.length} InputLibrary asset${result.copied.length===1?"":"s"}.`,"success")}catch(error){notify(String(error),"error")}});
-async function installSettingsPackage(button,picker){try{const source=await window.__TAURI_INTERNALS__.invoke(picker);if(!source)return;setBusy(button,true,"Installing…");const result=await post("/api/packages/install",{source});await refreshState({quiet:true});await openSettings("settingsAssets");notify(`Installed ${result.name}.`,"success")}catch(error){notify(error.message||String(error),"error")}finally{setBusy(button,false)}}
-$("settingsInstallPackage").addEventListener("click",()=>installSettingsPackage($("settingsInstallPackage"),"choose_package"));
-$("settingsInstallPackageFolder").addEventListener("click",()=>installSettingsPackage($("settingsInstallPackageFolder"),"choose_package_folder"));
-$("settingsForm").addEventListener("submit",async(event)=>{
-  event.preventDefault();
-  const activePage=document.querySelector(".settings-page.active")?.id||"settingsWorkspace";
-  const requested=settingsFormValues(),before=state.settingsSnapshot;
-  const native=state.data?.runtime?.adapter==="native";
-  const outcome=settingsSaveOutcome(before,requested,native);
-  try {
-    await post("/api/settings",requested.workspace);
-    state.desktop=await window.__TAURI_INTERNALS__.invoke("update_desktop_preferences",requested.desktop);
-    applyTheme(state.desktop.theme,false);
-    applyComparisonPalettes();
+if($("copyRuntimeInstallCommands"))$("copyRuntimeInstallCommands").addEventListener("click",()=>copyRuntimeCommands("runtimeInstallCommands","macOS runtime commands"));
+if($("copyRuntimeAdvancedCommands"))$("copyRuntimeAdvancedCommands").addEventListener("click",()=>copyRuntimeCommands("runtimeAdvancedCommands","macOS verification commands"));
+$("settingsInstallPackage").addEventListener("click",event=>openPackageSourceDialog(event.currentTarget,false));
+$("maxConcurrentRuns").addEventListener("change",updateParallelMemoryGuide);
+$("memoryLimit").addEventListener("input",updateParallelMemoryGuide);
+async function saveWorkbenchSettings(closeAfter=false){
+  const activePage=document.querySelector(".settings-page.active")?.id||"settingsWorkspace",previousMemory=state.desktop?.resources?.memoryLimitGb??null,previousRuns=Number(state.desktop?.resources?.maxConcurrentRuns||2),previousAutoStart=state.desktop?.autoStartDocker!==false,nextMemory=$("memoryLimit").value===""?null:Number($("memoryLimit").value),nextRuns=Number($("maxConcurrentRuns").value||1),nextAutoStart=$("autoStartDocker").checked;
+  try{
+    const optionalPrecision=(id)=>$(id).value===""?null:Number($(id).value);
+    await post("/api/settings",{defaultInputLibraryId:$("defaultLibrary").value,defaultInputExplanationId:$("defaultInputExplanations").value,retainFullExports:$("retainExports").checked,updateChecks:updateCheckSettingsFromControls(),numericPrecision:{default:Number($("precisionDefault").value),singleFile:optionalPrecision("precisionSingleFile"),batch:optionalPrecision("precisionBatch"),output:optionalPrecision("precisionOutput"),percentage:optionalPrecision("precisionPercentage")}});
+    state.desktop=await window.__TAURI_INTERNALS__.invoke("update_desktop_preferences",{theme:$("appearanceSetting").value,defaultRunMode:$("defaultRunMode").value,maxConcurrentRuns:nextRuns,memoryLimitGb:nextMemory,notificationsEnabled:$("notificationsEnabled").checked,notificationSuccessThresholdSeconds:Number($("notificationSuccessThreshold").value||60),autoStartDocker:nextAutoStart,comparisonPalettes:readComparisonPalettes(),masterComparisonPalette:masterComparisonPalette(),useMasterComparisonPalette:Boolean(state.desktop.useMasterComparisonPalette)});
+    applyTheme(state.desktop.theme,false);applyComparisonPalettes();
+    const resourcesChanged=previousMemory!==nextMemory||previousRuns!==nextRuns;
+    if(resourcesChanged&&Number(state.desktop.blockingJobCount||0)===0){
+      if(closeAfter)$("settingsDialog").close();
+      const url=await window.__TAURI_INTERNALS__.invoke("restart_backend");window.location.replace(url);return;
+    }
     await refreshState({quiet:true});
-    switchSettingsPage(activePage);
-    state.settingsSnapshot=JSON.parse(JSON.stringify(requested));
-    showSettingsNotice(outcome.message,"success",outcome.refreshRequired?.length?settingsRefreshAction(outcome.refreshRequired.join(" and ")):null);
-  } catch(error) {
-    showSettingsNotice(String(error),"error");
-  }
-});
+    if(closeAfter)$("settingsDialog").close();else await openSettings(activePage);
+    if(resourcesChanged)notify("Settings saved. Resource changes will apply after active and waiting runs finish and Workbench restarts.","success");else if(previousAutoStart!==nextAutoStart)notify("Settings saved. The Docker startup preference will be used the next time Workbench opens.","success");else notify("Settings saved and applied.","success");
+  }catch(error){notify(String(error),"error")}
+}
+$("settingsForm").addEventListener("submit",async(event)=>{event.preventDefault();await saveWorkbenchSettings(false)});
+$("saveCloseSettings").addEventListener("click",()=>saveWorkbenchSettings(true));
 
 function comparisonMapPackage() {
   const providers = state.data?.comparisonMapPackages || state.data?.regionPackages || [];
@@ -4369,17 +6188,14 @@ async function loadComparisonMapOptions() {
     setComparisonMapEmpty('Load a reference and comparison result to create a map.');
     return;
   }
-  const key=ids.join('|'),cached=state.comparisonMapOptionsCache.get(key);
-  if(state.comparisonMapOptionsRequest!==key)state.comparisonMapOptionsController?.abort();
-  let pending=state.comparisonMapOptionsInflight.get(key),controller=state.comparisonMapOptionsController;
-  if(!cached&&!pending){controller=new AbortController();state.comparisonMapOptionsController=controller;pending=request(`/api/comparison/map-options?ids=${encodeURIComponent(ids.join(','))}`,{signal:controller.signal}).finally(()=>state.comparisonMapOptionsInflight.delete(key));state.comparisonMapOptionsInflight.set(key,pending)}
-  state.comparisonMapOptionsRequest=key;
-  $('mapTable').innerHTML='<option value="">Loading map outputs…</option>';$('mapVariable').innerHTML='';$('mapYear').innerHTML='';$('generateMap').disabled=true;
+  const key=ids.join('|');state.comparisonMapOptionsRequest=key;state.mapSelectionInitialized=true;
+  const cached=state.comparisonOptionsCache.has(comparisonOptionsKey('map',ids));
+  if(!cached){$('mapTable').innerHTML='<option value="">Loading map outputs…</option>';$('mapVariable').innerHTML='';$('mapYear').innerHTML='';$('generateMap').disabled=true;}
   try {
-    const payload = cached || await pending;
+    const payload = await comparisonOptions('map',ids);
     if(state.comparisonMapOptionsRequest!==key)return;
-    state.comparisonMapOptionsCache.set(key,payload);
     state.mapOptions = payload.variables || [];
+    rememberComparisonPair(ids);
     const tables = [...new Set(state.mapOptions.map((item) => item.table))].sort();
     $('mapTable').innerHTML = tables.map((table) => `<option>${escapeHtml(table)}</option>`).join('');
     renderComparisonMapVariables();
@@ -4457,7 +6273,6 @@ function comparisonMapFullView(projection) {
 function comparisonMapSpatialIndex(entries, projection, columns=32, rows=20) {
   const buckets=new Map(),cellWidth=projection.width/columns,cellHeight=projection.height/rows;
   for(const entry of entries){
-    entry.label=regionMapInteriorLabel(entry.feature,projection);entry.center=[entry.label.x,entry.label.y];
     const minColumn=Math.max(0,Math.floor(entry.bounds.minX/cellWidth)),maxColumn=Math.min(columns-1,Math.floor(entry.bounds.maxX/cellWidth));
     const minRow=Math.max(0,Math.floor(entry.bounds.minY/cellHeight)),maxRow=Math.min(rows-1,Math.floor(entry.bounds.maxY/cellHeight));
     for(let column=minColumn;column<=maxColumn;column++)for(let row=minRow;row<=maxRow;row++){const key=`${column}:${row}`;if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(entry);}
@@ -4517,79 +6332,168 @@ function comparisonMapSignedValue(value, {percent = false, unit = ''} = {}) {
   return `${marker} ${sign}${magnitude}${percent ? '%' : unit}`;
 }
 
-function comparisonMapPercentile(values, percentile) {
-  const sorted = values.filter(Number.isFinite).sort((a,b)=>a-b); if (!sorted.length) return 1;
-  return sorted[Math.min(sorted.length-1, Math.max(0, Math.ceil(sorted.length * percentile)-1))] || 1;
-}
-
 function comparisonMapColor(value, scale) {
   if (!Number.isFinite(value)) return 'url(#comparison-map-unavailable)';
   if (value === 0) return comparisonPaletteColor('map','neutral');
+  const parse=(hex)=>[1,3,5].map((index)=>parseInt(hex.slice(index,index+2),16));
   if (scale.kind === 'sequential') {
-    const ratio = Math.max(0,Math.min(1,(value-scale.min)/Math.max(Number.EPSILON,scale.max-scale.min)));
-    return `rgb(${Math.round(226-166*ratio)},${Math.round(238-111*ratio)},${Math.round(246-50*ratio)})`;
+    const linear = scale.max===scale.min ? .5 : Math.max(0,Math.min(1,(value-scale.min)/(scale.max-scale.min))),ratio=.28+.72*Math.sqrt(linear);
+    const target=parse(comparisonPaletteColor('map','increase')),neutral=parse(comparisonPaletteColor('map','neutral'));
+    return `rgb(${neutral.map((channel,index)=>Math.round(channel+(target[index]-channel)*ratio)).join(',')})`;
   }
-  const parse=(hex)=>[1,3,5].map((index)=>parseInt(hex.slice(index,index+2),16)),ratio=Math.min(1,Math.abs(value)/scale.limit),target=parse(comparisonPaletteColor('map',value<0?'decrease':'increase')),neutral=parse(comparisonPaletteColor('map','neutral'));
+  const linear=scale.limit>0?Math.min(1,Math.abs(value)/scale.limit):0,ratio=linear>0?.28+.72*Math.sqrt(linear):0,target=parse(comparisonPaletteColor('map',value<0?'decrease':'increase')),neutral=parse(comparisonPaletteColor('map','neutral'));
   return `rgb(${neutral.map((channel,index)=>Math.round(channel+(target[index]-channel)*ratio)).join(',')})`;
 }
+
+function comparisonMapGradientSamples(scale){
+  return Array.from({length:9},(_,index)=>{const fraction=index/8,value=scale.kind==='diverging'?(fraction*2-1)*scale.limit:scale.min+(scale.max-scale.min)*fraction;return{fraction,color:comparisonMapColor(value,scale)}});
+}
+
+function comparisonMapCssGradient(scale){return `linear-gradient(90deg,${comparisonMapGradientSamples(scale).map((item)=>`${item.color} ${(item.fraction*100).toFixed(1)}%`).join(',')})`}
+
+function comparisonMapSvgGradientStops(scale){return comparisonMapGradientSamples(scale).map((item)=>`<stop offset="${(item.fraction*100).toFixed(1)}%" stop-color="${item.color}"/>`).join('')}
 
 function comparisonMapScale() {
   const values = (state.mapPayload?.geographyRows || []).map(comparisonMapMetricValue).filter(Number.isFinite);
   const metricName = $('mapMetric').value;
-  if (metricName === 'referenceValue' || metricName === 'comparisonValue') return {kind:'sequential',min:Math.min(...values,0),max:Math.max(...values,1)};
-  return {kind:'diverging',limit:comparisonMapPercentile(values.map(Math.abs),.95)};
+  if (!values.length) return metricName === 'referenceValue' || metricName === 'comparisonValue' ? {kind:'sequential',min:0,max:0} : {kind:'diverging',limit:0};
+  if (metricName === 'referenceValue' || metricName === 'comparisonValue') return {kind:'sequential',min:Math.min(...values),max:Math.max(...values)};
+  return {kind:'diverging',limit:Math.max(0,...values.map(Math.abs))};
+}
+
+function comparisonMapDisplayRows(){
+  return new Map((state.mapPayload?.geographyRows||[]).map((row)=>[String(row.geographyId),row]));
+}
+
+function comparisonMareaLabel(id){
+  const normalized=String(id||'').toLowerCase();
+  if(normalized.endsWith('__richmond_va'))return 'Richmond UZA';
+  if(normalized.endsWith('__non_uza'))return 'Non-UZA';
+  return String(id||'').replaceAll('__',' — ').replaceAll('_',' ');
+}
+
+function comparisonMapMareaFeatures(data=state.comparisonMapData,payload=state.mapPayload){
+  if(payload?.geographyLevel!=='marea')return [];
+  const fingerprint=JSON.stringify([data?.sourceFingerprint||data?.packageId||'',payload?.mareaBzones||{}]),cached=data?._mareaFeatureCache;
+  if(cached?.fingerprint===fingerprint)return cached.features;
+  const bzones=new Map((data?.bzones?.features||[]).map((feature)=>[String(feature.properties?.bzoneId||feature.properties?.GEOID||''),feature]));
+  const features=Object.entries(payload?.mareaBzones||{}).map(([mareaId,memberIds])=>{
+    const polygons=[];
+    for(const memberId of memberIds||[]){
+      const geometry=bzones.get(String(memberId))?.geometry;
+      if(geometry?.type==='Polygon')polygons.push(geometry.coordinates||[]);
+      else if(geometry?.type==='MultiPolygon')polygons.push(...(geometry.coordinates||[]));
+    }
+    return {type:'Feature',properties:{mareaId,name:comparisonMareaLabel(mareaId),memberBzones:(memberIds||[]).map(String)},geometry:{type:'MultiPolygon',coordinates:polygons}};
+  }).filter((feature)=>feature.geometry.coordinates.length);
+  if(data)data._mareaFeatureCache={fingerprint,features};
+  return features;
+}
+
+function comparisonMapMareaVisuals(data,payload,features,projection){
+  const fingerprint=JSON.stringify([data?.sourceFingerprint||data?.packageId||'',payload?.mareaBzones||{}]),cached=data?._mareaVisualCache;
+  if(cached?.fingerprint===fingerprint)return cached.entries;
+  const entries=new Map(features.map((feature)=>{const id=String(feature.properties?.mareaId||'');return[id,{feature,path:regionMapPath(feature,projection),label:comparisonMapMareaLabelAnchor(feature,projection)}]}));
+  if(data)data._mareaVisualCache={fingerprint,entries};
+  return entries;
+}
+
+function comparisonMapMareaLabelAnchor(feature,projection){
+  const polygons=(feature?.geometry?.coordinates||[]).map((coordinates)=>({type:'Feature',properties:{},geometry:{type:'Polygon',coordinates}})),labels=polygons.map((polygon)=>regionMapInteriorLabel(polygon,projection)).filter((label)=>label.radius>0).sort((left,right)=>right.radius-left.radius);
+  return labels[0]||regionMapInteriorLabel(feature,projection);
+}
+
+function comparisonMapDissolvedBoundary(features,projection,name='Boundary'){
+  const entries=(features||[]).map((feature)=>({feature,bounds:regionMapFeatureBounds(feature,projection)})).filter((entry)=>entry.bounds);
+  const contains=(point)=>entries.some(({feature,bounds})=>point.x>=bounds.minX&&point.x<=bounds.maxX&&point.y>=bounds.minY&&point.y<=bounds.maxY&&regionMapFeatureContains(feature,point,projection));
+  const coordinates=[];
+  for(const {feature} of entries)for(const ring of regionMapGeometryRings(feature.geometry))for(let index=1;index<ring.length;index++){
+    const a=ring[index-1],b=ring[index],projectedA=projection.point(a),projectedB=projection.point(b),dx=projectedB[0]-projectedA[0],dy=projectedB[1]-projectedA[1],length=Math.hypot(dx,dy);
+    if(!length)continue;
+    const midpoint={x:(projectedA[0]+projectedB[0])/2,y:(projectedA[1]+projectedB[1])/2},normal={x:-dy/length,y:dx/length};
+    let exterior=false;
+    for(const offset of [.8,1.6,2.8]){
+      const left=contains({x:midpoint.x+normal.x*offset,y:midpoint.y+normal.y*offset}),right=contains({x:midpoint.x-normal.x*offset,y:midpoint.y-normal.y*offset});
+      if(left!==right){exterior=true;break}
+      if(left&&right)break;
+    }
+    if(exterior)coordinates.push([a,b]);
+  }
+  return {type:'Feature',properties:{name},geometry:{type:'MultiLineString',coordinates}};
+}
+
+function comparisonMapStateBoundary(data=state.comparisonMapData,projection){
+  projection=projection||regionMapProjection(regionMapBounds([data?.azones]));
+  if(data?.stateBoundary)return data.stateBoundary;
+  if(data?._derivedStateBoundary)return data._derivedStateBoundary;
+  const boundary=comparisonMapDissolvedBoundary(data?.azones?.features||[],projection,'Virginia');
+  if(data)data._derivedStateBoundary=boundary;
+  return boundary;
+}
+
+function comparisonMapStateOutlinePath(feature,projection){
+  return (feature?.geometry?.coordinates||[]).map((line)=>line.map((point,index)=>`${index?'L':'M'}${projection.point(point).map((value)=>value.toFixed(2)).join(' ')}`).join(' ')).join(' ');
 }
 
 function comparisonMapScopeIds() {
-  return new Set((state.mapPayload?.geographyRows||[]).filter((row)=>Number.isFinite(row.referenceValue)||Number.isFinite(row.comparisonValue)).map((row)=>String(row.geographyId)));
+  return new Set([...comparisonMapDisplayRows()].filter(([,row])=>row&&(Number.isFinite(row.referenceValue)||Number.isFinite(row.comparisonValue))).map(([id])=>id));
 }
 
 function applyComparisonMapPresentation() {
   const scene = state.comparisonMapScene; if (!scene) return;
-  const rows = new Map((state.mapPayload?.geographyRows || []).map((row)=>[String(row.geographyId),row])), scale = comparisonMapScale(), scope = comparisonMapScopeIds();
-  scene.valuePaths.forEach((path,id)=>{const row=rows.get(id),value=comparisonMapMetricValue(row),outsideModel=!scope.has(id);path.style.fill=outsideModel?'#f4f6f8':comparisonMapColor(value,scale);path.dataset.direction=outsideModel?'context':comparisonMapDirection(value);path.classList.toggle('comparison-map-context',outsideModel);path.classList.toggle('comparison-map-outside-scope',outsideModel);path.classList.toggle('comparison-map-saturated',Number.isFinite(value)&&scale.kind==='diverging'&&Math.abs(value)>scale.limit);});
+  const rows = comparisonMapDisplayRows(), scale = comparisonMapScale(), scope = comparisonMapScopeIds();
+  scene.valuePaths.forEach((path,id)=>{const row=rows.get(id),value=comparisonMapMetricValue(row),outsideModel=!scope.has(id);path.style.fill=outsideModel?'#f4f6f8':comparisonMapColor(value,scale);path.dataset.direction=outsideModel?'context':comparisonMapDirection(value);path.classList.toggle('comparison-map-context',outsideModel);path.classList.toggle('comparison-map-outside-scope',outsideModel);});
   document.querySelectorAll('[data-comparison-map-layer]').forEach((input)=>{const group=scene.svg.querySelector(`[data-comparison-map-group="${input.dataset.comparisonMapLayer}"]`);if(group)group.style.display=input.checked?'':'none';});
   const metricLabels={percentChange:'Change %',absoluteChange:'Absolute change',referenceValue:'Reference value',comparisonValue:'Comparison value'}, units=$('mapMetric').value==='percentChange'?'%':state.mapPayload?.units||'';
   $('comparisonMapLegend').hidden=false;
   const formatLegendValue=(value)=>comparisonMapSignedValue(value,{percent:$('mapMetric').value==='percentChange',unit:$('mapMetric').value==='percentChange'?'':units?` ${units}`:''});
   const keys='<span class="comparison-map-legend-key"><strong aria-hidden="true">▼</strong> Decrease (dashed top border in 3D)</span><span class="comparison-map-legend-key"><strong aria-hidden="true">▲</strong> Increase (solid top border in 3D)</span><span class="comparison-map-legend-key"><i class="comparison-map-hatch"></i>Unavailable</span><span class="comparison-map-legend-key"><i class="comparison-map-context-key"></i>Outside model region</span>';
   $('comparisonMapLegend').innerHTML=scale.kind==='diverging'
-    ? `<div class="comparison-map-scale"><strong>${escapeHtml(metricLabels[$('mapMetric').value])}</strong><div class="comparison-map-scale-axis"><span>${escapeHtml(formatLegendValue(-scale.limit))}</span><i class="comparison-map-gradient diverging"><b aria-hidden="true"></b></i><span>${escapeHtml(formatLegendValue(scale.limit))}</span></div><small>• 0 at center · colors clipped at the 95th percentile</small></div><div class="comparison-map-legend-keys">${keys}</div>`
-    : `<div class="comparison-map-scale"><strong>${escapeHtml(metricLabels[$('mapMetric').value])}</strong><div class="comparison-map-scale-axis"><span>${escapeHtml(formatLegendValue(scale.min))}</span><i class="comparison-map-gradient sequential"></i><span>${escapeHtml(formatLegendValue(scale.max))}</span></div></div><div class="comparison-map-legend-keys">${keys}</div>`;
+    ? `<div class="comparison-map-scale"><strong>${escapeHtml(metricLabels[$('mapMetric').value])}</strong><div class="comparison-map-scale-axis"><span>${escapeHtml(formatLegendValue(-scale.limit))}</span><i class="comparison-map-gradient diverging" style="background:${comparisonMapCssGradient(scale)}"><b aria-hidden="true"></b></i><span>${escapeHtml(formatLegendValue(scale.limit))}</span></div><small>• 0 at center · perceptual color ramp scaled to the largest visible absolute change</small></div><div class="comparison-map-legend-keys">${keys}</div>`
+    : `<div class="comparison-map-scale"><strong>${escapeHtml(metricLabels[$('mapMetric').value])}</strong><div class="comparison-map-scale-axis"><span>${escapeHtml(formatLegendValue(scale.min))}</span><i class="comparison-map-gradient sequential" style="background:${comparisonMapCssGradient(scale)}"></i><span>${escapeHtml(formatLegendValue(scale.max))}</span></div></div><div class="comparison-map-legend-keys">${keys}</div>`;
   updateComparisonMapLabels();
   if (state.comparisonMapSelectedFeature) renderComparisonMapInspector();
 }
 
 function updateComparisonMapLabels() {
   const scene=state.comparisonMapScene,view=state.comparisonMapView,showIds=$('comparisonMapIdLabels').checked,showValues=$('comparisonMapValueLabels').checked;if(!scene?.labels||!view||(!showIds&&!showValues)){if(scene?.labels)scene.labels.innerHTML='';return;}
-  const useBzones=state.mapPayload?.geographyLevel==='bzone',useAzones=!useBzones;
+  const level=state.mapPayload?.geographyLevel,useBzones=level==='bzone',useMareas=level==='marea',useAzones=!useBzones&&!useMareas;
   const viewport={minX:view.x,minY:view.y,maxX:view.x+view.width,maxY:view.y+view.height};
-  const scope=comparisonMapScopeIds(),entries=comparisonMapIndexedEntries(useBzones?scene.bzoneIndex:scene.azoneIndex,viewport).filter((entry)=>scope.has(entry.id));
+  const index=useMareas?scene.mareaIndex:useBzones?scene.bzoneIndex:scene.azoneIndex;
+  const scope=comparisonMapScopeIds(),entries=comparisonMapIndexedEntries(index,viewport).filter((entry)=>scope.has(entry.id));
   const canvas=$('comparisonMapCanvas'),labelEntries=[];
   const metric=$('mapMetric').value,units=metric==='percentChange'?'%':state.mapPayload?.units||'';
   for(const entry of entries){
     const label=entry.label||regionMapInteriorLabel(entry.feature,scene.projection),x=label.x,y=label.y;if(x<view.x||x>view.x+view.width||y<view.y||y>view.y+view.height)continue;
     const sx=(x-view.x)/view.width*canvas.clientWidth,sy=(y-view.y)/view.height*canvas.clientHeight,radiusPx=Math.max(0,label.radius*Math.min(canvas.clientWidth/view.width,canvas.clientHeight/view.height));
-    if(radiusPx<6)continue;
+    if(radiusPx<6&&!useMareas)continue;
     const row=scene.rows.get(entry.id),value=comparisonMapMetricValue(row),valueText=Number.isFinite(value)?comparisonMapSignedValue(value,{percent:metric==='percentChange',unit:metric==='percentChange'?'':units?` ${units}`:''}):'N/A';
     const properties=entry.feature?.properties||{},azoneId=useBzones?String(properties.azoneId||entry.id.slice(0,5)):entry.id;
-    const locality=properties.localityName||properties.name||scene.localityNames?.get(azoneId)||'',identifier=entry.id;
+    const locality=useMareas?comparisonMareaLabel(entry.id):row?.name||properties.localityName||properties.name||scene.localityNames?.get(azoneId)||'',identifier=useMareas?locality:entry.id;
     const candidates=[];
-    if(showIds&&showValues){if(useAzones&&locality&&radiusPx>=70)candidates.push([locality,identifier,valueText]);if(radiusPx>=30)candidates.push([identifier,valueText]);candidates.push([valueText]);}
-    else if(showIds){if(useAzones&&locality&&radiusPx>=70)candidates.push([locality,identifier]);if(radiusPx>=25)candidates.push([identifier]);}else candidates.push([valueText]);
-    labelEntries.push({feature: entry.feature, label, priority: state.comparisonMapSelectedFeature?.id === entry.id ? 50 : 10, candidates, className: "region-map-id-label"});
+    if(showIds&&showValues){if(useMareas)candidates.push([identifier,valueText]);else{if(useAzones&&locality&&radiusPx>=70)candidates.push([locality,identifier,valueText]);if(radiusPx>=30)candidates.push([identifier,valueText]);candidates.push([valueText]);}}
+    else if(showIds){if(useMareas)candidates.push([identifier]);else{if(useAzones&&locality&&radiusPx>=70)candidates.push([locality,identifier]);if(radiusPx>=25)candidates.push([identifier]);}}else candidates.push([valueText]);
+    labelEntries.push({feature: entry.feature, label, force:useMareas, priority: useMareas ? 40 : state.comparisonMapSelectedFeature?.id === entry.id ? 50 : 10, candidates, className: "region-map-id-label"});
   }
   WorkbenchPolygonLabels.layout({group: scene.labels, entries: labelEntries, view, viewport: {width: Math.max(1, canvas.clientWidth), height: Math.max(1, canvas.clientHeight)}, project: scene.projection.point, pathFor: (feature) => regionMapPath(feature, scene.projection), className: "region-map-label", minFontPx: 8, maxFontPx: 11, maxLabels: 250});
 }
 
 function comparisonMapFeatureView(features) {
-  return regionMapFeaturesView(features,state.comparisonMapScene.projection);
+  const scene=state.comparisonMapScene,projection=scene.projection,entries=features.map((feature)=>regionMapFeatureBounds(feature,projection)).filter(Boolean);
+  if(!entries.length)return scene.fullView;
+  const raw={minX:Math.min(...entries.map((item)=>item.minX)),minY:Math.min(...entries.map((item)=>item.minY)),maxX:Math.max(...entries.map((item)=>item.maxX)),maxY:Math.max(...entries.map((item)=>item.maxY))};
+  const canvas=$('comparisonMapCanvas'),padding=36,usableWidth=Math.max(1,canvas.clientWidth-padding*2),usableHeight=Math.max(1,canvas.clientHeight-padding*2),centerX=(raw.minX+raw.maxX)/2,centerY=(raw.minY+raw.maxY)/2;
+  let width=Math.max(1,raw.maxX-raw.minX)*canvas.clientWidth/usableWidth,height=Math.max(1,raw.maxY-raw.minY)*canvas.clientHeight/usableHeight,ratio=comparisonMapViewportRatio();
+  if(width/height<ratio)width=height*ratio;else height=width/ratio;
+  return{x:centerX-width/2,y:centerY-height/2,width,height};
 }
 
 function focusComparisonMapProject({zoom=true}={}) {
   const scene=state.comparisonMapScene;if(!scene)return;
-  const ids=comparisonMapScopeIds(),features=[...ids].map((id)=>state.mapPayload?.geographyLevel==='bzone'?scene.bzoneFeatures.get(id):scene.azoneFeatures.get(id)).filter(Boolean);
+  const level=state.mapPayload?.geographyLevel,featuresById=level==='marea'?scene.mareaFeatures:level==='bzone'?scene.bzoneFeatures:scene.azoneFeatures;
+  const ids=comparisonMapScopeIds(),features=[...ids].map((id)=>featuresById.get(id)).filter(Boolean);
   scene.projectView=features.length?comparisonMapFeatureView(features):scene.fullView;
+  state.comparisonMapFitMode='project';
   $('fitComparisonMap').disabled=!features.length;
   if(zoom)setComparisonMapView(scene.projectView);
   applyComparisonMapPresentation();
@@ -4600,36 +6504,53 @@ function clearComparisonMapInspector() {
   state.comparisonMapSelectedFeature=null;$('comparisonMapInspector').hidden=true;if(state.comparisonMapScene?.inspected)state.comparisonMapScene.inspected.innerHTML='';
 }
 
+function renderComparisonMapSelectionOverlay(selected,scene){
+  if(!scene?.inspected||!selected?.feature)return;
+  const maskId=selected.type==='marea'?scene.mareaMaskIds?.get(String(selected.id)):'';
+  scene.inspected.innerHTML=maskId?`<g mask="url(#${maskId})"><rect class="region-map-inspected" x="0" y="0" width="1000" height="620"></rect></g>`:`<path class="region-map-inspected" d="${regionMapPath(selected.feature,scene.projection)}"></path>`;
+}
+
 function renderComparisonMapInspector() {
   const selected=state.comparisonMapSelectedFeature,scene=state.comparisonMapScene;if(!selected||!scene)return clearComparisonMapInspector();
-  if(selected.densityRow){const item=selected.densityRow,properties=selected.feature?.properties||{};$('comparisonMapInspectorTitle').textContent=item.name||properties.localityName||selected.id;$('comparisonMapInspectorBody').innerHTML=`<div class="comparison-map-detail-cards"><section class="comparison-map-detail-card identity"><h4>Identity</h4><dl class="region-map-details">${regionMapDetailRow(selected.type==='bzone'?'Bzone GEOID':'Azone ID',selected.id)}${regionMapDetailRow('Locality',item.name||properties.localityName)}${regionMapDetailRow('Project coverage','Included in project results')}</dl></section><section class="comparison-map-detail-card change"><h4>Changed-variable density</h4><strong>${Number(item.changedVariableCount||0).toLocaleString()} changed variables</strong><small>${Number(item.scannedVariableCount||0).toLocaleString()} safely assigned variables scanned · ${Number(item.unavailableVariableCount||0).toLocaleString()} unavailable</small></section></div>`;$('comparisonMapInspector').hidden=false;if(scene.inspected)scene.inspected.innerHTML=`<path class="region-map-inspected" d="${regionMapPath(selected.feature,scene.projection)}"></path>`;return;}
+  if(selected.densityRow){const item=selected.densityRow,properties=selected.feature?.properties||{},marea=selected.type==='marea',name=marea?comparisonMareaLabel(selected.id):item.name||properties.localityName||selected.id,members=marea?(properties.memberBzones||state.comparisonMapDensity?.mareaBzones?.[selected.id]||[]):[];$('comparisonMapInspectorTitle').textContent=name;$('comparisonMapInspectorBody').innerHTML=`<div class="comparison-map-detail-cards"><section class="comparison-map-detail-card identity"><h4>Identity</h4><dl class="region-map-details">${regionMapDetailRow(selected.type==='bzone'?'Bzone GEOID':marea?'Marea ID':'Azone ID',selected.id)}${regionMapDetailRow(marea?'Region':'Locality',name)}${members.length?regionMapDetailRow('Member Bzones',members.length.toLocaleString()):''}${regionMapDetailRow('Project coverage','Included in project results')}</dl></section><section class="comparison-map-detail-card change"><h4>Changed-variable density</h4><strong>${Number(item.changedVariableCount||0).toLocaleString()} changed variables</strong><small>${Number(item.scannedVariableCount||0).toLocaleString()} safely assigned variables scanned · ${Number(item.unavailableVariableCount||0).toLocaleString()} unavailable</small></section></div>`;$('comparisonMapInspector').hidden=false;renderComparisonMapSelectionOverlay(selected,scene);return;}
   const row=scene.rows.get(selected.id),metric=comparisonMapMetricValue(row),scale=comparisonMapScale(),properties=selected.feature.properties||{},scope=comparisonMapScopeIds();
   const status=scope.has(selected.id)?'Included in project results':'Virginia context only';
-  $('comparisonMapInspectorTitle').textContent=row?.name||properties.localityName||properties.name||selected.id;
+  $('comparisonMapInspectorTitle').textContent=selected.type==='marea'?comparisonMareaLabel(selected.id):row?.name||properties.localityName||properties.name||selected.id;
   const unit=state.mapPayload.units||'',value=(numberValue)=>Number.isFinite(numberValue)?`${number(numberValue)}${unit?` ${escapeHtml(unit)}`:''}`:'Not available';
-  const scaleStatus=!Number.isFinite(metric)||scale.kind!=='diverging'||Math.abs(metric)<=scale.limit?'Within color scale':metric>0?`Above +${percentage(scale.limit)}% scale cap`:`Below −${percentage(scale.limit)}% scale cap`;
-  const identityLabel=selected.type==='bzone'?'Bzone GEOID':'County / locality FIPS';
-  $('comparisonMapInspectorBody').innerHTML=`<div class="comparison-map-detail-cards"><section class="comparison-map-detail-card identity"><h4>Identity</h4><dl class="region-map-details">${regionMapDetailRow(identityLabel,selected.id)}${selected.type!=='bzone'?regionMapDetailRow('Technical geography','Azone'):''}${regionMapDetailRow('Locality',row?.name||properties.localityName)}${regionMapDetailRow('Project coverage',status)}</dl></section><div class="comparison-map-value-cards"><section class="comparison-map-detail-card"><h4>Reference</h4><strong>${value(row?.referenceValue)}</strong><small>${row?.referenceCount?.toLocaleString()||0} contributing rows</small></section><section class="comparison-map-detail-card"><h4>Comparison</h4><strong>${value(row?.comparisonValue)}</strong><small>${row?.comparisonCount?.toLocaleString()||0} contributing rows</small></section></div><section class="comparison-map-detail-card change"><h4>Change</h4><dl class="region-map-details">${regionMapDetailRow('Absolute',Number.isFinite(row?.absoluteChange)?comparisonMapSignedValue(row.absoluteChange):'Not available')}${regionMapDetailRow('Percent',Number.isFinite(row?.percentChange)?comparisonMapSignedValue(row.percentChange,{percent:true}):'Not available')}${regionMapDetailRow('Scale status',scaleStatus)}</dl></section></div>`;
-  $('comparisonMapInspector').hidden=false;scene.inspected.innerHTML=`<path class="region-map-inspected" d="${regionMapPath(selected.feature,scene.projection)}"></path>`;
+  const identityLabel=selected.type==='bzone'?'Bzone GEOID':selected.type==='marea'?'Marea ID':'County / locality FIPS',technical=selected.type==='marea'?'Marea':selected.type==='bzone'?'Bzone':'Azone',displayName=selected.type==='marea'?comparisonMareaLabel(selected.id):row?.name||properties.localityName;
+  const members=selected.type==='marea'?(properties.memberBzones||state.mapPayload?.mareaBzones?.[selected.id]||[]):[];
+  $('comparisonMapInspectorBody').innerHTML=`<div class="comparison-map-detail-cards"><section class="comparison-map-detail-card identity"><h4>Identity</h4><dl class="region-map-details">${regionMapDetailRow(identityLabel,selected.id)}${regionMapDetailRow('Technical geography',technical)}${regionMapDetailRow(selected.type==='marea'?'Region':'Locality',displayName)}${members.length?regionMapDetailRow('Member Bzones',members.length.toLocaleString()):''}${regionMapDetailRow('Project coverage',status)}</dl></section><div class="comparison-map-value-cards"><section class="comparison-map-detail-card"><h4>Reference</h4><strong>${value(row?.referenceValue)}</strong><small>${row?.referenceCount?.toLocaleString()||0} contributing rows</small></section><section class="comparison-map-detail-card"><h4>Comparison</h4><strong>${value(row?.comparisonValue)}</strong><small>${row?.comparisonCount?.toLocaleString()||0} contributing rows</small></section></div><section class="comparison-map-detail-card change"><h4>Change</h4><dl class="region-map-details">${regionMapDetailRow('Absolute',Number.isFinite(row?.absoluteChange)?comparisonMapSignedValue(row.absoluteChange):'Not available')}${regionMapDetailRow('Percent',Number.isFinite(row?.percentChange)?comparisonMapSignedValue(row.percentChange,{percent:true}):'Not available')}${regionMapDetailRow('Scale status','Within visible-value scale')}</dl></section></div>`;
+  $('comparisonMapInspector').hidden=false;renderComparisonMapSelectionOverlay(selected,scene);
 }
 
 function renderComparisonMap() {
   const data=state.comparisonMapData,payload=state.mapPayload,canvas=$('comparisonMapCanvas'),bounds=data&&regionMapBounds([data.mpos,data.azones,data.bzones]);
   if(!bounds||!payload)return setComparisonMapEmpty('Map geometry or comparison values are unavailable.');
-  const projection=regionMapProjection(bounds),geo=payload.geographyLevel,features=geo==='bzone'?data.bzones?.features||[]:data.azones?.features||[],idFor=(feature)=>String(geo==='bzone'?(feature.properties?.bzoneId||feature.properties?.GEOID||''):(feature.properties?.azoneId||feature.properties?.Azones||''));
-  const pathFor=(feature)=>regionMapPath(feature,projection),mpos=(data.mpos?.features||[]).map((feature)=>`<path class="region-map-mpo comparison-map-context" d="${pathFor(feature)}"></path>`).join(''),azones=(data.azones?.features||[]).map((feature)=>`<path class="region-map-azone comparison-map-context" d="${pathFor(feature)}"></path>`).join(''),bzones=(data.bzones?.features||[]).map((feature)=>`<path class="region-map-bzone comparison-map-context" d="${pathFor(feature)}"></path>`).join(''),values=features.map((feature)=>`<path class="comparison-map-value" data-map-geography-id="${escapeHtml(idFor(feature))}" d="${pathFor(feature)}"><title>${escapeHtml(feature.properties?.localityName||feature.properties?.name||idFor(feature))}</title></path>`).join('');
+  const projection=regionMapProjection(bounds),geo=payload.geographyLevel,mareaFeatures=comparisonMapMareaFeatures(data,payload),features=geo==='marea'?mareaFeatures:geo==='bzone'?data.bzones?.features||[]:data.azones?.features||[];
+  const idFor=(feature)=>String(geo==='marea'?(feature.properties?.mareaId||''):geo==='bzone'?(feature.properties?.bzoneId||feature.properties?.GEOID||''):(feature.properties?.azoneId||feature.properties?.Azones||''));
+  const pathFor=(feature)=>regionMapPath(feature,projection),cache=data._comparisonProjectedPaths||(data._comparisonProjectedPaths={}),layerPath=(name,collection)=>cache[name]||(cache[name]=(collection?.features||[]).map(pathFor).join(' ')),mpos=`<path class="region-map-mpo comparison-map-context" d="${layerPath('mpos',data.mpos)}"></path>`,azones=`<path class="region-map-azone comparison-map-context" d="${layerPath('azones',data.azones)}"></path>`,bzones=`<path class="region-map-bzone comparison-map-context" d="${layerPath('bzones',data.bzones)}"></path>`,stateOutline=cache.stateOutline||(cache.stateOutline=comparisonMapStateOutlinePath(comparisonMapStateBoundary(data,projection),projection)),mareaVisuals=comparisonMapMareaVisuals(data,payload,mareaFeatures,projection);
+  const mareaMasks=geo==='marea'?[...mareaVisuals.entries()].map(([id,item],index)=>`<mask id="comparison-marea-mask-${index}" maskUnits="userSpaceOnUse" x="0" y="0" width="1000" height="620"><path d="${item.path}" fill="white" stroke="white" stroke-width="1.4" stroke-linejoin="round"></path></mask>`).join(''):'';
+  const values=geo==='marea'?[...mareaVisuals.entries()].map(([id,item],index)=>`<g class="comparison-map-marea-region" tabindex="0" role="button" aria-label="Inspect ${escapeHtml(item.feature.properties?.name||id)}" data-map-geography-id="${escapeHtml(id)}"><title>${escapeHtml(item.feature.properties?.name||id)}</title><g class="comparison-map-marea-visual" filter="url(#comparison-map-marea-outline)"><g mask="url(#comparison-marea-mask-${index})"><rect class="comparison-map-value marea-value" data-comparison-map-value-fill data-map-geography-fill-id="${escapeHtml(id)}" x="0" y="0" width="1000" height="620"></rect></g></g><path class="comparison-map-marea-hit" d="${item.path}"></path></g>`).join(''):features.map((feature)=>`<path class="comparison-map-value" tabindex="0" role="button" aria-label="Inspect ${escapeHtml(feature.properties?.name||idFor(feature))}" data-comparison-map-value-fill data-map-geography-fill-id="${escapeHtml(idFor(feature))}" data-map-geography-id="${escapeHtml(idFor(feature))}" d="${pathFor(feature)}"><title>${escapeHtml(feature.properties?.localityName||feature.properties?.name||idFor(feature))}</title></path>`).join('');
   canvas.className='region-map-canvas comparison-map-canvas';
-  canvas.innerHTML=`<svg role="img" aria-label="Virginia comparison map" viewBox="0 0 1000 620" data-comparison-map-svg><defs><pattern id="comparison-map-unavailable" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#e3e7ea"></rect><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" stroke="#9aa6af" stroke-width="1"></path></pattern></defs><g data-comparison-map-group="mpos">${mpos}</g><g data-comparison-map-group="azones">${azones}</g><g data-comparison-map-group="bzones">${bzones}</g><g data-comparison-map-group="values">${values}</g><g data-comparison-map-group="labels"></g><g data-comparison-map-group="inspected"></g></svg>`;
-  const svg=canvas.querySelector('svg'),fullView=comparisonMapFullView(projection),bzoneFeatures=new Map((data.bzones?.features||[]).map((feature)=>[String(feature.properties?.bzoneId||feature.properties?.GEOID||''),feature])),azoneFeatures=new Map((data.azones?.features||[]).map((feature)=>[String(feature.properties?.azoneId||feature.properties?.Azones||''),feature])),hit=(items,getId)=>items.map((feature)=>({id:String(getId(feature)),feature,bounds:regionMapFeatureBounds(feature,projection)})).filter((entry)=>entry.id&&entry.bounds);
-  const hitBzones=hit(data.bzones?.features||[],(feature)=>feature.properties?.bzoneId||feature.properties?.GEOID),hitAzones=hit(data.azones?.features||[],(feature)=>feature.properties?.azoneId||feature.properties?.Azones);
-  state.comparisonMapScene={svg,projection,fullView,rows:new Map((payload.geographyRows||[]).map((row)=>[String(row.geographyId),row])),valuePaths:new Map([...svg.querySelectorAll('[data-map-geography-id]')].map((path)=>[path.dataset.mapGeographyId,path])),bzoneFeatures,azoneFeatures,mpoFeatures:new Map((data.mpos?.features||[]).map((feature)=>[String(feature.properties?.regionId||''),feature])),regionsById:new Map((data.regions||[]).map((region)=>[String(region.id),region])),localityNames:new Map((data.localities||[]).map((item)=>[String(item.azoneId),item.localityName])),hitBzones,hitAzones,bzoneIndex:comparisonMapSpatialIndex(hitBzones,projection),azoneIndex:comparisonMapSpatialIndex(hitAzones,projection),labels:svg.querySelector('[data-comparison-map-group="labels"]'),inspected:svg.querySelector('[data-comparison-map-group="inspected"]'),projectView:null};
+  canvas.innerHTML=`<svg role="img" aria-label="Virginia comparison map" viewBox="0 0 1000 620" data-comparison-map-svg><defs><pattern id="comparison-map-unavailable" width="8" height="8" patternUnits="userSpaceOnUse"><rect width="8" height="8" fill="#e3e7ea"></rect><path d="M-2 2L2-2M0 8L8 0M6 10L10 6" stroke="#9aa6af" stroke-width="1"></path></pattern>${mareaMasks}<filter id="comparison-map-marea-outline" x="-4%" y="-4%" width="108%" height="108%" color-interpolation-filters="sRGB"><feMorphology in="SourceAlpha" operator="dilate" radius="0.9" result="expanded"></feMorphology><feComposite in="expanded" in2="SourceAlpha" operator="out" result="ring"></feComposite><feFlood flood-color="#526172" flood-opacity="0.72" result="outline-color"></feFlood><feComposite in="outline-color" in2="ring" operator="in" result="outline"></feComposite><feMerge><feMergeNode in="SourceGraphic"></feMergeNode><feMergeNode in="outline"></feMergeNode></feMerge></filter></defs><g data-comparison-map-group="mpos">${mpos}</g><g data-comparison-map-group="azones">${azones}</g><g data-comparison-map-group="bzones">${bzones}</g><g data-comparison-map-group="values">${values}</g><path class="comparison-map-state-outline" d="${stateOutline}"></path><g data-comparison-map-group="labels"></g><g data-comparison-map-group="inspected"></g></svg>`;
+  const svg=canvas.querySelector('svg'),fullView=comparisonMapFullView(projection),bzoneFeatures=new Map((data.bzones?.features||[]).map((feature)=>[String(feature.properties?.bzoneId||feature.properties?.GEOID||''),feature])),azoneFeatures=new Map((data.azones?.features||[]).map((feature)=>[String(feature.properties?.azoneId||feature.properties?.Azones||''),feature])),mareaFeatureMap=new Map(mareaFeatures.map((feature)=>[String(feature.properties.mareaId),feature])),hit=(items,getId)=>items.map((feature)=>({id:String(getId(feature)),feature,bounds:regionMapFeatureBounds(feature,projection)})).filter((entry)=>entry.id&&entry.bounds);
+  const activeHit=hit(features,idFor);if(geo==='marea')activeHit.forEach((entry)=>{entry.label=mareaVisuals.get(entry.id)?.label});const activeIndex=comparisonMapSpatialIndex(activeHit,projection);
+  state.comparisonMapScene={svg,projection,fullView,rows:comparisonMapDisplayRows(),valuePaths:new Map([...svg.querySelectorAll('[data-comparison-map-value-fill]')].map((path)=>[path.dataset.mapGeographyFillId,path])),mareaMaskIds:new Map([...mareaVisuals.keys()].map((id,index)=>[String(id),`comparison-marea-mask-${index}`])),bzoneFeatures,azoneFeatures,mareaFeatures:mareaFeatureMap,mpoFeatures:new Map((data.mpos?.features||[]).map((feature)=>[String(feature.properties?.regionId||''),feature])),regionsById:new Map((data.regions||[]).map((region)=>[String(region.id),region])),localityNames:new Map((data.localities||[]).map((item)=>[String(item.azoneId),item.localityName])),hitBzones:geo==='bzone'?activeHit:[],hitAzones:geo!=='bzone'&&geo!=='marea'?activeHit:[],hitMareas:geo==='marea'?activeHit:[],bzoneIndex:geo==='bzone'?activeIndex:null,azoneIndex:geo!=='bzone'&&geo!=='marea'?activeIndex:null,mareaIndex:geo==='marea'?activeIndex:null,labels:svg.querySelector('[data-comparison-map-group="labels"]'),inspected:svg.querySelector('[data-comparison-map-group="inspected"]'),projectView:null};
+  svg.querySelectorAll('[data-map-geography-id]').forEach((path)=>path.addEventListener('keydown',(event)=>{if(!['Enter',' '].includes(event.key))return;event.preventDefault();const id=path.dataset.mapGeographyId,feature=geo==='marea'?mareaFeatureMap.get(id):geo==='bzone'?bzoneFeatures.get(id):azoneFeatures.get(id);if(feature){state.comparisonMapSelectedFeature={id,feature,type:geo};renderComparisonMapInspector();}}));
   state.comparisonMapView=fullView;clearComparisonMapInspector();
+  applyComparisonMapLayerDefaults(geo);
+  document.querySelectorAll('[data-comparison-map-context-control]').forEach((control)=>{control.hidden=geo==='marea'});$('comparisonMapMareaContext').hidden=geo!=='marea';
   $('comparisonMapTitle').textContent=`${payload.table} / ${payload.variable} by ${payload.geographyLabel || (geo==='bzone'?'Bzone':'County / locality')}`;
   const assignments=payload.assignments||[],unmatched=assignments.reduce((sum,item)=>sum+(item.unmatchedRows||0),0),mapped=(payload.geographyRows||[]).filter((row)=>Number.isFinite(row.referenceValue)||Number.isFinite(row.comparisonValue)).length;
-  const project=state.data?.projects?.find((item)=>item.id===payload.reference?.projectId),identity=project?`${project.template?.name||payload.reference?.templateId||'Template'} · ${project.inputLibrary?.name||project.inputLibrary?.id||payload.reference?.inputLibraryId||'InputLibrary'}`:`${payload.reference?.templateId||'Project template'} · ${payload.reference?.inputLibraryId||'Project InputLibrary'}`;
+  const project=state.data?.projects?.find((item)=>item.id===payload.reference?.projectId),identity=project?projectPackageName(project):(payload.reference?.packageDisplayName||"VisionEval model");
   $('comparisonMapSubtitle').textContent=`${payload.reference?.label || 'Reference'} compared with ${payload.comparison?.label || 'Comparison'} · ${payload.year} · ${identity} · ${mapped.toLocaleString()} project geographies${unmatched?` · ${unmatched.toLocaleString()} unmatched rows excluded`:''}`;
   focusComparisonMapProject({zoom:true});setComparisonMapExportAvailability();
   if(state.comparisonMapMode==='3d')renderComparisonMap3d();
+}
+
+function applyComparisonMapLayerDefaults(geography){
+  const defaults=geography==='bzone'?{mpos:true,azones:true,bzones:true}:geography==='marea'?{mpos:true,azones:true,bzones:false}:{mpos:true,azones:true,bzones:false},saved=state.comparisonMapLayerPreferences.get(geography)||defaults;
+  document.querySelectorAll('[data-comparison-map-layer]').forEach((input)=>{if(Object.hasOwn(saved,input.dataset.comparisonMapLayer))input.checked=Boolean(saved[input.dataset.comparisonMapLayer]);});
 }
 
 const COMPARISON_MAP_3D_CAPABILITY_STATES = Object.freeze(['loading','ready','renderer-unavailable','webgl-unavailable','initialization-failed']);
@@ -4658,7 +6579,7 @@ async function initializeComparisonMap3dCapability(){
   finally{try{map?.remove()}catch{}host.remove()}
 }
 
-function comparisonMapFeatureId(feature,level){return String(level==='bzone'?(feature.properties?.bzoneId||feature.properties?.GEOID||''):(feature.properties?.azoneId||feature.properties?.Azones||''))}
+function comparisonMapFeatureId(feature,level){return String(level==='marea'?(feature.properties?.mareaId||''):level==='bzone'?(feature.properties?.bzoneId||feature.properties?.GEOID||''):(feature.properties?.azoneId||feature.properties?.Azones||''))}
 
 function comparisonMap3dBounds(features){const bounds=regionMapBounds([{features}]);return bounds?[[bounds.minX,bounds.minY],[bounds.maxX,bounds.maxY]]:null}
 
@@ -4675,17 +6596,17 @@ function comparisonMap3dLabelRows(map,features,level){
   const showNames=$('comparisonMapIdLabels').checked,showValues=$('comparisonMapValueLabels').checked;if(!showNames&&!showValues)return;
   const occupied=[];
   const valueText=(feature)=>{const rawValue=feature.properties?.__displayValue,value=rawValue===null||rawValue===undefined?NaN:Number(rawValue);return Number.isFinite(value)?comparisonMapSignedValue(value,{percent:$('mapMetric').value==='percentChange',unit:$('mapMetric').value==='percentChange'?'':state.mapPayload?.units?` ${state.mapPayload.units}`:''}):'N/A'};
-  for(const feature of features){const id=comparisonMapFeatureId(feature,level),point=regionMapInteriorLabel(feature,{point:(value)=>value});if(point.radius<=0)continue;const name=feature.properties?.localityName||feature.properties?.name||feature.properties?.__name||'',value=showValues?valueText(feature):'',candidates=showNames&&showValues?[[name,id,value],[id,value],[value]]:showNames?[[name,id],[id]]:[[value]],screen=map.project([point.x,point.y]),radiusScreen=map.project([point.x+point.radius,point.y]),available=Math.max(18,Math.hypot(radiusScreen.x-screen.x,radiusScreen.y-screen.y)*2);let accepted='';for(const candidate of candidates){const text=candidate.filter(Boolean).join('\n');if(!text)continue;const lines=text.split('\n'),width=Math.min(190,Math.max(42,...lines.map((line)=>line.length*6))),height=lines.length*13+7,box={left:screen.x-width/2,right:screen.x+width/2,top:screen.y-height/2,bottom:screen.y+height/2};if(width>available*1.8||occupied.some((item)=>item.left<box.right&&item.right>box.left&&item.top<box.bottom&&item.bottom>box.top))continue;occupied.push(box);accepted=text;break}if(!accepted)continue;const element=document.createElement('div');element.className='comparison-map-3d-label';element.textContent=accepted;const marker=new window.maplibregl.Marker({element,anchor:'center'}).setLngLat([point.x,point.y]).addTo(map);state.comparisonMap3dMarkers.push(marker);if(state.comparisonMap3dMarkers.length>=100)break;
+  for(const feature of features){const id=comparisonMapFeatureId(feature,level),marea=level==='marea',point=marea?comparisonMapMareaLabelAnchor(feature,{point:(value)=>value}):regionMapInteriorLabel(feature,{point:(value)=>value});if(point.radius<=0)continue;const name=feature.properties?.localityName||feature.properties?.name||feature.properties?.__name||'',value=showValues?valueText(feature):'',candidates=showNames&&showValues?[[name,id,value],[id,value],[value]]:showNames?[[name,id],[id]]:[[value]],screen=map.project([point.x,point.y]),radiusScreen=map.project([point.x+point.radius,point.y]),available=Math.max(18,Math.hypot(radiusScreen.x-screen.x,radiusScreen.y-screen.y)*2);let accepted='';for(const candidate of candidates){const text=candidate.filter(Boolean).join('\n');if(!text)continue;const lines=text.split('\n'),width=Math.min(190,Math.max(42,...lines.map((line)=>line.length*6))),height=lines.length*13+7,box={left:screen.x-width/2,right:screen.x+width/2,top:screen.y-height/2,bottom:screen.y+height/2};if(!marea&&(width>available*1.8||occupied.some((item)=>item.left<box.right&&item.right>box.left&&item.top<box.bottom&&item.bottom>box.top)))continue;occupied.push(box);accepted=text;break}if(!accepted)continue;const element=document.createElement('div');element.className='comparison-map-3d-label';element.textContent=accepted;const marker=new window.maplibregl.Marker({element,anchor:'center'}).setLngLat([point.x,point.y]).addTo(map);state.comparisonMap3dMarkers.push(marker);if(state.comparisonMap3dMarkers.length>=100)break;
   }
 }
 
 function comparisonMap3dRows(){
-  const density=$('comparisonMap3dHeight').value==='change-density',level=state.mapPayload?.geographyLevel,displayRows=new Map((state.mapPayload?.geographyRows||[]).map((row)=>[String(row.geographyId),row])),heightRows=new Map(((density?state.comparisonMapDensity?.geographyRows:state.mapPayload?.geographyRows)||[]).map((row)=>[String(row.geographyId),row]));
+  const density=$('comparisonMap3dHeight').value==='change-density',level=state.mapPayload?.geographyLevel,displayRows=comparisonMapDisplayRows();let heightRows=density?new Map((state.comparisonMapDensity?.geographyRows||[]).map((row)=>[String(row.geographyId),row])):comparisonMapDisplayRows();
   return {density,level,displayRows,heightRows};
 }
 
 async function loadComparisonMapDensity(){
-  const geographyLevel=state.mapPayload?.geographyLevel==='bzone'?'bzone':'azone',signature=JSON.stringify([$('mapReference').value,$('mapComparison').value,$('mapYear').value,geographyLevel]);if(state.comparisonMapDensity&&state.comparisonMapDensitySignature===signature)return state.comparisonMapDensity;
+  const geographyLevel=['bzone','marea'].includes(state.mapPayload?.geographyLevel)?state.mapPayload.geographyLevel:'azone',signature=JSON.stringify([$('mapReference').value,$('mapComparison').value,$('mapYear').value,geographyLevel]);if(state.comparisonMapDensity&&state.comparisonMapDensitySignature===signature)return state.comparisonMapDensity;
   startCompareActivity('Calculating changed-variable density','Validating saved comparison results.');const operation=await post('/api/comparison/operations/start',{operationKind:'change-density',reference:$('mapReference').value,comparison:$('mapComparison').value,year:$('mapYear').value,geographyLevel});state.comparisonMapDensityOperationId=operation.id;state.comparisonOperationId=operation.id;let status=operation;
   while(['waiting','running'].includes(status.state)){setCompareActivityPhase('Calculating changed-variable density',status.message||status.phase||'Assigning output variables to project geography.');await new Promise((resolve)=>setTimeout(resolve,350));status=await request(`/api/comparison/operations/status?id=${encodeURIComponent(operation.id)}`);}
   state.comparisonMapDensityOperationId='';state.comparisonOperationId='';if(status.state==='cancelled')throw new DOMException('Stopped','AbortError');if(status.state!=='succeeded'||!status.result)throw new Error(status.message||'Changed-variable density could not be calculated.');state.comparisonMapDensity=status.result;state.comparisonMapDensitySignature=signature;finishCompareActivity('succeeded','Changed-variable density ready',`${status.result.geographyRows?.length||0} project geographies were evaluated.`);return status.result;
@@ -4693,9 +6614,9 @@ async function loadComparisonMapDensity(){
 
 async function comparisonMap3dSceneData(){
   if($('comparisonMap3dHeight').value==='change-density')await loadComparisonMapDensity();
-  const {density,level,displayRows,heightRows}=comparisonMap3dRows(),data=state.comparisonMapData,features=(level==='bzone'?data.bzones?.features:data.azones?.features)||[],scope=new Set(displayRows.keys()),project=features.filter((feature)=>scope.has(comparisonMapFeatureId(feature,level))),scale=comparisonMapScale(),densityMax=Math.max(1,...[...heightRows.values()].map((row)=>Number(row.changedVariableCount)||0)),heightLimit=comparisonMapPercentile([...heightRows.values()].map((row)=>Math.abs(comparisonMapMetricValue(row))).filter(Number.isFinite),.95),elevationDirection=['increase','decrease'].includes(state.comparisonMap3dElevationDirection)?state.comparisonMap3dElevationDirection:'all';
-  const valueFeatures=project.map((feature)=>{const id=comparisonMapFeatureId(feature,level),displayRow=displayRows.get(id),heightRow=heightRows.get(id),displayCandidate=comparisonMapMetricValue(displayRow),heightCandidate=density?Number(heightRow?.changedVariableCount):displayCandidate,displayValue=Number.isFinite(displayCandidate)?displayCandidate:null,heightValue=Number.isFinite(heightCandidate)?heightCandidate:null,direction=comparisonMapDirection(displayValue),directionVisible=elevationDirection==='all'||elevationDirection===direction,ratio=!Number.isFinite(heightValue)?0:density?Math.min(1,Math.abs(heightValue)/densityMax):Math.min(1,Math.abs(heightValue)/heightLimit),color=!Number.isFinite(displayValue)?comparisonPaletteColor('map','neutral'):comparisonMapColor(displayValue,scale),base=0,height=directionVisible&&['increase','decrease'].includes(direction)?ratio*12000:0;return {type:'Feature',geometry:feature.geometry,properties:{...feature.properties,__id:id,__displayValue:displayValue,__heightValue:heightValue,__available:Number.isFinite(displayValue),__heightAvailable:Number.isFinite(heightValue),__base:base,__height:height,__color:color,__direction:direction,__name:displayRow?.name||feature.properties?.localityName||feature.properties?.name||id,__capped:!density&&Number.isFinite(heightValue)&&Math.abs(heightValue)>heightLimit}}});
-  return {density,level,displayRows,heightRows,project:valueFeatures,originalProject:project,azones:data.azones?.features||[],bzones:data.bzones?.features||[],mpos:data.mpos?.features||[],elevationDirection,scale,densityMax,heightLimit};
+  const {density,level,displayRows,heightRows}=comparisonMap3dRows(),data=state.comparisonMapData,features=(level==='marea'?comparisonMapMareaFeatures(data,state.mapPayload):level==='bzone'?data.bzones?.features:data.azones?.features)||[],scope=new Set(displayRows.keys()),project=features.filter((feature)=>scope.has(comparisonMapFeatureId(feature,level))),scale=comparisonMapScale(),densityMax=Math.max(1,...[...heightRows.values()].map((row)=>Number(row?.changedVariableCount)||0)),heightLimit=density?densityMax:scale.kind==='diverging'?scale.limit:Math.max(Math.abs(scale.min),Math.abs(scale.max)),elevationDirection=['increase','decrease'].includes(state.comparisonMap3dElevationDirection)?state.comparisonMap3dElevationDirection:'all';
+  const valueFeatures=project.map((feature)=>{const id=comparisonMapFeatureId(feature,level),displayRow=displayRows.get(id),heightRow=heightRows.get(id),displayCandidate=comparisonMapMetricValue(displayRow),heightCandidate=density?Number(heightRow?.changedVariableCount):displayCandidate,displayValue=Number.isFinite(displayCandidate)?displayCandidate:null,heightValue=Number.isFinite(heightCandidate)?heightCandidate:null,direction=comparisonMapDirection(displayValue),directionVisible=elevationDirection==='all'||elevationDirection===direction,ratio=!Number.isFinite(heightValue)||heightLimit<=0?0:Math.min(1,Math.abs(heightValue)/heightLimit),color=!Number.isFinite(displayValue)?comparisonPaletteColor('map','neutral'):comparisonMapColor(displayValue,scale),base=0,height=directionVisible&&['increase','decrease'].includes(direction)?ratio*12000:0;return {type:'Feature',geometry:feature.geometry,properties:{...feature.properties,__id:id,__displayValue:displayValue,__heightValue:heightValue,__available:Number.isFinite(displayValue),__heightAvailable:Number.isFinite(heightValue),__base:base,__height:height,__color:color,__direction:direction,__name:level==='marea'?comparisonMareaLabel(id):displayRow?.name||feature.properties?.localityName||feature.properties?.name||id}}});
+  return {density,level,displayRows,heightRows,project:valueFeatures,originalProject:project,azones:data.azones?.features||[],bzones:data.bzones?.features||[],mpos:data.mpos?.features||[],stateBoundary:comparisonMapStateBoundary(data),elevationDirection,scale,densityMax,heightLimit};
 }
 
 function comparisonMapHexRgba(value,alpha=.94){const text=String(value||''),hex=text.match(/^#([0-9a-f]{6})$/i),rgb=text.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);if(rgb)return rgb.slice(1,4).map((channel)=>Math.max(0,Math.min(255,Number(channel)))/255).concat(alpha);if(!hex)return[.5,.5,.5,alpha];const number=parseInt(hex[1],16);return[(number>>16&255)/255,(number>>8&255)/255,(number&255)/255,alpha]}
@@ -4705,9 +6626,9 @@ function comparisonMap3dLayerVisible(name){return Boolean(document.querySelector
 function updateComparisonMap3dSources(map,scene){
   const collection=(features)=>({type:'FeatureCollection',features});
   const borderColor=getComputedStyle(document.documentElement).getPropertyValue('--text').trim()||'#243244';
-  const borderMesh=window.WorkbenchExtrusionBorders?.buildMesh(scene.project,window.maplibregl,borderColor);
+  const borderMesh=window.WorkbenchExtrusionBorders?.buildMesh(scene.level==='marea'?[]:scene.project,window.maplibregl,borderColor);
   const projectBounds=comparisonMap3dBounds(scene.project);if(projectBounds)state.comparisonMap3dDefaultCamera={bounds:projectBounds,pitch:52,bearing:-20};
-  map.getSource('azones')?.setData(collection(scene.azones));map.getSource('bzones')?.setData(collection(scene.bzones));map.getSource('project')?.setData(collection(scene.originalProject));map.getSource('mpos')?.setData(collection(scene.mpos));map.getSource('values')?.setData(collection(scene.project));
+  map.getSource('azones')?.setData(collection(scene.azones));map.getSource('bzones')?.setData(collection(scene.bzones));map.getSource('project')?.setData(collection(scene.originalProject));map.getSource('mpos')?.setData(collection(scene.mpos));map.getSource('state-boundary')?.setData(collection([scene.stateBoundary]));map.getSource('values')?.setData(collection(scene.project));
   const projectOnly=$('comparisonMapProjectOnly').checked;
   ['azone-context-fill','azone-context-line'].forEach((id)=>map.setLayoutProperty(id,'visibility',!projectOnly&&comparisonMap3dLayerVisible('azones')?'visible':'none'));['bzone-context-fill','bzone-context-line'].forEach((id)=>map.setLayoutProperty(id,'visibility',!projectOnly&&comparisonMap3dLayerVisible('bzones')?'visible':'none'));map.setLayoutProperty('mpo-line','visibility',!projectOnly&&comparisonMap3dLayerVisible('mpos')?'visible':'none');
   state.comparisonMap3dBorderLayer?.setMesh(borderMesh);
@@ -4716,7 +6637,7 @@ function updateComparisonMap3dSources(map,scene){
 
 function initializeComparisonMap3dMap(scene){
   const maplibre=window.maplibregl,container=$('comparisonMap3dCanvas'),collection=(features)=>({type:'FeatureCollection',features});container.innerHTML='';
-  const map=new maplibre.Map({container,style:{version:8,sources:{azones:{type:'geojson',data:collection(scene.azones)},bzones:{type:'geojson',data:collection(scene.bzones)},project:{type:'geojson',data:collection(scene.originalProject)},mpos:{type:'geojson',data:collection(scene.mpos)},values:{type:'geojson',data:collection(scene.project)}},layers:[{id:'background',type:'background',paint:{'background-color':'#eef2f5'}},{id:'azone-context-fill',type:'fill',source:'azones',paint:{'fill-color':'#dbe3e9','fill-opacity':.11}},{id:'azone-context-line',type:'line',source:'azones',paint:{'line-color':'#8094a5','line-width':.55,'line-opacity':.42}},{id:'bzone-context-fill',type:'fill',source:'bzones',paint:{'fill-color':'#dbe3e9','fill-opacity':.035}},{id:'bzone-context-line',type:'line',source:'bzones',paint:{'line-color':'#aab7c2','line-width':.35,'line-opacity':.3}},{id:'mpo-line',type:'line',source:'mpos',paint:{'line-color':'#163f68','line-width':1.3,'line-opacity':.68}},{id:'values-hit',type:'fill',source:'values',paint:{'fill-color':'#000000','fill-opacity':.001}},{id:'values-extrusion',type:'fill-extrusion',source:'values',paint:{'fill-extrusion-color':['get','__color'],'fill-extrusion-height':['get','__height'],'fill-extrusion-base':['get','__base'],'fill-extrusion-opacity':.92}}]},center:[-78.5,37.8],zoom:6,pitch:52,bearing:-20,attributionControl:false,renderWorldCopies:false,preserveDrawingBuffer:true});state.comparisonMap3d=map;state.comparisonMap3dScene=scene;
+  const map=new maplibre.Map({container,style:{version:8,sources:{azones:{type:'geojson',data:collection(scene.azones)},bzones:{type:'geojson',data:collection(scene.bzones)},project:{type:'geojson',data:collection(scene.originalProject)},mpos:{type:'geojson',data:collection(scene.mpos)},'state-boundary':{type:'geojson',data:collection([scene.stateBoundary])},values:{type:'geojson',data:collection(scene.project)}},layers:[{id:'background',type:'background',paint:{'background-color':'#eef2f5'}},{id:'azone-context-fill',type:'fill',source:'azones',paint:{'fill-color':'#dbe3e9','fill-opacity':.11}},{id:'azone-context-line',type:'line',source:'azones',paint:{'line-color':'#8094a5','line-width':.55,'line-opacity':.42}},{id:'bzone-context-fill',type:'fill',source:'bzones',paint:{'fill-color':'#dbe3e9','fill-opacity':.035}},{id:'bzone-context-line',type:'line',source:'bzones',paint:{'line-color':'#aab7c2','line-width':.35,'line-opacity':.3}},{id:'mpo-line',type:'line',source:'mpos',paint:{'line-color':'#163f68','line-width':1.3,'line-opacity':.68}},{id:'state-outline',type:'line',source:'state-boundary',paint:{'line-color':'#243244','line-width':2.1,'line-opacity':.86}},{id:'values-hit',type:'fill',source:'values',paint:{'fill-color':'#000000','fill-opacity':.001}},{id:'values-extrusion',type:'fill-extrusion',source:'values',paint:{'fill-extrusion-color':['get','__color'],'fill-extrusion-height':['get','__height'],'fill-extrusion-base':['get','__base'],'fill-extrusion-opacity':1}}]},center:[-78.5,37.8],zoom:6,pitch:52,bearing:-20,attributionControl:false,renderWorldCopies:false,preserveDrawingBuffer:true});state.comparisonMap3d=map;state.comparisonMap3dScene=scene;
   map.addControl(new maplibre.NavigationControl({showCompass:true,showZoom:false,visualizePitch:true}),'top-right');
   map.on('load',()=>{state.comparisonMap3dBorderLayer=new window.WorkbenchExtrusionBorders.BorderLayer();map.addLayer(state.comparisonMap3dBorderLayer);updateComparisonMap3dSources(map,scene);const bounds=comparisonMap3dBounds(scene.project);if(bounds){map.fitBounds(bounds,{padding:45,pitch:52,bearing:-20,duration:0});state.comparisonMap3dDefaultCamera={bounds,pitch:52,bearing:-20}}});map.on('moveend',()=>comparisonMap3dLabelRows(map,state.comparisonMap3dScene?.project||[],state.comparisonMap3dScene?.level));
   const tooltip=$('comparisonMap3dTooltip');map.on('mousemove','values-hit',(event)=>{map.getCanvas().style.cursor='pointer';const item=event.features?.[0]?.properties||{},available=item.__available===true||item.__available==='true',densityNow=state.comparisonMap3dScene?.density,displayNumber=Number(item.__displayValue),displayValue=!available?'Unavailable':comparisonMapSignedValue(displayNumber,{percent:$('mapMetric').value==='percentChange',unit:$('mapMetric').value==='percentChange'?'':state.mapPayload?.units||''}),heightValue=Number(item.__heightValue),height=densityNow&&Number.isFinite(heightValue)?`<span>3D height: ${heightValue.toLocaleString()} changed variables</span>`:'',direction=item.__direction==='decrease'?'▼ Decrease':item.__direction==='increase'?'▲ Increase':item.__direction==='neutral'?'• Neutral':'Unavailable';tooltip.innerHTML=`<strong>${escapeHtml(item.__name||item.__id)}</strong><span>${escapeHtml(item.__id||'')} · ${escapeHtml(direction)}</span><b>${escapeHtml(displayValue)}</b>${height}`;tooltip.style.left=`${event.point.x+12}px`;tooltip.style.top=`${event.point.y+12}px`;tooltip.hidden=false});map.on('mouseleave','values-hit',()=>{map.getCanvas().style.cursor='';tooltip.hidden=true});map.on('click','values-hit',(event)=>{const id=String(event.features?.[0]?.properties?.__id||''),current=state.comparisonMap3dScene;if(!id||!current)return;const original=current.originalProject.find((item)=>comparisonMapFeatureId(item,current.level)===id),densityRow=current.density?current.heightRows.get(id):null;state.comparisonMapSelectedFeature={id,feature:original,type:current.level,densityRow};renderComparisonMapInspector()});
@@ -4737,7 +6658,7 @@ function comparisonMapPointer(event) {
 
 function inspectComparisonMapAt(point) {
   const scene=state.comparisonMapScene;if(!scene)return;
-  const index=state.mapPayload?.geographyLevel==='bzone'?scene.bzoneIndex:scene.azoneIndex,entries=comparisonMapIndexedEntries(index,{minX:point.x,minY:point.y,maxX:point.x,maxY:point.y});
+  const level=state.mapPayload?.geographyLevel,index=level==='marea'?scene.mareaIndex:level==='bzone'?scene.bzoneIndex:scene.azoneIndex,entries=comparisonMapIndexedEntries(index,{minX:point.x,minY:point.y,maxX:point.x,maxY:point.y});
   const hit=entries.find((entry)=>point.x>=entry.bounds.minX&&point.x<=entry.bounds.maxX&&point.y>=entry.bounds.minY&&point.y<=entry.bounds.maxY&&regionMapFeatureContains(entry.feature,point,scene.projection));
   if(!hit)return clearComparisonMapInspector();state.comparisonMapSelectedFeature={...hit,type:state.mapPayload.geographyLevel};renderComparisonMapInspector();
 }
@@ -4747,11 +6668,12 @@ async function generateComparisonMap() {
   if($('mapReference').value===$('mapComparison').value)return notify('Choose different reference and comparison results.','error');
   setBusy($('generateMap'),true,'Generating…');
   try{
-    await loadComparisonMapGeometry();startCompareActivity('Generating comparison map','Preparing geographic aggregation.');
+    startCompareActivity('Generating comparison map','Loading map geometry.');setCompareActivityPhase('Loading map geometry','Preparing cached Virginia and project boundaries.');
+    await loadComparisonMapGeometry();
     const requestBody=comparisonMapRequest(),operation=await post('/api/comparison/operations/start',requestBody);state.comparisonOperationId=operation.id;let status=operation;
     while(['waiting','running'].includes(status.state)){setCompareActivityPhase('Generating comparison map',status.message||'Aggregating numeric rows by geography.');await new Promise((resolve)=>setTimeout(resolve,300));status=await request(`/api/comparison/operations/status?id=${encodeURIComponent(operation.id)}`,{signal:state.compareController.signal});}
     if(status.state==='cancelled')throw new DOMException('Stopped','AbortError');if(status.state!=='succeeded'||!status.result)throw new Error(status.message||'Map aggregation failed.');
-    state.mapPayload=status.result;state.mapInputSignature=JSON.stringify(requestBody);state.mapDirty=false;$('mapStaleMessage').hidden=true;renderComparisonMap();finishCompareActivity('succeeded','Generating comparison map complete',`${status.result.geographyRows?.length||0} geographic values are ready.`);syncMenuContext();
+    state.mapPayload=status.result;state.mapInputSignature=JSON.stringify(requestBody);state.mapDirty=false;$('mapStaleMessage').hidden=true;setCompareActivityPhase('Drawing map regions','Projecting visible layers and building the active hit index.');await nextPaint();renderComparisonMap();finishCompareActivity('succeeded','Generating comparison map complete',`${status.result.geographyRows?.length||0} geographic values are ready.`);syncMenuContext();
   }catch(error){if(state.compareActivity?.status==='running')finishCompareActivity('failed',error.name==='AbortError'?'Generating comparison map stopped':'Generating comparison map failed',error.name==='AbortError'?'The operation was stopped.':error.message);if(error.name!=='AbortError')notify(error.message,'error');}
   finally{state.comparisonOperationId='';setBusy($('generateMap'),false);}
 }
@@ -4768,73 +6690,144 @@ function setComparisonMapExportOpen(open) {
   if(open)menu.querySelector('button:not(:disabled)')?.focus();
 }
 
-function runComparisonMapExport(action) {
+function exportLaneBusy(){return state.exportRunning||state.exportQueue.length>0;}
+function derivedWorkBusy(){return state.compareActivity?.status==="running"||Boolean(state.hypercubeAnalysis?.matrixOperationId||state.hypercubeAnalysis?.discoveryOperationId);}
+function updateExportQueueStatus(){
+  const status=$("exportQueueStatus"),mapStatus=$("mapExportStatus"),queued=state.exportQueue.length;
+  const text=state.exportRunning?`Exporting ${state.exportCurrent}${queued?` · ${queued} queued`:""}`:queued?`${queued} export${queued===1?"":"s"} queued`:"";
+  [status,mapStatus].forEach((node)=>{if(node){node.hidden=!text;node.textContent=text;}});
+  syncOperationCoordinatorControls();
+}
+function syncOperationCoordinatorControls(){
+  const busy=exportLaneBusy(),reason="Wait for queued exports to finish.";
+  ["runComparison","findChangedOutputs","generateMap","generateDashboard","updateHypercubeAnalysis","discoverHypercubeOutputs"].forEach((id)=>{const button=$(id);if(!button)return;if(busy){button.disabled=true;button.title=reason;button.setAttribute("aria-description",reason);}else{button.removeAttribute("aria-description");if(button.title===reason)button.removeAttribute("title");}});
+  if(!busy){syncSingleDatastoreControls();syncDashboardGenerateAvailability();if($("generateMap"))$("generateMap").disabled=!state.mapOptions.length||!comparisonMapPackage();if(typeof setHypercubeAnalysisLocked==="function")setHypercubeAnalysisLocked(hypercubeOperationActive());}
+}
+async function waitForDerivedWorkToFinish(){while(derivedWorkBusy())await new Promise((resolve)=>setTimeout(resolve,150));}
+async function processExportQueue(){
+  if(state.exportRunning)return;
+  state.exportRunning=true;updateExportQueueStatus();
+  try{
+    while(state.exportQueue.length){
+      const task=state.exportQueue.shift();state.exportCurrent=task.label;updateExportQueueStatus();
+      await waitForDerivedWorkToFinish();
+      try{const saved=await task.run();if(saved===null)notify(`${task.label} export cancelled.`);}catch(error){notify(`${task.label} export failed: ${error.message||String(error)}`,"error");}
+    }
+  }finally{state.exportRunning=false;state.exportCurrent="";updateExportQueueStatus();}
+}
+function enqueueExport(label,run){state.exportQueue.push({label,run});updateExportQueueStatus();void processExportQueue();}
+function enqueueHypercubeExport(label,run){
+  enqueueExport(label,async()=>{
+    try{
+      const saved=await run();
+      if(saved)nativeNotification(`${label} complete`,typeof saved==='string'?`Saved ${saved}.`:'The export was saved.',{outcome:'succeeded',force:true});
+      return saved;
+    }catch(error){
+      nativeNotification(`${label} failed`,error.message||String(error),{outcome:'failed',force:true});
+      throw error;
+    }
+  });
+}
+function enqueueBackendExport(label,kind,params=null,filename=""){
+  const snapshot=params?new URLSearchParams(params.toString()):null,outputName=filename||"";
+  enqueueExport(label,()=>saveBackendExport(kind,snapshot,outputName));
+}
+function enqueueArtifactExport(label,kind,override={}){
+  const snapshot=override.request?structuredClone(override.request):structuredClone(workbookRequest(kind,override));
+  enqueueExport(label,()=>exportArtifact(kind,{...override,request:snapshot}));
+}
+function enqueueComparisonMapExport(kind){
   setComparisonMapExportOpen(false);
-  return action();
+  try{
+    let task;
+    if(["pdf","png","svg"].includes(kind)){
+      const snapshot=snapshotComparisonMapVisual(kind);task={label:kind.toUpperCase(),run:()=>exportComparisonMapVisual(snapshot)};
+    }else if(kind==="csv"){
+      const params=new URLSearchParams(comparisonMapExportParams().toString()),filename=compareExportFilename("comparison map data","csv");
+      task={label:"CSV",run:()=>saveBackendExport("comparison-map-csv",params,filename)};
+    }else{
+      const request=structuredClone(workbookRequest("comparison-map"));
+      task={label:"Excel",run:()=>exportArtifact("comparison-map",{request})};
+    }
+    enqueueExport(`Map ${task.label}`,task.run);
+  }catch(error){notify(error.message||String(error),"error");}
 }
 
 function comparisonMapExportParams() {
-  return new URLSearchParams({mapToken:state.mapPayload?.mapToken||'',packageId:state.comparisonMapPackageId||'',scopeId:[...comparisonMapScopeIds()].join('|')});
+  const ids=[...comparisonMapScopeIds()];
+  const scopeIds=state.mapPayload?.geographyLevel==='marea'?ids.flatMap((id)=>state.mapPayload?.mareaBzones?.[id]||[]):ids;
+  return new URLSearchParams({mapToken:state.mapPayload?.mapToken||'',packageId:state.comparisonMapPackageId||'',scopeId:scopeIds.join('|')});
 }
 
-async function exportComparisonMapVisual(format) {
-  if(!state.comparisonMapScene||state.mapDirty)return notify('Generate the map before exporting it.','error');
+function snapshotComparisonMapVisual(format) {
+  if(!state.comparisonMapScene||state.mapDirty)throw new Error('Generate the map before exporting it.');
   if(format==='png'&&state.comparisonMapMode==='3d'){
-    const canvas=state.comparisonMap3d?.getCanvas();if(!canvas)throw new Error('The 3D map is not ready to export.');const content=canvas.toDataURL('image/png'),filename=compareExportFilename('comparison map 3d','png'),invoke=window.__TAURI_INTERNALS__?.invoke;
-    if(invoke){const saved=await invoke('save_visual_export',{format:'png',content,filename,width:canvas.width,height:canvas.height});if(saved)notify(`Saved ${saved}.`,'success');return}const link=document.createElement('a');link.href=content;link.download=filename;link.click();return;
+    const canvas=state.comparisonMap3d?.getCanvas();if(!canvas)throw new Error('The 3D map is not ready to export.');return{format:'png',content:canvas.toDataURL('image/png'),filename:compareExportFilename('comparison map 3d','png'),width:canvas.width,height:canvas.height};
   }
   const source=state.comparisonMapScene.svg.cloneNode(true),view=state.comparisonMapView,scale=comparisonMapScale(),metric=$('mapMetric').selectedOptions[0]?.textContent||'Map value',scope='Project geography';
   const inner=[...source.children].map((child)=>new XMLSerializer().serializeToString(child)).join(''),width=1600,height=1120,mapHeight=850;
-  const mapPalette=comparisonPalettes().map,range=scale.kind==='diverging'?`${number(-scale.limit)} to ${number(scale.limit)}`:`${number(scale.min)} to ${number(scale.max)}`,gradient=scale.kind==='diverging'?`${mapPalette.decrease} 0%,${mapPalette.neutral} 50%,${mapPalette.increase} 100%`:`${mapPalette.neutral} 0%,${mapPalette.increase} 100%`;
+  const range=scale.kind==='diverging'?`${number(-scale.limit)} to ${number(scale.limit)}`:`${number(scale.min)} to ${number(scale.max)}`;
   const aggregationLabel=String(state.mapPayload.aggregation||"mean").replaceAll("_"," ");
-  const stops=scale.kind==='diverging'?`<stop offset="0%" stop-color="${mapPalette.decrease}"/><stop offset="50%" stop-color="${mapPalette.neutral}"/><stop offset="100%" stop-color="${mapPalette.increase}"/>`:`<stop offset="0%" stop-color="${mapPalette.neutral}"/><stop offset="100%" stop-color="${mapPalette.increase}"/>`;
-  const svgText=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><title>${escapeHtml($('comparisonMapTitle').textContent)}</title><style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#182331}.region-map-mpo{fill:none;stroke:#163f68;stroke-width:1.5;vector-effect:non-scaling-stroke}.region-map-azone{fill:none;stroke:#2878b8;stroke-width:1;vector-effect:non-scaling-stroke}.region-map-bzone{fill:none;stroke:#98a7b4;stroke-width:.55;vector-effect:non-scaling-stroke}.comparison-map-value{stroke:#fff9;stroke-width:.45;vector-effect:non-scaling-stroke}.comparison-map-context{opacity:.22}.comparison-map-outside-scope{opacity:.16}.region-map-inspected{fill:#2563eb2e;stroke:#1d4ed8;stroke-width:3;vector-effect:non-scaling-stroke}.region-map-label{font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px}</style><rect width="1600" height="1120" fill="#fff"/><text x="44" y="50" font-size="30" font-weight="750">${escapeHtml($('comparisonMapTitle').textContent)}</text><text x="44" y="82" font-size="17" fill="#53657a">${escapeHtml($('comparisonMapSubtitle').textContent)}</text><svg x="40" y="112" width="1520" height="${mapHeight}" viewBox="${view.x} ${view.y} ${view.width} ${view.height}" preserveAspectRatio="xMidYMid meet">${inner}</svg><text x="44" y="1000" font-size="18" font-weight="700">${escapeHtml(metric)}</text><defs><linearGradient id="export-scale">${stops}</linearGradient></defs><rect x="210" y="982" width="650" height="22" fill="url(#export-scale)" stroke="#aab4bd"/><text x="880" y="1000" font-size="16">${escapeHtml(range)} ${escapeHtml($('mapMetric').value==='percentChange'?'%':state.mapPayload.units||'')}</text><text x="44" y="1040" font-size="15" fill="#53657a">Scope: ${escapeHtml(scope)} · Gray hatching means unavailable · Muted polygons are outside the model region</text><text x="44" y="1075" font-size="14" fill="#68798b">Generated ${escapeHtml(state.mapPayload.generatedAt||'')} from ${escapeHtml(state.mapPayload.reference?.label||'Reference')} and ${escapeHtml(state.mapPayload.comparison?.label||'Comparison')}. Aggregation: ${escapeHtml(aggregationLabel)} across project rows.</text></svg>`;
-  const filename=compareExportFilename('comparison map',format),invoke=window.__TAURI_INTERNALS__?.invoke;
-  if(format==='svg'){if(invoke){const saved=await invoke('save_visual_export',{format,content:svgText,filename,width,height});if(saved)notify(`Saved ${saved}.`,'success');return;}const blob=new Blob([svgText],{type:'image/svg+xml'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=filename;link.click();URL.revokeObjectURL(link.href);return;}
-  const url=URL.createObjectURL(new Blob([svgText],{type:'image/svg+xml'})),image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;});const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);const mime=format==='pdf'?'image/jpeg':'image/png',content=canvas.toDataURL(mime,.94);
-  if(invoke){const saved=await invoke('save_visual_export',{format,content,filename,width:canvas.width,height:canvas.height});if(saved)notify(`Saved ${saved}.`,'success');return;}
-  if(format==='pdf')return notify('PDF map export is available in the desktop app.','error');const link=document.createElement('a');link.href=content;link.download=filename;link.click();
+  const stops=comparisonMapSvgGradientStops(scale);
+  const svgText=`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><title>${escapeHtml($('comparisonMapTitle').textContent)}</title><style>text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;fill:#182331}.region-map-mpo{fill:none;stroke:#607b94;stroke-width:1.35;vector-effect:non-scaling-stroke}.region-map-azone{fill:none;stroke:#4a91c7;stroke-width:1;vector-effect:non-scaling-stroke}.region-map-bzone{fill:#64748b08;stroke:#98a7b4;stroke-width:.35;vector-effect:non-scaling-stroke}.comparison-map-state-outline{fill:none;stroke:#243244;stroke-width:2;vector-effect:non-scaling-stroke}.comparison-map-value{stroke:#fff9;stroke-width:.45;vector-effect:non-scaling-stroke}.comparison-map-value.marea-value{stroke:none;opacity:1}.comparison-map-marea-visual,.comparison-map-marea-hit{pointer-events:none}.comparison-map-marea-hit{fill:transparent;stroke:none}.comparison-map-context{opacity:.22}.comparison-map-outside-scope{opacity:.16}.region-map-inspected{fill:#2563eb2e;stroke:#1d4ed8;stroke-width:3;vector-effect:non-scaling-stroke}.region-map-label{font-weight:700;paint-order:stroke;stroke:#fff;stroke-width:3px}</style><rect width="1600" height="1120" fill="#fff"/><text x="44" y="50" font-size="30" font-weight="750">${escapeHtml($('comparisonMapTitle').textContent)}</text><text x="44" y="82" font-size="17" fill="#53657a">${escapeHtml($('comparisonMapSubtitle').textContent)}</text><svg x="40" y="112" width="1520" height="${mapHeight}" viewBox="${view.x} ${view.y} ${view.width} ${view.height}" preserveAspectRatio="xMidYMid meet">${inner}</svg><text x="44" y="1000" font-size="18" font-weight="700">${escapeHtml(metric)}</text><defs><linearGradient id="export-scale">${stops}</linearGradient></defs><rect x="210" y="982" width="650" height="22" fill="url(#export-scale)" stroke="#aab4bd"/><text x="880" y="1000" font-size="16">${escapeHtml(range)} ${escapeHtml($('mapMetric').value==='percentChange'?'%':state.mapPayload.units||'')}</text><text x="44" y="1040" font-size="15" fill="#53657a">Scope: ${escapeHtml(scope)} · Gray hatching means unavailable · Muted polygons are outside the model region</text><text x="44" y="1075" font-size="14" fill="#68798b">Generated ${escapeHtml(state.mapPayload.generatedAt||'')} from ${escapeHtml(state.mapPayload.reference?.label||'Reference')} and ${escapeHtml(state.mapPayload.comparison?.label||'Comparison')}. Aggregation: ${escapeHtml(aggregationLabel)} across project rows.</text></svg>`;
+  return{format,svgText,filename:compareExportFilename('comparison map',format),width,height};
 }
 
-['mapReference','mapComparison'].forEach((id)=>$(id).addEventListener('change',()=>{setComparisonMapDirty();loadComparisonMapOptions()}));
+async function exportComparisonMapVisual(snapshot) {
+  const {format,filename,width,height}=snapshot,invoke=window.__TAURI_INTERNALS__?.invoke;
+  if(snapshot.content){if(invoke){const saved=await invoke('save_visual_export',{format,content:snapshot.content,filename,width,height});if(saved)notify(`Saved ${saved}.`,'success');return saved;}const link=document.createElement('a');link.href=snapshot.content;link.download=filename;link.click();return filename;}
+  if(format==='svg'){if(invoke){const saved=await invoke('save_visual_export',{format,content:snapshot.svgText,filename,width,height});if(saved)notify(`Saved ${saved}.`,'success');return saved;}const blob=new Blob([snapshot.svgText],{type:'image/svg+xml'}),link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download=filename;link.click();URL.revokeObjectURL(link.href);return filename;}
+  const url=URL.createObjectURL(new Blob([snapshot.svgText],{type:'image/svg+xml'})),image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url;});const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const context=canvas.getContext('2d');context.fillStyle='#ffffff';context.fillRect(0,0,canvas.width,canvas.height);context.drawImage(image,0,0,canvas.width,canvas.height);URL.revokeObjectURL(url);const content=canvas.toDataURL(format==='pdf'?'image/jpeg':'image/png',.94);
+  if(invoke){const saved=await invoke('save_visual_export',{format,content,filename,width:canvas.width,height:canvas.height});if(saved)notify(`Saved ${saved}.`,'success');return saved;}
+  if(format==='pdf')throw new Error('PDF map export is available in the desktop app.');const link=document.createElement('a');link.href=content;link.download=filename;link.click();return filename;
+}
+
+['mapReference','mapComparison'].forEach((id)=>$(id).addEventListener('change',()=>{syncComparePairOptions();setComparisonMapDirty();loadComparisonMapOptions()}));
 ['mapYear','mapGeography','mapAggregation'].forEach((id)=>$(id).addEventListener('change',setComparisonMapDirty));
 $('mapTable').addEventListener('change',renderComparisonMapVariables);$('mapVariable').addEventListener('change',renderComparisonMapYears);$('generateMap').addEventListener('click',generateComparisonMap);
 $('mapMetric').addEventListener('change',()=>{applyComparisonMapPresentation();if(state.comparisonMapMode==='3d')renderComparisonMap3d()});$('comparisonMapIdLabels').addEventListener('change',()=>{if(state.comparisonMapMode==='3d')renderComparisonMap3d();else updateComparisonMapLabels();});$('comparisonMapValueLabels').addEventListener('change',()=>{if(state.comparisonMapMode==='3d')renderComparisonMap3d();else updateComparisonMapLabels();});
 $('comparisonMap2d').addEventListener('click',()=>setComparisonMapMode('2d'));$('comparisonMap3d').addEventListener('click',()=>setComparisonMapMode('3d'));document.querySelector('.comparison-map-mode').addEventListener('keydown',(event)=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;event.preventDefault();const wants3d=['ArrowRight','End'].includes(event.key);if(wants3d&&$('comparisonMap3d').disabled)return;setComparisonMapMode(wants3d?'3d':'2d');$(wants3d?'comparisonMap3d':'comparisonMap2d').focus()});$('comparisonMap3dHeight').addEventListener('change',()=>renderComparisonMap3d());$('resetComparisonMapBearing').addEventListener('click',()=>{const map=state.comparisonMap3d,camera=state.comparisonMap3dDefaultCamera;if(!map||!camera)return;map.fitBounds(camera.bounds,{padding:45,pitch:camera.pitch,bearing:camera.bearing,duration:500})});
-document.querySelectorAll('[data-comparison-map-layer]').forEach((input)=>input.addEventListener('change',()=>{applyComparisonMapPresentation();if(state.comparisonMapMode==='3d')renderComparisonMap3d();}));
+document.querySelectorAll('[data-comparison-map-layer]').forEach((input)=>input.addEventListener('change',()=>{const geography=state.mapPayload?.geographyLevel;if(geography){const saved=state.comparisonMapLayerPreferences.get(geography)||{};saved[input.dataset.comparisonMapLayer]=input.checked;state.comparisonMapLayerPreferences.set(geography,saved);}applyComparisonMapPresentation();if(state.comparisonMapMode==='3d')renderComparisonMap3d();}));
 $('comparisonMapProjectOnly').addEventListener('change',renderComparisonMap3d);
 document.querySelectorAll('[data-elevation-direction]').forEach((button)=>button.addEventListener('click',()=>{
   state.comparisonMap3dElevationDirection=button.dataset.elevationDirection;
   document.querySelectorAll('[data-elevation-direction]').forEach((item)=>{const active=item===button;item.classList.toggle('active',active);item.setAttribute('aria-checked',String(active));item.tabIndex=active?0:-1;});
   renderComparisonMap3d();
 }));
-$('zoomInComparisonMap').addEventListener('click',()=>{if(state.comparisonMapMode==='3d')state.comparisonMap3d?.zoomIn();else zoomComparisonMap(.65)});$('zoomOutComparisonMap').addEventListener('click',()=>{if(state.comparisonMapMode==='3d')state.comparisonMap3d?.zoomOut();else zoomComparisonMap(1/.65)});$('resetComparisonMap').addEventListener('click',()=>{if(state.comparisonMapMode==='3d'){const map=state.comparisonMap3d,bounds=comparisonMap3dVirginiaBounds();if(map&&bounds)map.fitBounds(bounds,{padding:35,pitch:map.getPitch(),bearing:map.getBearing(),duration:500})}else if(state.comparisonMapScene)setComparisonMapView(state.comparisonMapScene.fullView)});$('fitComparisonMap').addEventListener('click',()=>{if(state.comparisonMapMode==='3d'){const map=state.comparisonMap3d,bounds=comparisonMap3dBounds(state.comparisonMap3dScene?.project||[]);if(map&&bounds)map.fitBounds(bounds,{padding:45,pitch:map.getPitch(),bearing:map.getBearing()})}else focusComparisonMapProject({zoom:true})});$('closeComparisonMapInspector').addEventListener('click',clearComparisonMapInspector);
-$('comparisonMapCanvas').addEventListener('wheel',(event)=>{if(!state.comparisonMapView)return;event.preventDefault();const pixels=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?$('comparisonMapCanvas').clientHeight:1),clamped=Math.max(-90,Math.min(90,pixels));zoomComparisonMap(Math.exp(clamped*.0028),comparisonMapPointer(event));},{passive:false});
-$('comparisonMapCanvas').addEventListener('dblclick',(event)=>{event.preventDefault();zoomComparisonMap(.5,comparisonMapPointer(event));});
-$('comparisonMapCanvas').addEventListener('pointerdown',(event)=>{if(!state.comparisonMapView)return;const canvas=$('comparisonMapCanvas'),start={x:event.clientX,y:event.clientY,view:{...state.comparisonMapView}};state.comparisonMapPointerMoved=false;canvas.setPointerCapture(event.pointerId);const move=(moveEvent)=>{const rect=canvas.getBoundingClientRect(),dx=(moveEvent.clientX-start.x)/rect.width*start.view.width,dy=(moveEvent.clientY-start.y)/rect.height*start.view.height;if(Math.abs(dx)+Math.abs(dy)>.5)state.comparisonMapPointerMoved=true;setComparisonMapView({...start.view,x:start.view.x-dx,y:start.view.y-dy});};const up=(upEvent)=>{canvas.removeEventListener('pointermove',move);canvas.removeEventListener('pointerup',up);canvas.removeEventListener('pointercancel',up);if(!state.comparisonMapPointerMoved)inspectComparisonMapAt(comparisonMapPointer(upEvent));};canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);});
-$('comparisonMapCanvas').addEventListener('keydown',(event)=>{if(!state.comparisonMapView)return;const view=state.comparisonMapView,step=view.width*.08;if(event.key==='+'||event.key==='=')zoomComparisonMap(.65);else if(event.key==='-')zoomComparisonMap(1/.65);else if(event.key==='ArrowLeft')setComparisonMapView({...view,x:view.x-step});else if(event.key==='ArrowRight')setComparisonMapView({...view,x:view.x+step});else if(event.key==='ArrowUp')setComparisonMapView({...view,y:view.y-step});else if(event.key==='ArrowDown')setComparisonMapView({...view,y:view.y+step});else return;event.preventDefault();});
+$('zoomInComparisonMap').addEventListener('click',()=>{state.comparisonMapFitMode='manual';if(state.comparisonMapMode==='3d')state.comparisonMap3d?.zoomIn();else zoomComparisonMap(.65)});$('zoomOutComparisonMap').addEventListener('click',()=>{state.comparisonMapFitMode='manual';if(state.comparisonMapMode==='3d')state.comparisonMap3d?.zoomOut();else zoomComparisonMap(1/.65)});$('resetComparisonMap').addEventListener('click',()=>{state.comparisonMapFitMode='virginia';if(state.comparisonMapMode==='3d'){const map=state.comparisonMap3d,bounds=comparisonMap3dVirginiaBounds();if(map&&bounds)map.fitBounds(bounds,{padding:35,pitch:map.getPitch(),bearing:map.getBearing(),duration:500})}else if(state.comparisonMapScene)setComparisonMapView(state.comparisonMapScene.fullView)});$('fitComparisonMap').addEventListener('click',()=>{state.comparisonMapFitMode='project';if(state.comparisonMapMode==='3d'){const map=state.comparisonMap3d,bounds=comparisonMap3dBounds(state.comparisonMap3dScene?.project||[]);if(map&&bounds)map.fitBounds(bounds,{padding:{top:45,bottom:45,left:45,right:45},pitch:map.getPitch(),bearing:map.getBearing()})}else focusComparisonMapProject({zoom:true})});$('closeComparisonMapInspector').addEventListener('click',clearComparisonMapInspector);
+$('comparisonMapCanvas').addEventListener('wheel',(event)=>{if(!state.comparisonMapView)return;state.comparisonMapFitMode='manual';event.preventDefault();const pixels=event.deltaY*(event.deltaMode===1?16:event.deltaMode===2?$('comparisonMapCanvas').clientHeight:1),clamped=Math.max(-90,Math.min(90,pixels));zoomComparisonMap(Math.exp(clamped*.0028),comparisonMapPointer(event));},{passive:false});
+$('comparisonMapCanvas').addEventListener('dblclick',(event)=>{state.comparisonMapFitMode='manual';event.preventDefault();zoomComparisonMap(.5,comparisonMapPointer(event));});
+$('comparisonMapCanvas').addEventListener('pointerdown',(event)=>{if(!state.comparisonMapView)return;const canvas=$('comparisonMapCanvas'),start={x:event.clientX,y:event.clientY,view:{...state.comparisonMapView}};state.comparisonMapPointerMoved=false;canvas.setPointerCapture(event.pointerId);const move=(moveEvent)=>{const rect=canvas.getBoundingClientRect(),dx=(moveEvent.clientX-start.x)/rect.width*start.view.width,dy=(moveEvent.clientY-start.y)/rect.height*start.view.height;if(Math.abs(dx)+Math.abs(dy)>.5){state.comparisonMapPointerMoved=true;state.comparisonMapFitMode='manual';}setComparisonMapView({...start.view,x:start.view.x-dx,y:start.view.y-dy});};const up=(upEvent)=>{canvas.removeEventListener('pointermove',move);canvas.removeEventListener('pointerup',up);canvas.removeEventListener('pointercancel',up);if(!state.comparisonMapPointerMoved)inspectComparisonMapAt(comparisonMapPointer(upEvent));};canvas.addEventListener('pointermove',move);canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);});
+$('comparisonMapCanvas').addEventListener('keydown',(event)=>{if(!state.comparisonMapView)return;const view=state.comparisonMapView,step=view.width*.08;if(event.key==='+'||event.key==='=')zoomComparisonMap(.65);else if(event.key==='-')zoomComparisonMap(1/.65);else if(event.key==='ArrowLeft')setComparisonMapView({...view,x:view.x-step});else if(event.key==='ArrowRight')setComparisonMapView({...view,x:view.x+step});else if(event.key==='ArrowUp')setComparisonMapView({...view,y:view.y-step});else if(event.key==='ArrowDown')setComparisonMapView({...view,y:view.y+step});else return;state.comparisonMapFitMode='manual';event.preventDefault();});
 $('toggleMapExport').addEventListener('click',()=>setComparisonMapExportOpen($('mapExportMenu').hidden));
-$('exportMapPdf').addEventListener('click',()=>runComparisonMapExport(()=>exportComparisonMapVisual('pdf')).catch((error)=>notify(error.message,'error')));$('exportMapPng').addEventListener('click',()=>runComparisonMapExport(()=>exportComparisonMapVisual('png')).catch((error)=>notify(error.message,'error')));$('exportMapSvg').addEventListener('click',()=>runComparisonMapExport(()=>exportComparisonMapVisual('svg')).catch((error)=>notify(error.message,'error')));$('exportMapCsv').addEventListener('click',()=>runComparisonMapExport(()=>saveBackendExport('comparison-map-csv')).catch((error)=>notify(error.message,'error')));$('exportMapWorkbook').addEventListener('click',()=>runComparisonMapExport(()=>exportArtifact('comparison-map')));
+$('exportMapPdf').addEventListener('click',()=>enqueueComparisonMapExport('pdf'));$('exportMapPng').addEventListener('click',()=>enqueueComparisonMapExport('png'));$('exportMapSvg').addEventListener('click',()=>enqueueComparisonMapExport('svg'));$('exportMapCsv').addEventListener('click',()=>enqueueComparisonMapExport('csv'));$('exportMapWorkbook').addEventListener('click',()=>enqueueComparisonMapExport('excel'));
 document.addEventListener('pointerdown',(event)=>{if(!$('mapExportMenu').hidden&&!event.target.closest('.map-export-menu'))setComparisonMapExportOpen(false);});
 document.addEventListener('keydown',(event)=>{if(event.key==='Escape'&&!$('mapExportMenu').hidden){setComparisonMapExportOpen(false);$('toggleMapExport').focus();}});
 if(window.ResizeObserver){
-  new ResizeObserver(()=>{if(state.comparisonMapMode==='2d')updateComparisonMapLabels();else state.comparisonMap3d?.resize()}).observe($('comparisonMapCanvas').parentElement);
+  new ResizeObserver(()=>{if(state.comparisonMapMode==='2d'){if(state.comparisonMapFitMode==='project'&&state.comparisonMapScene)focusComparisonMapProject({zoom:true});else if(state.comparisonMapFitMode==='virginia'&&state.comparisonMapScene)setComparisonMapView(state.comparisonMapScene.fullView);else updateComparisonMapLabels();}else{state.comparisonMap3d?.resize();if(state.comparisonMapFitMode==='project'){const bounds=comparisonMap3dBounds(state.comparisonMap3dScene?.project||[]);if(bounds)state.comparisonMap3d?.fitBounds(bounds,{padding:{top:45,bottom:45,left:45,right:45},duration:0});}}}).observe($('comparisonMapCanvas').parentElement);
   new ResizeObserver(()=>{if($("regionGeographyDialog").open)renderRegionGeographySelectionMap()}).observe($("regionGeographyMap"));
 }
 let workbenchDevicePixelRatio=window.devicePixelRatio;
 window.addEventListener("resize",()=>{if(window.devicePixelRatio!==workbenchDevicePixelRatio){workbenchDevicePixelRatio=window.devicePixelRatio;if($("regionGeographyDialog").open)renderRegionGeographySelectionMap();updateComparisonMapLabels();}});
 
 function renderDashboardControls(){
-  if(state.comparisonIds.length<2){$("dashboardVariableList").innerHTML=`<p class="muted">Load at least two datastores to build a percent-change chart.</p>`;$("generateDashboard").disabled=true;return;}const records=state.comparisonIds.map((id)=>state.data.catalog.find((item)=>item.id===id)).filter(Boolean),options=records.map((item)=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}</option>`).join("");$("dashboardReference").innerHTML=options;$("dashboardComparison").innerHTML=options;$("dashboardReference").value=state.comparisonIds[0];$("dashboardComparison").value=state.comparisonIds[1];
-  const years=[...new Set(state.variables.flatMap((item)=>item.years))].sort();$("dashboardYear").innerHTML=years.map((year)=>`<option ${year==="2045"?"selected":""}>${year}</option>`).join("");
-  $("dashboardVariableList").innerHTML=state.variables.map((item)=>`<label class="check-option" data-dashboard-variable-option="${escapeHtml(`${item.table} ${item.name}`.toLowerCase())}"><input type="checkbox" data-dashboard-variable="${escapeHtml(`${item.table}/${item.name}`)}"><span><strong>${escapeHtml(item.table)} / ${escapeHtml(item.name)}</strong>${item.description?`<small>${escapeHtml(item.description)}</small>`:""}</span></label>`).join("");
+  if(state.dashboardIds.length<2){$("dashboardVariableList").innerHTML=`<p class="muted">Choose two different results to build a percent-change chart.</p>`;syncDashboardGenerateAvailability();return;}
+  const years=[...new Set(state.dashboardVariables.flatMap((item)=>item.years))].sort();$("dashboardYear").innerHTML=years.map((year)=>`<option ${year==="2045"?"selected":""}>${year}</option>`).join("");
+  $("dashboardVariableList").innerHTML=state.dashboardVariables.map((item)=>`<label class="check-option" data-dashboard-variable-option="${escapeHtml(`${item.table} ${item.name}`.toLowerCase())}"><input type="checkbox" data-dashboard-variable="${escapeHtml(`${item.table}/${item.name}`)}"><span><strong>${escapeHtml(item.table)} / ${escapeHtml(item.name)}</strong>${item.description?`<small>${escapeHtml(item.description)}</small>`:""}</span></label>`).join("");
   document.querySelectorAll("[data-dashboard-variable]").forEach((box)=>box.addEventListener("change",()=>{updateDashboardVariableSummary();setDashboardDirty();}));
   state.dashboardVariableQuery="";$("dashboardVariableSearch").value="";setDashboardVariablesExpanded(true);updateDashboardVariableVisibility();
+  syncDashboardGenerateAvailability();
   loadDashboardGeoOptions();
 }
+function syncDashboardGenerateAvailability(){
+  const hasPair=state.dashboardIds.length===2&&state.dashboardIds[0]!==state.dashboardIds[1],hasVariables=state.dashboardVariables.length>0,busy=state.compareActivity?.status==="running",exports=exportLaneBusy();
+  const reason=!hasPair?"Choose two different results first.":!hasVariables?"The selected results have no compatible numeric outputs.":exports?"Wait for queued exports to finish.":busy?"Wait for the current Compare operation to finish.":"";
+  setButtonAvailability($("generateDashboard"),hasPair&&hasVariables&&!busy&&!exports,reason);
+}
+async function loadDashboardSelection(){const ids=[$('dashboardReference').value,$('dashboardComparison').value];state.dashboardSelectionInitialized=true;if(!ids[0]||!ids[1]||ids[0]===ids[1]){state.dashboardIds=[];state.dashboardVariables=[];renderDashboardControls();return;}try{const payload=await comparisonOptions('dashboard',ids);if(state.comparisonOptionRequestKeys.dashboard!==comparisonOptionsKey('dashboard',ids))return;state.dashboardIds=ids;state.dashboardVariables=payload.variables||[];rememberComparisonPair(ids);state.dashboardPayload=null;state.dashboardDirty=true;renderDashboardControls();}catch(error){if(error.name!=='AbortError')notify(error.message,'error');}}
 async function loadDashboardGeoOptions(){
-  if(!state.comparisonIds.length||!$("dashboardYear").value)return;
-  try{const payload=await request(`/api/comparison/cross-output-geo-options?reference=${encodeURIComponent($("dashboardReference").value||state.comparisonIds[0])}&year=${encodeURIComponent($("dashboardYear").value)}`);state.dashboardGeoOptions=payload.levels||[];state.dashboardGeoMessage=payload.message||"";if(!state.dashboardGeoOptions.some((item)=>item.field===state.dashboardFilterField)){state.dashboardFilterField="";state.dashboardFilterValues.clear();}renderDashboardGeoControls();}
+  if(!state.dashboardIds.length||!$("dashboardYear").value)return;
+  try{const payload=await request(`/api/comparison/cross-output-geo-options?reference=${encodeURIComponent($("dashboardReference").value||state.dashboardIds[0])}&year=${encodeURIComponent($("dashboardYear").value)}`);state.dashboardGeoOptions=payload.levels||[];state.dashboardGeoMessage=payload.message||"";if(!state.dashboardGeoOptions.some((item)=>item.field===state.dashboardFilterField)){state.dashboardFilterField="";state.dashboardFilterValues.clear();}renderDashboardGeoControls();}
   catch(error){state.dashboardGeoOptions=[];state.dashboardGeoMessage=error.message;renderDashboardGeoControls();}
 }
 function renderDashboardGeoControls(){configureLocationSelector({containerId:"dashboardGeoControls",prefix:"dashboard",levels:state.dashboardGeoOptions||[],message:state.dashboardGeoMessage,field:state.dashboardFilterField,values:state.dashboardFilterValues,search:state.dashboardLocationSearch,allowAll:true,setField:(value)=>state.dashboardFilterField=value,setSearch:(value)=>state.dashboardLocationSearch=value,onChange:setDashboardDirty,note:""});}
@@ -4855,10 +6848,11 @@ function renderDashboard(payload){const rows=dashboardDisplayRows(),unavailable=
 function updateDashboardDisplayControl(){const mode=$("dashboardDisplayMode").value,label=$("dashboardDisplayValueLabel");label.hidden=mode==="all";document.querySelector(".dashboard-view-controls").classList.toggle("has-display-value",mode!=="all");if(mode==="threshold"){$("dashboardDisplayValueText").textContent="Minimum magnitude (%)";$("dashboardDisplayValue").min="0";$("dashboardDisplayValue").step="0.1";$("dashboardDisplayValue").title="Show changes at or above this percentage in either direction.";}else if(mode==="extremes"){$("dashboardDisplayValueText").textContent="Bars per direction";$("dashboardDisplayValue").min="1";$("dashboardDisplayValue").step="1";$("dashboardDisplayValue").title="Show up to this many largest increases and this many largest decreases.";}if(state.dashboardPayload)renderDashboard(state.dashboardPayload);}
 $("dashboardSort").addEventListener("change",()=>state.dashboardPayload&&renderDashboard(state.dashboardPayload));
 $("dashboardDisplayMode").addEventListener("change",updateDashboardDisplayControl);$("dashboardDisplayValue").addEventListener("input",()=>state.dashboardPayload&&renderDashboard(state.dashboardPayload));$("dashboardHideZero").addEventListener("change",()=>state.dashboardPayload&&renderDashboard(state.dashboardPayload));
-["dashboardReference","dashboardComparison","dashboardYear"].forEach((id)=>$(id).addEventListener("change",()=>{setDashboardDirty();if(id!=="dashboardComparison")loadDashboardGeoOptions();}));
-$("exportDashboardPdf").addEventListener("click",()=>saveBackendExport("dashboard-pdf").catch((error)=>notify(error.message||String(error),"error")));
-$("exportDashboardCsv").addEventListener("click",()=>saveBackendExport("dashboard-csv").catch((error)=>notify(error.message||String(error),"error")));
-$("exportDashboardWorkbook").addEventListener("click",()=>exportArtifact("dashboard"));
+["dashboardReference","dashboardComparison"].forEach((id)=>$(id).addEventListener("change",()=>{syncComparePairOptions();setDashboardDirty();loadDashboardSelection();}));
+$("dashboardYear").addEventListener("change",()=>{setDashboardDirty();loadDashboardGeoOptions();});
+$("exportDashboardPdf").addEventListener("click",()=>enqueueBackendExport("Percent-Change PDF","dashboard-pdf",dashboardExportParams(),compareExportFilename("percent-change chart","pdf")));
+$("exportDashboardCsv").addEventListener("click",()=>enqueueBackendExport("Percent-Change CSV","dashboard-csv",dashboardExportParams(),compareExportFilename("percent-change chart","csv")));
+$("exportDashboardWorkbook").addEventListener("click",()=>enqueueArtifactExport("Percent-Change Excel","dashboard"));
 
 let lastMenuContext = "";
 const APP_ZOOM_KEY="visioneval-app-zoom";
@@ -4899,67 +6893,427 @@ async function handleMenuAction(action) {
   if(action==='map-zoom-out')return runActiveMapAction('out');
   if(action==='map-fit-mpo')return runActiveMapAction('fit');
   if(action==='map-virginia')return runActiveMapAction('extent');
-  if (action === "new-scenario") return guardUnsaved(() => { switchPage("createPage"); switchCreateSubpage("createEditor", false); openScenarioDialog(false); });
-  if (action === "new-file") return guardUnsaved(() => { const scenario = activeEditorVariation(); if (!scenario) return; switchPage("createPage"); switchCreateSubpage("createEditor", false); openNewFile(scenario.id); });
-  if (action === "batch-change") return guardUnsaved(() => { const scenario=activeEditorVariation(); if (!scenario) return; switchPage("createPage"); switchCreateSubpage("createEditor",false); openScenarioTools(scenario.id); });
+  if (action === "new-scenario") return guardUnsaved(() => { switchPage("createPage", {restoreScroll:false}); switchCreateSubpage("createEditor", false); openScenarioDialog(false); });
+  if (action === "new-file") return guardUnsaved(() => { const scenario = activeEditorVariation(); if (!scenario) return; switchPage("createPage", {restoreScroll:false}); switchCreateSubpage("createEditor", false); openNewFile(scenario.id); });
+  if (action === "batch-change") return guardUnsaved(() => { const scenario=activeEditorVariation(); if (!scenario) return; switchPage("createPage",{restoreScroll:false}); switchCreateSubpage("createEditor",false); openScenarioTools(scenario.id); });
   if (action === "save-file") return saveFileChanges();
   if (action === "run-selected") return guardUnsaved(() => {
     const projectId = $("runProject").value || state.selectedProject?.id;
     if (!projectId) return;
-    switchPage("runPage"); $("runProject").value = projectId; renderRunSelections(); $("runDialog").showModal();
+    switchPage("runPage", {restoreScroll:false}); $("runProject").value = projectId; renderRunSelections(); $("runDialog").showModal();
   });
   if (action === "stop-selected-run") { const job = selectedActiveJob(); if (job) return jobAction("/api/runs/cancel", job.id); return; }
   if (action === "stop-all-runs") return stopAllRuns();
   if (action === "export-dependency-svg") return saveDependencyExport("svg");
   if (action === "export-dependency-pdf") return saveDependencyExport("pdf");
   if (action === "export-dependency-html") return saveDependencyExport("html");
-  if (action === "export-current-csv") return saveBackendExport("comparison-current-csv");
-  if (action === "export-current-xlsx") return exportArtifact("current");
-  if (action === "export-all-changed-csv") return prepareChangedOutputExport("all","csv");
-  if (action === "export-all-changed-xlsx") return prepareChangedOutputExport("all","xlsx");
+  if (action === "export-current-csv") return startVisibleBackendExport("comparison-current-csv");
+  if (action === "export-current-xlsx") return enqueueArtifactExport("Compare Excel","current");
+  if (action === "export-all-changed-csv") return enqueueChangedOutputExport("all","csv");
+  if (action === "export-all-changed-xlsx") return enqueueChangedOutputExport("all","xlsx");
   if (action === "export-selected-changed") return openCompareExportDialog("selected-changed");
   if (action === "export-full-variables") return openCompareExportDialog("full-variables");
-  if (action === "export-dashboard-pdf") return saveBackendExport("dashboard-pdf");
-  if (action === "export-dashboard-csv") return saveBackendExport("dashboard-csv");
-  if (action === "export-dashboard-xlsx") return exportArtifact("dashboard");
-  if (action === "export-map-pdf") return exportComparisonMapVisual("pdf");
-  if (action === "export-map-png") return exportComparisonMapVisual("png");
-  if (action === "export-map-svg") return exportComparisonMapVisual("svg");
-  if (action === "export-map-csv") return saveBackendExport("comparison-map-csv");
-  if (action === "export-map-xlsx") return exportArtifact("comparison-map");
+  if (action === "export-dashboard-pdf") return enqueueBackendExport("Percent-Change PDF","dashboard-pdf",dashboardExportParams(),compareExportFilename("percent-change chart","pdf"));
+  if (action === "export-dashboard-csv") return enqueueBackendExport("Percent-Change CSV","dashboard-csv",dashboardExportParams(),compareExportFilename("percent-change chart","csv"));
+  if (action === "export-dashboard-xlsx") return enqueueArtifactExport("Percent-Change Excel","dashboard");
+  if (action === "export-map-pdf") return enqueueComparisonMapExport("pdf");
+  if (action === "export-map-png") return enqueueComparisonMapExport("png");
+  if (action === "export-map-svg") return enqueueComparisonMapExport("svg");
+  if (action === "export-map-csv") return enqueueComparisonMapExport("csv");
+  if (action === "export-map-xlsx") return enqueueComparisonMapExport("excel");
   if (action === "show-workspace-in-finder") return window.__TAURI_INTERNALS__?.invoke("reveal_workspace_location", {location:"projects"}).catch((error) => notify(String(error), "error"));
   if (action === "settings") return openSettings();
   if (action === "user-guide") {
-    const invoke = window.__TAURI_INTERNALS__?.invoke;
-    if (!invoke) return notify("The workspace user guide is available from the VisionEval Workbench desktop app.", "error");
-    return invoke("open_user_guide").catch((error) => notify(String(error), "error"));
+    return openDocumentationReader("user-guide").catch((error) => notify(String(error), "error"));
   }
+  if (action === "whats-new") return openDocumentationReader("whats-new").catch((error) => notify(String(error), "error"));
   if (action === "keyboard-shortcuts") return $("shortcutDialog").showModal();
   if (action === "runtime-setup-guide") return $("runtimeGuideDialog").showModal();
   if (action === "view-explore") return guardUnsaved(() => switchPage("explorePage"));
   if (action === "view-create") return guardUnsaved(() => switchPage("createPage"));
   if (action === "view-run") return guardUnsaved(() => switchPage("runPage"));
   if (action === "view-compare") return guardUnsaved(() => switchPage("comparePage"));
-  if (action === "refresh") return refreshState();
+  if (action === "view-hypercube") return guardUnsaved(() => openHypercubeArea(state.activeHypercubeSubpage));
+  if (action === "refresh") return guardUnsaved(() => refreshState());
 }
 window.addEventListener("visioneval-menu-action", (event) => handleMenuAction(event.detail).catch((error) => notify(error.message || String(error), "error")));
 
-function switchPage(pageId) {
+function restorePrimaryPageScroll(pageId, token) {
+  const position = state.primaryPageScroll.get(pageId) || {left:0,top:0};
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (state.activePrimaryPage === pageId && state.pageNavigationToken === token) window.scrollTo(position);
+  }));
+}
+
+function hypercubeAnalysisProjects(){return (state.data?.projects||[]).filter((project)=>project.projectType==="hypercube"&&(project.hypercubes||[]).length);}
+function hypercubeAxisValue(cell,axisId){return String((cell?.values||[]).find((item)=>item.axisId===axisId)?.value??"");}
+function hypercubeAnalysisRequest(){
+  const analysis=state.hypercubeAnalysis,options=analysis.options,axes=options?.hypercube?.axes||[],x=$('hypercubeAnalysisXAxis').value,y=$('hypercubeAnalysisYAxis').value;
+  const caseIds=(options?.cases||[]).filter((item)=>axes.every((axis)=>axis.id===x||axis.id===y||String(analysis.sliceValues.get(axis.id)??axis.values?.[0]??"")===hypercubeAxisValue(item,axis.id))).map((item)=>item.variationId);
+  return {projectId:$('hypercubeAnalysisProject').value,year:$('hypercubeAnalysisYear').value,table:$('hypercubeAnalysisTable').value,variable:$('hypercubeAnalysisVariable').value,metric:$('hypercubeAnalysisMetric').value,aggregation:$('hypercubeAnalysisAggregation').value,filterField:$('hypercubeAnalysisGeography').value,filterValues:[...$('hypercubeAnalysisLocations').selectedOptions].map((item)=>item.value),caseIds,pairCaseIds:analysis.selectedCases};
+}
+function setHypercubeAnalysisExportAvailability(){const ready=Boolean(state.hypercubeAnalysis.matrix);['exportHypercubePng','exportHypercubeSvg','exportHypercubePdf','exportHypercubeCsv','exportHypercubeExcel'].forEach((id)=>$(id).disabled=!ready);}
+async function loadHypercubeAnalysisProjects(force=false){
+  const projects=hypercubeAnalysisProjects(),select=$('hypercubeAnalysisProject');if(!select)return;
+  const previous=select.value;select.innerHTML=`<option value="">Choose a project</option>${projects.map((item)=>`<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join('')}`;
+  select.value=projects.some((item)=>item.id===previous)?previous:(projects.length===1?projects[0].id:"");
+  if(select.value&&(force||state.hypercubeAnalysis.options?.project?.id!==select.value))await loadHypercubeAnalysisProject();
+}
+async function loadHypercubeAnalysisProject(){
+  const projectId=$('hypercubeAnalysisProject').value,analysis=state.hypercubeAnalysis;analysis.options=null;analysis.matrix=null;analysis.selectedCases=[];analysis.sliceValues=new Map();setHypercubeAnalysisExportAvailability();
+  if(!projectId){$('hypercubeAnalysisCoverage').textContent='Choose a generated Hypercube project.';$('hypercubeAnalysisStorage').hidden=true;return;}
+  $('hypercubeAnalysisCoverage').textContent='Loading completed cases and output catalog…';
+  try{
+    const [options,storage]=await Promise.all([request(`/api/hypercube-analysis/options?projectId=${encodeURIComponent(projectId)}`),request(`/api/hypercube-analysis/storage?projectId=${encodeURIComponent(projectId)}`)]);analysis.options=options;analysis.storage=storage;
+    renderHypercubeAnalysisProject();await loadHypercubeAnalysisGeography();await restoreCachedHypercubeDiscovery();
+  }catch(error){$('hypercubeAnalysisCoverage').textContent=error.message;notify(error.message,'error');}
+}
+function renderHypercubeAnalysisProject(){
+  const options=state.hypercubeAnalysis.options;if(!options)return;const variables=options.variables||[],tables=[...new Set(variables.map((item)=>item.table))].sort(),axes=options.hypercube?.axes||[];
+  $('hypercubeAnalysisCoverage').textContent=`${options.completedCases} of ${options.caseCount} cases complete${options.missingCases?` · ${options.missingCases} missing`:''}.`;
+  $('hypercubeAnalysisWarnings').innerHTML=(options.warnings||[]).map((message)=>`<p class="notice warning-notice">${escapeHtml(message)}</p>`).join('');
+  $('hypercubeAnalysisTable').innerHTML=tables.map((table)=>`<option value="${escapeHtml(table)}">${escapeHtml(table)}</option>`).join('');renderHypercubeAnalysisVariables();
+  const variableYearSets=variables.map((item)=>new Set((item.years||[]).map(String))).filter((years)=>years.size),commonDiscoveryYears=variableYearSets.length?[...variableYearSets[0]].filter((year)=>variableYearSets.every((years)=>years.has(year))):[],discoveryYears=[...new Set((commonDiscoveryYears.length?commonDiscoveryYears:options.years||[]).map(String))].sort((a,b)=>Number(a)-Number(b)||a.localeCompare(b)),discoveryYear=$('hypercubeDiscoveryYear'),priorDiscoveryYear=discoveryYear.value;
+  discoveryYear.innerHTML=discoveryYears.map((year)=>`<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join('');
+  discoveryYear.value=discoveryYears.includes(priorDiscoveryYear)?priorDiscoveryYear:(discoveryYears.includes('2045')?'2045':discoveryYears.at(-1)||'');
+  if(!$('hypercubeDiscoveryAggregation').value)$('hypercubeDiscoveryAggregation').value='median';
+  const axisOptions=axes.map((axis)=>`<option value="${escapeHtml(axis.id)}">${escapeHtml(axis.column)} (${axis.values?.length||0})</option>`).join('');$('hypercubeAnalysisXAxis').innerHTML=axisOptions;$('hypercubeAnalysisYAxis').innerHTML=axisOptions;$('hypercubeAnalysisXAxis').value=axes[0]?.id||'';$('hypercubeAnalysisYAxis').value=axes[1]?.id||axes[0]?.id||'';
+  axes.slice(2).forEach((axis)=>state.hypercubeAnalysis.sliceValues.set(axis.id,String(axis.values?.[0]??'')));renderHypercubeAnalysisSlices();renderHypercubeStorage();renderHypercubeReadingGuide();
+}
+function renderHypercubeAnalysisVariables(){
+  const variables=(state.hypercubeAnalysis.options?.variables||[]).filter((item)=>item.table===$('hypercubeAnalysisTable').value);$('hypercubeAnalysisVariable').innerHTML=variables.map((item)=>`<option value="${escapeHtml(item.name)}">${escapeHtml(item.name)}</option>`).join('');renderHypercubeAnalysisYears();
+}
+function renderHypercubeAnalysisYears(){const item=(state.hypercubeAnalysis.options?.variables||[]).find((entry)=>entry.table===$('hypercubeAnalysisTable').value&&entry.name===$('hypercubeAnalysisVariable').value);$('hypercubeAnalysisYear').innerHTML=(item?.years||[]).map((year)=>`<option value="${escapeHtml(year)}" ${String(year)==='2045'?'selected':''}>${escapeHtml(year)}</option>`).join('');}
+function renderHypercubeAnalysisSlices(){
+  const axes=state.hypercubeAnalysis.options?.hypercube?.axes||[],shown=new Set([$('hypercubeAnalysisXAxis').value,$('hypercubeAnalysisYAxis').value]);$('hypercubeAnalysisSlices').innerHTML=axes.filter((axis)=>!shown.has(axis.id)).map((axis)=>{const value=state.hypercubeAnalysis.sliceValues.get(axis.id)??axis.values?.[0]??'';return `<label>${escapeHtml(axis.column)} slice<select data-hypercube-analysis-slice="${escapeHtml(axis.id)}">${(axis.values||[]).map((item)=>`<option value="${escapeHtml(item)}" ${String(item)===String(value)?'selected':''}>${escapeHtml(item)}</option>`).join('')}</select></label>`}).join('');
+  document.querySelectorAll('[data-hypercube-analysis-slice]').forEach((select)=>select.addEventListener('change',()=>{state.hypercubeAnalysis.sliceValues.set(select.dataset.hypercubeAnalysisSlice,select.value);state.hypercubeAnalysis.matrix=null;setHypercubeAnalysisExportAvailability();}));
+}
+function renderHypercubeStorage(){const report=state.hypercubeAnalysis.storage,card=$('hypercubeAnalysisStorage');if(!report){card.hidden=true;return;}card.hidden=false;card.innerHTML=`<div class="section-title"><div><h3>Hypercube result storage</h3><p class="muted">Hypercube runs retain Datastores and do not create persistent full CSV trees. Analysis caches are disposable.</p></div></div><div class="metric-grid">${metric('Completed cases',report.completedCases)}${metric('Datastores',humanBytes(report.datastoreBytes))}${metric('Analysis cache',humanBytes(report.comparisonCache?.bytes||0))}</div>`;}
+async function removeHypercubeExports(){const report=state.hypercubeAnalysis.storage,answer=await confirmWorkbench(`This will remove ${report.exportDirectories} Workbench-owned output folders and reclaim approximately ${humanBytes(report.reclaimableBytes)}.\n\nDatastores, results, run history, logs, Compare, and Hypercube Analysis will remain available.`,{title:'Remove full CSV exports?',confirmLabel:'Remove Full CSV Exports'});if(!answer)return;try{const result=await post('/api/hypercube-analysis/cleanup-exports',{projectId:$('hypercubeAnalysisProject').value});state.hypercubeAnalysis.storage=result;renderHypercubeStorage();notify(`Removed ${result.removedDirectories} export folders and reclaimed ${humanBytes(result.removedBytes)}.`,'success');}catch(error){notify(error.message,'error');}}
+async function loadHypercubeAnalysisGeography(){const options=state.hypercubeAnalysis.options,baseline=options?.baseline;if(!baseline||!$('hypercubeAnalysisTable').value||!$('hypercubeAnalysisYear').value)return;try{const payload=await request(`/api/comparison/geo-options?reference=${encodeURIComponent(baseline.id)}&table=${encodeURIComponent($('hypercubeAnalysisTable').value)}&year=${encodeURIComponent($('hypercubeAnalysisYear').value)}`),select=$('hypercubeAnalysisGeography');select.innerHTML='<option value="">All locations</option>'+(payload.levels||[]).map((item)=>`<option value="${escapeHtml(item.field)}">${escapeHtml(item.label)}</option>`).join('');select._levels=payload.levels||[];renderHypercubeLocations();}catch(error){notify(error.message,'error');}}
+function renderHypercubeLocations(){const field=$('hypercubeAnalysisGeography').value,level=($('hypercubeAnalysisGeography')._levels||[]).find((item)=>item.field===field),select=$('hypercubeAnalysisLocations');select.innerHTML=(level?.options||level?.values?.map((value)=>({value,label:value}))||[]).map((item)=>`<option value="${escapeHtml(item.value??item)}">${escapeHtml(item.label??item)}</option>`).join('');select.disabled=!field;}
+function hypercubeOperationActive(){const analysis=state.hypercubeAnalysis;return Boolean(analysis.matrixOperationId||analysis.discoveryOperationId);}
+function setHypercubeAnalysisLocked(locked,status=null){
+  const reason='The analysis must finish or be cancelled before selections can change.';
+  const controls=['hypercubeAnalysisProject','refreshHypercubeAnalysis','hypercubeAnalysisYear','hypercubeAnalysisTable','hypercubeAnalysisVariable','hypercubeAnalysisMetric','hypercubeAnalysisAggregation','hypercubeAnalysisGeography','hypercubeAnalysisLocations','hypercubeAnalysisXAxis','hypercubeAnalysisYAxis','swapHypercubeAxes','updateHypercubeAnalysis','hypercubeDiscoveryYear','hypercubeDiscoveryAggregation','discoverHypercubeOutputs'];
+  controls.forEach((id)=>{const element=$(id);if(!element)return;element.disabled=locked;element.title=locked?reason:'';});
+  $('hypercubeAnalysisSlices')?.querySelectorAll('select').forEach((element)=>{element.disabled=locked;element.title=locked?reason:'';});
+  const wrapper=$('hypercubeAnalysisLock');wrapper?.classList.toggle('locked',locked);if(wrapper){wrapper.tabIndex=locked?0:-1;wrapper.title=locked?reason:'';wrapper.setAttribute('aria-disabled',String(locked));}
+  $('hypercubeUpdatingOverlay').hidden=!(locked&&Boolean(state.hypercubeAnalysis.matrix));
+  $('hypercubeAnalysisActivity').hidden=!locked;
+  $('hypercubePrimaryActivity').hidden=!locked;
+  if(locked)$('hypercubePrimaryActivity').dataset.local='true';else delete $('hypercubePrimaryActivity').dataset.local;
+  if(status)renderHypercubeActivity(status);
+}
+function renderHypercubeActivity(status){
+  const progress=status.progress||{},elapsed=state.hypercubeAnalysis.operationStartedAt?Math.max(0,Math.floor((Date.now()-state.hypercubeAnalysis.operationStartedAt)/1000)):0;
+  $('hypercubeActivityPhase').textContent=status.message||status.phase||'Working…';
+  $('hypercubeActivityDetail').textContent=progress.current||progress.table||progress.variable||'';
+  const pieces=[];if(progress.total)pieces.push(`${progress.completed||0} of ${progress.total}`);pieces.push(`${Math.floor(elapsed/60)}m ${elapsed%60}s`);if(status.heartbeatAt)pieces.push(`heartbeat ${new Date(status.heartbeatAt).toLocaleTimeString()}`);if(status.bytesRead)pieces.push(`${humanBytes(status.bytesRead)} read`);if(status.summariesWritten)pieces.push(`${status.summariesWritten} summaries`);if(status.cacheBytesAdded)pieces.push(`cache +${humanBytes(status.cacheBytesAdded)}`);$('hypercubeActivityMetrics').textContent=pieces.join(' · ');
+}
+async function updateHypercubeAnalysis(){
+  if(hypercubeOperationActive())return;
+  const requestPayload=hypercubeAnalysisRequest();if(!requestPayload.projectId||!requestPayload.table||!requestPayload.variable||!requestPayload.year)return notify('Choose a Hypercube output first.','error');if(!requestPayload.aggregation)return notify('Choose how rows or locations should be aggregated first.','error');
+  try{const operation=await post('/api/hypercube-analysis/operations/start',requestPayload);const analysis=state.hypercubeAnalysis;analysis.matrixOperationId=operation.id;analysis.operationKind='matrix';analysis.operationStartedAt=Date.now();analysis.requestSnapshot=structuredClone(requestPayload);setHypercubeAnalysisLocked(true,operation);pollHypercubeMatrixOperation(operation.id);}catch(error){setHypercubeAnalysisLocked(false);notify(error.message,'error');}
+}
+async function pollHypercubeMatrixOperation(operationId){
+  if(state.hypercubeAnalysis.matrixOperationId!==operationId)return;
+  try{const status=await request(`/api/hypercube-analysis/operations/status?id=${encodeURIComponent(operationId)}`);if(state.hypercubeAnalysis.matrixOperationId!==operationId)return;renderHypercubeActivity(status);if(['waiting','running','cancelling'].includes(status.state)){state.hypercubeAnalysis.pollTimer=setTimeout(()=>pollHypercubeMatrixOperation(operationId),700);return;}state.hypercubeAnalysis.matrixOperationId='';state.hypercubeAnalysis.operationKind='';setHypercubeAnalysisLocked(Boolean(state.hypercubeAnalysis.discoveryOperationId));if(status.state==='succeeded'&&status.result){state.hypercubeAnalysis.matrix=status.result;if(state.hypercubeAnalysis.pendingSelectedCase){state.hypercubeAnalysis.selectedCases=[state.hypercubeAnalysis.pendingSelectedCase];state.hypercubeAnalysis.pendingSelectedCase='';}renderHypercubeAnalysis();setHypercubeAnalysisExportAvailability();nativeNotification('Hypercube analysis ready',`${status.result.table} / ${status.result.variable} finished.`,{outcome:'succeeded',force:true});}else if(status.state==='failed'){notify(status.message,'error');nativeNotification('Hypercube analysis failed',status.message,{outcome:'failed',force:true});}}catch(error){notify(error.message,'error');state.hypercubeAnalysis.matrixOperationId='';setHypercubeAnalysisLocked(Boolean(state.hypercubeAnalysis.discoveryOperationId));}
+}
+function hypercubeMetricLabel(metricValue=$('hypercubeAnalysisMetric').value){return ({percent_change:'Percent change from baseline',absolute_change:'Absolute change from baseline',value:'Result value',typical_row_change:'Typical row change',breadth:'Matched rows changed'})[metricValue]||metricValue;}
+function hypercubeDisplayValue(value){if(value===null||value===undefined||Number.isNaN(Number(value)))return '—';return `${number(value)}${['percent_change','typical_row_change','breadth'].includes($('hypercubeAnalysisMetric').value)?'%':''}`;}
+function hypercubeOutputValue(value){const units=state.hypercubeAnalysis.matrix?.metadata?.units||'';return value==null?'—':`${number(value)}${units?` ${units}`:''}`;}
+function renderHypercubeAnalysis(){const payload=state.hypercubeAnalysis.matrix;if(!payload)return;const item=(state.hypercubeAnalysis.options?.variables||[]).find((entry)=>entry.table===payload.table&&entry.name===payload.variable);$('hypercubeAnalysisTitle').textContent=`${payload.table} / ${payload.variable}`;$('hypercubeAnalysisSubtitle').textContent=`${hypercubeMetricLabel()} · ${item?.units||payload.metadata?.units||'units not specified'} · ${payload.cells.length} available cases`;$('hypercubeCaseSortLabel').hidden=state.hypercubeAnalysis.view!=='table';if(state.hypercubeAnalysis.view==='table')renderHypercubeCaseTable(payload);else renderHypercubeHeatmap(payload);renderHypercubeSelection();}
+function hypercubeCellButton(cell,scale){const selected=state.hypercubeAnalysis.selectedCases.includes(cell.variationId),value=Number(cell.value),ratio=Number.isFinite(value)&&scale.max!==scale.min?Math.min(1,Math.abs(value)/(scale.maxAbs||1)):0,color=value<0?'var(--red)':'var(--blue)',strength=Math.round(14+ratio*58);return `<button type="button" class="hypercube-heat-cell${selected?' selected':''}" style="background:color-mix(in srgb,${color} ${strength}%,var(--surface))" data-hypercube-cell="${escapeHtml(cell.variationId)}" title="${escapeHtml(cell.name)}"><strong>${hypercubeDisplayValue(cell.value)}</strong><small>${escapeHtml(cell.name)}</small></button>`;}
+function bindHypercubeCells(){document.querySelectorAll('[data-hypercube-cell]').forEach((button)=>button.addEventListener('click',()=>selectHypercubeCell(button.dataset.hypercubeCell)));}
+function renderHypercubeHeatmap(payload){const axes=payload.hypercube.axes||[],x=axes.find((item)=>item.id===$('hypercubeAnalysisXAxis').value)||axes[0],y=axes.find((item)=>item.id===$('hypercubeAnalysisYAxis').value)||axes[1]||axes[0],lookup=new Map(payload.cells.map((cell)=>[`${hypercubeAxisValue(cell,x.id)}\u0000${hypercubeAxisValue(cell,y.id)}`,cell])),numeric=payload.cells.map((cell)=>Number(cell.value)).filter(Number.isFinite),scale={min:Math.min(...numeric),max:Math.max(...numeric),maxAbs:Math.max(1,...numeric.map(Math.abs))};$('hypercubeAnalysisView').className='hypercube-heatmap-wrap';$('hypercubeAnalysisView').innerHTML=`<table class="hypercube-heatmap"><caption>${escapeHtml(y.column)} by ${escapeHtml(x.column)} · color intensity shows magnitude; every cell also prints its value</caption><thead><tr><th>${escapeHtml(y.column)} ↓ / ${escapeHtml(x.column)} →</th>${(x.values||[]).map((value)=>`<th>${escapeHtml(value)}</th>`).join('')}</tr></thead><tbody>${(y.values||[]).map((yv)=>`<tr><th>${escapeHtml(yv)}</th>${(x.values||[]).map((xv)=>`<td>${lookup.has(`${xv}\u0000${yv}`)?hypercubeCellButton(lookup.get(`${xv}\u0000${yv}`),scale):'<span class="hypercube-missing">Missing</span>'}</td>`).join('')}</tr>`).join('')}</tbody></table>`;bindHypercubeCells();}
+function hypercubeCoverageLabel(cell){return Number.isFinite(cell.matchedRows)?`${number(cell.matchedRows)} matched${Number.isFinite(cell.unmatchedRows)?` · ${number(cell.unmatchedRows)} unmatched`:''}`:cell.summaryBacked?'Indexed summary':'—';}
+function renderHypercubeCaseTable(payload){const axes=payload.hypercube.axes||[],sort=$('hypercubeCaseSort').value,rows=sortScenarioCells(payload.cells,sort);$('hypercubeAnalysisView').className='table-wrap';$('hypercubeAnalysisView').innerHTML=`<table><thead><tr><th>Case</th>${axes.map((axis)=>`<th>${escapeHtml(axis.column)}</th>`).join('')}<th>${escapeHtml(hypercubeMetricLabel())}</th><th>Aggregation</th><th>Coverage</th><th>Status</th></tr></thead><tbody>${rows.map((cell)=>`<tr data-hypercube-cell="${escapeHtml(cell.variationId)}"><td><button class="text-button" data-hypercube-cell="${escapeHtml(cell.variationId)}">${escapeHtml(cell.name)}</button></td>${axes.map((axis)=>`<td>${escapeHtml(hypercubeAxisValue(cell,axis.id))}</td>`).join('')}<td>${hypercubeDisplayValue(cell.value)}</td><td>${escapeHtml(cell.aggregationLabel)}</td><td>${escapeHtml(hypercubeCoverageLabel(cell))}</td><td>${escapeHtml(cell.status||'complete')}</td></tr>`).join('')}</tbody></table>`;bindHypercubeCells();}
+function renderHypercubeCurves(payload){const axes=payload.hypercube.axes||[],x=axes.find((item)=>item.id===$('hypercubeAnalysisXAxis').value)||axes[0],group=axes.find((item)=>item.id===$('hypercubeAnalysisYAxis').value)||axes[1]||axes[0],values=payload.cells.map((cell)=>Number(cell.value)).filter(Number.isFinite),min=Math.min(...values),max=Math.max(...values),range=max-min||1,width=900,height=430,pad=55,colors=['#1769aa','#c43d3d','#198754','#8b5cf6','#d97706','#0891b2','#be185d','#4d7c0f','#475569'];const lines=(group.values||[]).map((groupValue,index)=>{const cells=payload.cells.filter((cell)=>hypercubeAxisValue(cell,group.id)===String(groupValue)).sort((a,b)=>(x.values||[]).indexOf(hypercubeAxisValue(a,x.id))-(x.values||[]).indexOf(hypercubeAxisValue(b,x.id))),points=cells.map((cell,pointIndex)=>`${pad+pointIndex*Math.max(1,(width-pad*2)/Math.max(1,(x.values||[]).length-1))},${height-pad-(Number(cell.value)-min)/range*(height-pad*2)}`).join(' ');return `<polyline fill="none" stroke="${colors[index%colors.length]}" stroke-width="3" points="${points}"/><text x="${width-180}" y="${30+index*20}" fill="${colors[index%colors.length]}">${escapeHtml(group.column)} ${escapeHtml(groupValue)}</text>`}).join('');$('hypercubeAnalysisView').className='hypercube-curve-wrap';$('hypercubeAnalysisView').innerHTML=`<p class="muted">Each line holds ${escapeHtml(group.column)} constant while ${escapeHtml(x.column)} changes. Lines connect completed scenarios; they are not fitted predictions. Tiny near-zero differences may look larger because the chart scales to the displayed range.</p><svg id="hypercubeAnalysisSvg" role="img" aria-label="Response curves for ${escapeHtml(payload.variable)}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/><line x1="${pad}" y1="${height-pad}" x2="${width-pad}" y2="${height-pad}" stroke="#526477"/><line x1="${pad}" y1="${pad}" x2="${pad}" y2="${height-pad}" stroke="#526477"/>${lines}<text x="${width/2}" y="${height-12}" text-anchor="middle">${escapeHtml(x.column)}</text></svg>`;}
+function selectHypercubeCell(caseId){if(hypercubeOperationActive())return notify('Finish or cancel the active Hypercube analysis before changing case selection.','error');const selected=state.hypercubeAnalysis.selectedCases,index=selected.indexOf(caseId);if(index>=0)selected.splice(index,1);else{if(selected.length>=2)selected.shift();selected.push(caseId);}renderHypercubeAnalysis();}
+function renderHypercubeSelection(){const payload=state.hypercubeAnalysis.matrix,ids=state.hypercubeAnalysis.selectedCases,cells=ids.map((id)=>payload?.cells.find((cell)=>cell.variationId===id)).filter(Boolean),firstValue=finiteNumber(cells[0]?.scenarioValue),secondValue=finiteNumber(cells[1]?.scenarioValue),pairDifference=firstValue===null||secondValue===null?null:secondValue-firstValue;$('hypercubePairSummary').textContent=cells.length===2?`${cells[1].name} − ${cells[0].name}: ${pairDifference===null?'unavailable':hypercubeOutputValue(pairDifference)}`:cells.length===1?`${cells[0].name} selected · Open Map compares this scenario with the common baseline.`:'Select one cell for details or two to compare cases.';$('openHypercubeMap').disabled=cells.length<1;$('openHypercubeMap').title=cells.length?'Open Compare → Map with the common baseline and the most recently selected scenario.':'Select a scenario first.';$('openHypercubeMap').setAttribute('aria-description',$('openHypercubeMap').title);const detail=$('hypercubeCellDetails');detail.hidden=cells.length!==1;if(cells.length===1){const cell=cells[0];detail.innerHTML=`<h4>${escapeHtml(cell.name)}</h4><dl class="removal-impact-grid"><dt>Scenario value</dt><dd>${hypercubeOutputValue(cell.scenarioValue)}</dd><dt>Baseline value</dt><dd>${hypercubeOutputValue(cell.referenceValue)}</dd><dt>Absolute change</dt><dd>${hypercubeOutputValue(cell.absoluteChange)}</dd><dt>Percent change</dt><dd>${cell.percentChange==null?'Unavailable (zero reference)':`${number(cell.percentChange)}%`}</dd><dt>Aggregation</dt><dd>${escapeHtml(cell.aggregationLabel)}</dd><dt>Coverage</dt><dd>${escapeHtml(hypercubeCoverageLabel(cell))}</dd></dl>${cell.warning?`<p class="notice warning-notice">${escapeHtml(cell.warning)}</p>`:''}`;}}
+async function openHypercubeInCompare(pair=false){const payload=state.hypercubeAnalysis.matrix,ids=state.hypercubeAnalysis.selectedCases,cells=ids.map((id)=>payload.cells.find((cell)=>cell.variationId===id)).filter(Boolean),selected=pair&&cells.length===2?[cells[0].datastore.id,cells[1].datastore.id]:[payload.baseline.id,cells.at(-1)?.datastore.id].filter(Boolean);selected.forEach((id)=>state.transientDatastoreIds.add(id));switchPage('comparePage',{restoreScroll:false});switchSubpage('compareData');renderDatastores();$('compareReference').value=selected[0]||'';$('compareComparison').value=selected[1]||'';await loadCompareSelection();}
+async function openHypercubeInMap(){const payload=state.hypercubeAnalysis.matrix,cell=payload.cells.find((item)=>item.variationId===state.hypercubeAnalysis.selectedCases.at(-1));if(!cell)return;[payload.baseline.id,cell.datastore.id].forEach((id)=>state.transientDatastoreIds.add(id));switchPage('comparePage',{restoreScroll:false});switchSubpage('mapData');renderDatastores();$('mapReference').value=payload.baseline.id;$('mapComparison').value=cell.datastore.id;await loadComparisonMapOptions();$('mapTable').value=payload.table;renderComparisonMapVariables();$('mapVariable').value=payload.variable;renderComparisonMapYears();}
+function hypercubeVisualSvg(){const view=$('hypercubeAnalysisView'),title=$('hypercubeAnalysisTitle').textContent,subtitle=$('hypercubeAnalysisSubtitle').textContent,width=1600,height=1000;const foreign=`<foreignObject x="45" y="120" width="1510" height="820"><div xmlns="http://www.w3.org/1999/xhtml" style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#172331;background:white;padding:20px">${view.outerHTML}</div></foreignObject>`;return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="white"/><text x="45" y="55" font-family="sans-serif" font-size="30" font-weight="700">${escapeHtml(title)}</text><text x="45" y="88" font-family="sans-serif" font-size="17" fill="#53657a">${escapeHtml(subtitle)}</text>${foreign}</svg>`;}
+async function exportHypercubeVisual(format,snapshot={svgText:hypercubeVisualSvg(),filename:compareExportFilename('hypercube analysis',format)}){const {svgText,filename}=snapshot,invoke=window.__TAURI_INTERNALS__?.invoke;if(format==='svg'){if(invoke){const saved=await invoke('save_visual_export',{format,content:svgText,filename,width:1600,height:1000});if(saved)notify(`Saved ${saved}.`,'success');return saved||null;}const link=document.createElement('a');link.href=URL.createObjectURL(new Blob([svgText],{type:'image/svg+xml'}));link.download=filename;link.click();return filename;}const url=URL.createObjectURL(new Blob([svgText],{type:'image/svg+xml'})),image=new Image();await new Promise((resolve,reject)=>{image.onload=resolve;image.onerror=reject;image.src=url});const canvas=document.createElement('canvas');canvas.width=1600;canvas.height=1000;const context=canvas.getContext('2d');context.fillStyle='#fff';context.fillRect(0,0,1600,1000);context.drawImage(image,0,0);URL.revokeObjectURL(url);const content=canvas.toDataURL(format==='pdf'?'image/jpeg':'image/png',.94);if(invoke){const saved=await invoke('save_visual_export',{format,content,filename,width:1600,height:1000});if(saved)notify(`Saved ${saved}.`,'success');return saved||null;}if(format==='pdf')throw new Error('PDF export is available in the desktop app.');const link=document.createElement('a');link.href=content;link.download=filename;link.click();return filename;}
+function exportHypercubeCsv(){const params=new URLSearchParams({payload:JSON.stringify(hypercubeAnalysisRequest())}),filename=compareExportFilename('hypercube analysis','csv');enqueueHypercubeExport('Hypercube CSV',()=>saveBackendExport('hypercube-analysis-csv',new URLSearchParams(params.toString()),filename));}
+function hypercubeDiscoveryRequest(){return {projectId:$('hypercubeAnalysisProject').value,year:$('hypercubeDiscoveryYear').value,aggregation:$('hypercubeDiscoveryAggregation').value||'median'};}
+async function restoreCachedHypercubeDiscovery(){const payload=hypercubeDiscoveryRequest();if(!payload.projectId||!payload.year||!payload.aggregation)return;try{const status=await post('/api/hypercube-analysis/discovery/cached',payload);if(status.state!=='succeeded'||!status.result)return;state.hypercubeAnalysis.discoveryResult=status.result;$('hypercubeDiscoveryStatus').textContent=`Found ${(status.result.results||[]).length} changed outputs · Reused cached results`;renderHypercubeDiscovery(status.result);}catch(error){console.warn('Could not restore cached Find All Changes results',error);}}
+async function startHypercubeDiscovery(){if(hypercubeOperationActive())return;const payload=hypercubeDiscoveryRequest();if(!payload.projectId||!payload.year)return notify('Choose a Hypercube project and Find All Changes year first.','error');const operation=await post('/api/hypercube-analysis/discovery/start',payload);state.hypercubeAnalysis.discoveryOperationId=operation.id;state.hypercubeAnalysis.operationKind='discovery';state.hypercubeAnalysis.operationStartedAt=Date.now();state.hypercubeAnalysis.requestSnapshot=structuredClone(payload);$('cancelHypercubeDiscovery').hidden=false;setHypercubeAnalysisLocked(true,operation);pollHypercubeDiscovery(operation.id);}
+async function pollHypercubeDiscovery(operationId=state.hypercubeAnalysis.discoveryOperationId){const id=operationId;if(!id||state.hypercubeAnalysis.discoveryOperationId!==id)return;try{const status=await request(`/api/hypercube-analysis/discovery/status?id=${encodeURIComponent(id)}`),progress=status.progress||{};if(state.hypercubeAnalysis.discoveryOperationId!==id)return;$('hypercubeDiscoveryStatus').textContent=`${status.message}${progress.total?` · ${progress.completed} of ${progress.total}`:''}`;renderHypercubeActivity(status);if(['waiting','running','cancelling'].includes(status.state)){state.hypercubeAnalysis.pollTimer=setTimeout(()=>pollHypercubeDiscovery(id),900);return;}state.hypercubeAnalysis.discoveryOperationId='';state.hypercubeAnalysis.operationKind='';$('cancelHypercubeDiscovery').hidden=true;setHypercubeAnalysisLocked(Boolean(state.hypercubeAnalysis.matrixOperationId));if(status.state==='succeeded'){state.hypercubeAnalysis.discoveryResult=status.result;const elapsed=Math.max(0,new Date(status.finishedAt||Date.now()).getTime()-new Date(status.startedAt||Date.now()).getTime());$('hypercubeDiscoveryStatus').textContent=`Found ${(status.result?.results||[]).length} changed outputs · ${status.cached?'Reused cached results':`Completed in ${formatDuration(elapsed)}`}`;renderHypercubeDiscovery(status.result);nativeNotification('Find All Changes complete',status.cached?'Matching cached results are ready.':`${(status.result?.results||[]).length} changed outputs found in ${formatDuration(elapsed)}.`,{outcome:'succeeded',force:true});}else if(status.state==='failed'){notify(status.message,'error');nativeNotification('Find All Changes failed',status.message,{outcome:'failed',force:true});}}catch(error){notify(error.message,'error');state.hypercubeAnalysis.discoveryOperationId='';setHypercubeAnalysisLocked(Boolean(state.hypercubeAnalysis.matrixOperationId));}}
+function finiteNumber(value){const result=Number(value);return Number.isFinite(result)?result:null;}
+function sortScenarioCells(cells,sort='magnitude',metric='value'){
+  const rows=[...(cells||[])],value=(cell)=>finiteNumber(cell[metric]);
+  return rows.sort((a,b)=>{const av=value(a),bv=value(b);if(av===null&&bv===null)return (a.caseIndex||0)-(b.caseIndex||0);if(av===null)return 1;if(bv===null)return -1;if(sort==='increase')return bv-av;if(sort==='decrease')return av-bv;if(sort==='closest')return Math.abs(av)-Math.abs(bv);if(sort==='case')return (a.caseIndex||0)-(b.caseIndex||0);return Math.abs(bv)-Math.abs(av);});
+}
+function discoveryAxisText(values){return (values||[]).map((item)=>`${item.column||item.axisId}: ${item.value}`).join(' · ');}
+function discoveryChange(value){const numeric=finiteNumber(value);return numeric===null?'Unavailable':`${numeric>0?'+':''}${number(numeric)}%`;}
+function closeHypercubeOutputRanking(){const pane=$('hypercubeOutputRankingPane'),origin=state.hypercubeAnalysis.rankingOrigin;pane.hidden=true;state.hypercubeAnalysis.rankingOutput=null;origin?.focus?.();state.hypercubeAnalysis.rankingOrigin=null;}
+function renderHypercubeOutputRanking(){
+  const output=state.hypercubeAnalysis.rankingOutput,pane=$('hypercubeOutputRankingPane');if(!output){pane.hidden=true;return;}
+  const sort=$('hypercubeOutputRankingSort').value,rows=sortScenarioCells(output.cells,sort,'percentChange'),warning=['Household','Vehicle','Worker'].includes(output.table)?'Run-local IDs; aggregate distributions are compared.':'';
+  $('hypercubeOutputRankingTitle').textContent=`${output.table} / ${output.variable}`;$('hypercubeOutputRankingMeta').textContent=[output.description,output.units,`${output.availableCases} of ${output.totalCases} cases`,warning].filter(Boolean).join(' · ');
+  $('hypercubeOutputRankingTable').innerHTML=`<table><thead><tr><th>Scenario</th><th>Axes</th><th title="Signed aggregate percent change from the common baseline.">Change</th><th>Absolute change</th><th>Baseline</th><th>Scenario value</th><th>Actions</th></tr></thead><tbody>${rows.map((cell)=>`<tr class="${finiteNumber(cell.percentChange)>0?'increase':finiteNumber(cell.percentChange)<0?'decrease':'unchanged'}"><td>${escapeHtml(cell.name)}</td><td>${escapeHtml(discoveryAxisText(cell.values))}</td><td>${escapeHtml(discoveryChange(cell.percentChange))}</td><td>${cell.absoluteChange==null?'—':escapeHtml(number(cell.absoluteChange))}</td><td>${cell.referenceValue==null?'—':escapeHtml(number(cell.referenceValue))}</td><td>${cell.scenarioValue==null?'—':escapeHtml(number(cell.scenarioValue))}</td><td><div class="actions"><button type="button" class="text-button" data-inspect-discovery-case="${escapeHtml(cell.variationId)}">Inspect matrix</button><button type="button" class="text-button" data-map-discovery-case="${escapeHtml(cell.variationId)}">Open Map</button></div></td></tr>`).join('')}</tbody></table>`;
+  $('hypercubeOutputRankingTable').querySelectorAll('[data-inspect-discovery-case]').forEach((button)=>button.addEventListener('click',()=>inspectDiscoveredScenario(output,button.dataset.inspectDiscoveryCase)));
+  $('hypercubeOutputRankingTable').querySelectorAll('[data-map-discovery-case]').forEach((button)=>button.addEventListener('click',()=>openDiscoveredScenarioMap(output,button.dataset.mapDiscoveryCase)));
+}
+function openHypercubeOutputRanking(output,origin,highlight=''){
+  state.hypercubeAnalysis.rankingOutput=output;state.hypercubeAnalysis.rankingOrigin=origin||document.activeElement;$('hypercubeOutputRankingSort').value='magnitude';$('hypercubeOutputRankingPane').hidden=false;renderHypercubeOutputRanking();
+  requestAnimationFrame(()=>{$('hypercubeOutputRankingTitle').focus();if(highlight)$('hypercubeOutputRankingTable').querySelector(`[data-inspect-discovery-case="${CSS.escape(highlight)}"]`)?.scrollIntoView({block:'center'});});
+}
+async function inspectDiscoveredScenario(output,caseId){
+  $('hypercubeAnalysisTable').value=output.table;renderHypercubeAnalysisVariables();$('hypercubeAnalysisVariable').value=output.variable;renderHypercubeAnalysisYears();state.hypercubeAnalysis.pendingSelectedCase=caseId;closeHypercubeOutputRanking();await updateHypercubeAnalysis();
+}
+async function openDiscoveredScenarioMap(output,caseId){
+  const options=state.hypercubeAnalysis.options,baseline=options?.baseline,entry=(options?.cases||[]).find((item)=>item.variationId===caseId),datastore=entry?.datastore;if(!baseline||!datastore)return notify('This scenario does not have a verified map result.','error');
+  [baseline.id,datastore.id].forEach((id)=>state.transientDatastoreIds.add(id));switchPage('comparePage',{restoreScroll:false});switchSubpage('mapData');renderDatastores();$('mapReference').value=baseline.id;$('mapComparison').value=datastore.id;await loadComparisonMapOptions();$('mapTable').value=output.table;renderComparisonMapVariables();$('mapVariable').value=output.variable;renderComparisonMapYears();
+}
+function discoveryScenarioSort(rows,rank){const value=(item)=>finiteNumber(rank==='largest'?item.largestAbsoluteChange:rank==='changed'?item.changedOutputPercent:item.typicalAbsoluteChange);return [...rows].sort((a,b)=>{const av=value(a),bv=value(b);if(av===null)return 1;if(bv===null)return -1;return rank==='closest'?av-bv:bv-av;});}
+const hypercubeDiscoveryHelp={
+  outputs:{
+    'Overall shift':'Largest aggregate percentage change across any completed case.',
+    'Typical row shift':'Largest case-level average change across comparable rows.',
+    'Breadth':'Greatest share of comparable rows or locations changed in one case.',
+    'Extreme change':'Largest raw-unit difference for one comparable row.',
+    'Coverage':'Completed cases contributing to the result.',
+    'Warnings':'Identifies outputs that use aggregate distributions because row identifiers differ between runs.',
+  },
+  scenarios:{
+    'Typical change':'Median absolute percentage deviation from baseline across eligible outputs.',
+    'Largest change':'Largest absolute percentage deviation from baseline for one eligible output.',
+    'Outputs changed':'Count and share of outputs whose aggregates differ from baseline at five decimal places.',
+    'Increase / decrease':'Eligible outputs with positive and negative percentage changes, respectively.',
+    'Coverage':'Outputs with usable percentage changes included in the scenario summary.',
+    'Excluded outputs':'Outputs omitted from percentage summaries, including results with a zero baseline.',
+  },
+};
+function discoveryHeaderHelp(label,view){const description=hypercubeDiscoveryHelp[view]?.[label]||'';return `${escapeHtml(label)} <button type="button" class="table-header-help" data-table-header-help="${escapeHtml(description)}" aria-label="About ${escapeHtml(label)}" aria-description="${escapeHtml(description)}">?</button>`;}
+function renderHypercubeReadingGuide(view=state.hypercubeAnalysis.discoveryView){const target=$('hypercubeReadingGuideContent');if(!target)return;const definitions=hypercubeDiscoveryHelp[view]||hypercubeDiscoveryHelp.outputs;target.innerHTML=`<p><strong>${view==='scenarios'?'Scenario ranking':'Output ranking'}</strong></p><dl>${Object.entries(definitions).map(([term,description])=>`<dt>${escapeHtml(term)}</dt><dd>${escapeHtml(description)}</dd>`).join('')}</dl><p>Coverage excludes unavailable percentages such as zero-baseline results. Rankings measure sensitivity and deviation from baseline, not whether an outcome is desirable.</p>`;}
+let tableHeaderTooltip=null;
+function showTableHeaderTooltip(button){hideTableHeaderTooltip();const message=button.dataset.tableHeaderHelp;if(!message)return;tableHeaderTooltip=document.createElement('div');tableHeaderTooltip.className='table-header-tooltip';tableHeaderTooltip.setAttribute('role','tooltip');tableHeaderTooltip.textContent=message;document.body.appendChild(tableHeaderTooltip);const bounds=button.getBoundingClientRect(),tooltip=tableHeaderTooltip.getBoundingClientRect(),left=Math.max(8,Math.min(window.innerWidth-tooltip.width-8,bounds.left+bounds.width/2-tooltip.width/2)),top=bounds.bottom+8;tableHeaderTooltip.style.left=`${left}px`;tableHeaderTooltip.style.top=`${Math.min(window.innerHeight-tooltip.height-8,top)}px`;}
+function hideTableHeaderTooltip(){tableHeaderTooltip?.remove();tableHeaderTooltip=null;}
+document.addEventListener('pointerover',(event)=>{const button=event.target.closest?.('[data-table-header-help]');if(button)showTableHeaderTooltip(button);});
+document.addEventListener('pointerout',(event)=>{if(event.target.closest?.('[data-table-header-help]'))hideTableHeaderTooltip();});
+document.addEventListener('focusin',(event)=>{const button=event.target.closest?.('[data-table-header-help]');if(button)showTableHeaderTooltip(button);});
+document.addEventListener('focusout',(event)=>{if(event.target.closest?.('[data-table-header-help]'))hideTableHeaderTooltip();});
+function renderHypercubeDiscovery(result){
+  const target=$('hypercubeDiscoveryResults'),items=result?.results||[],summaries=result?.scenarioSummaries||[],tables=[...new Set(items.map((item)=>item.table))].sort(),view=state.hypercubeAnalysis.discoveryView;
+  renderHypercubeReadingGuide(view);
+  target.innerHTML=`<div class="segmented hypercube-discovery-views" role="group" aria-label="Find All Changes results"><button type="button" data-discovery-view="outputs" aria-pressed="${view==='outputs'}">Outputs</button><button type="button" data-discovery-view="scenarios" aria-pressed="${view==='scenarios'}">Scenarios</button></div><div id="hypercubeDiscoveryView"></div>`;
+  target.querySelectorAll('[data-discovery-view]').forEach((button)=>button.addEventListener('click',()=>{state.hypercubeAnalysis.discoveryView=button.dataset.discoveryView;renderHypercubeDiscovery(result);}));
+  const viewTarget=$('hypercubeDiscoveryView');
+  if(view==='scenarios'){
+    viewTarget.innerHTML=`<div class="hypercube-discovery-toolbar scenario"><label>Rank by<select id="hypercubeScenarioRank"><option value="typical">Largest typical change</option><option value="largest">Largest single change</option><option value="changed">Most outputs changed</option><option value="closest">Closest to baseline</option></select></label></div><div id="hypercubeScenarioRanking" class="table-wrap"></div>`;
+    const paint=()=>{const rows=discoveryScenarioSort(summaries,$('hypercubeScenarioRank').value);$('hypercubeScenarioRanking').innerHTML=`<table><thead><tr><th>Scenario</th><th>Axes</th><th>${discoveryHeaderHelp('Typical change','scenarios')}</th><th>${discoveryHeaderHelp('Largest change','scenarios')}</th><th>${discoveryHeaderHelp('Outputs changed','scenarios')}</th><th>${discoveryHeaderHelp('Increase / decrease','scenarios')}</th><th>${discoveryHeaderHelp('Coverage','scenarios')}</th><th>${discoveryHeaderHelp('Excluded outputs','scenarios')}</th></tr></thead><tbody>${rows.map((item)=>`<tr><td><details><summary>${escapeHtml(item.name)}</summary><div class="scenario-top-outputs"><strong>Five largest output changes</strong>${(item.topOutputs||[]).map((output)=>`<button type="button" class="text-button" data-summary-table="${escapeHtml(output.table)}" data-summary-variable="${escapeHtml(output.variable)}" data-summary-case="${escapeHtml(item.variationId)}">${escapeHtml(output.table)} / ${escapeHtml(output.variable)} · ${escapeHtml(discoveryChange(output.percentChange))}</button>`).join('')||'<span>No eligible changes.</span>'}</div></details></td><td>${escapeHtml(discoveryAxisText(item.values))}</td><td>${item.typicalAbsoluteChange==null?'—':`${number(item.typicalAbsoluteChange)}%`}</td><td>${item.largestAbsoluteChange==null?'—':`${number(item.largestAbsoluteChange)}%`}</td><td>${item.changedOutputs} / ${item.totalOutputs}${item.changedOutputPercent==null?'':` (${number(item.changedOutputPercent)}%)`}</td><td>${item.positiveOutputs} / ${item.negativeOutputs}</td><td>${item.eligibleOutputs} / ${item.totalOutputs} eligible</td><td>${item.excludedOutputs||0}</td></tr>`).join('')}</tbody></table>`;$('hypercubeScenarioRanking').querySelectorAll('[data-summary-table]').forEach((button)=>button.addEventListener('click',()=>{const output=items.find((item)=>item.table===button.dataset.summaryTable&&item.variable===button.dataset.summaryVariable);if(output)openHypercubeOutputRanking(output,button,button.dataset.summaryCase);}));};
+    $('hypercubeScenarioRank').addEventListener('change',paint);paint();return;
+  }
+  viewTarget.innerHTML=`<div class="hypercube-discovery-toolbar"><label>Search outputs<input id="hypercubeDiscoverySearch" type="search" placeholder="Table or variable"></label><label>Table<select id="hypercubeDiscoveryTable"><option value="">All tables</option>${tables.map((table)=>`<option>${escapeHtml(table)}</option>`).join('')}</select></label><label>Rank by<select id="hypercubeDiscoveryRank"><option value="largestOverallShift">Largest overall shift</option><option value="largestTypicalRowShift">Largest typical row shift</option><option value="broadestChange">Broadest change</option><option value="largestExtremeChange">Largest extreme change</option></select></label></div><div id="hypercubeDiscoveryTableWrap" class="table-wrap"></div>`;
+  const paint=()=>{const query=$('hypercubeDiscoverySearch').value.trim().toLowerCase(),table=$('hypercubeDiscoveryTable').value,rank=$('hypercubeDiscoveryRank').value,rows=items.filter((item)=>(!table||item.table===table)&&(!query||`${item.table} ${item.variable} ${item.description||''}`.toLowerCase().includes(query))).sort((a,b)=>(Number(b[rank])||-Infinity)-(Number(a[rank])||-Infinity));$('hypercubeDiscoveryTableWrap').innerHTML=`<table><thead><tr><th>Output</th><th>${discoveryHeaderHelp('Overall shift','outputs')}</th><th>${discoveryHeaderHelp('Typical row shift','outputs')}</th><th>${discoveryHeaderHelp('Breadth','outputs')}</th><th>${discoveryHeaderHelp('Extreme change','outputs')}</th><th>${discoveryHeaderHelp('Coverage','outputs')}</th><th>${discoveryHeaderHelp('Warnings','outputs')}</th></tr></thead><tbody>${rows.map((item)=>`<tr><td><button class="text-button" data-discovered-table="${escapeHtml(item.table)}" data-discovered-variable="${escapeHtml(item.variable)}">${escapeHtml(item.table)} / ${escapeHtml(item.variable)}</button></td><td>${number(item.largestOverallShift)}%</td><td>${item.largestTypicalRowShift==null?'—':`${number(item.largestTypicalRowShift)}%`}</td><td>${item.broadestChange==null?'—':`${number(item.broadestChange)}%`}</td><td>${item.largestExtremeChange==null?'—':number(item.largestExtremeChange)}</td><td>${item.availableCases} / ${item.totalCases}</td><td>${['Household','Vehicle','Worker'].includes(item.table)?'Run-local IDs; aggregate distributions used':'—'}</td></tr>`).join('')}</tbody></table>`;viewTarget.querySelectorAll('[data-discovered-variable]').forEach((button)=>button.addEventListener('click',()=>{const output=items.find((item)=>item.table===button.dataset.discoveredTable&&item.variable===button.dataset.discoveredVariable);if(output)openHypercubeOutputRanking(output,button);}));};
+  ['hypercubeDiscoverySearch','hypercubeDiscoveryTable','hypercubeDiscoveryRank'].forEach((id)=>$(id).addEventListener(id.endsWith('Search')?'input':'change',paint));paint();
+}
+
+async function loadHypercubeCaseExportOptions(){
+  const view=state.hypercubeCaseExport,select=$('hypercubeExportProject'),projects=hypercubeWorkflowProjects().filter((project)=>(project.hypercubes||[]).length),prior=select.value||view.projectId;
+  select.innerHTML=`<option value="">Choose a project</option>${projects.map((project)=>`<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join('')}`;
+  select.value=projects.some((project)=>project.id===prior)?prior:(projects.length===1?projects[0].id:'');view.projectId=select.value;view.selected.clear();
+  if(!view.projectId){view.items=[];renderHypercubeCaseExportItems();return;}
+  $('hypercubeExportItems').className='hypercube-export-items empty-state';$('hypercubeExportItems').textContent='Loading completed results…';
+  try{const payload=await request(`/api/hypercube-exports/options?projectId=${encodeURIComponent(view.projectId)}`);if(view.projectId!==select.value)return;view.items=payload.items||[];renderHypercubeCaseExportItems();}catch(error){view.items=[];$('hypercubeExportItems').textContent=error.message;notify(error.message,'error');}
+}
+function renderHypercubeCaseExportItems(){
+  const view=state.hypercubeCaseExport,target=$('hypercubeExportItems'),query=(view.query||'').trim().toLowerCase(),selected=view.selected.size,limit=3;
+  const items=view.items.filter((item)=>!query||`${item.name} ${(item.values||[]).map((entry)=>`${entry.column||entry.axisId} ${entry.value}`).join(' ')}`.toLowerCase().includes(query));
+  target.className=`hypercube-export-items${items.length?'':' empty-state'}`;target.innerHTML=items.length?items.map((item)=>{const checked=view.selected.has(item.id),blocked=selected>=limit&&!checked,axes=(item.values||[]).map((entry)=>`${entry.column||entry.axisId}: ${entry.value}`).join(' · ');return `<label class="hypercube-export-row${blocked?' disabled':''}"><input type="checkbox" data-hypercube-export-item="${escapeHtml(item.id)}" ${checked?'checked':''} ${blocked?'disabled':''} aria-describedby="hypercubeExportSelectionHelp"><span><strong>${escapeHtml(item.name)}</strong><small>${escapeHtml(item.baseline?'Common baseline':axes||`Case ${item.caseIndex||''}`)}</small></span><span class="pill">Complete</span></label>`}).join(''):(view.projectId?'No completed results match this search.':'Choose a Hypercube project.');
+  $('hypercubeExportSelectionHelp').textContent=selected>=limit?'3 of 3 selected. Queue this batch before selecting more.':`${selected} of 3 selected. Each item is saved as a separate ZIP.`;$('queueHypercubeCaseExports').textContent=`Export selected (${selected}/3)`;$('queueHypercubeCaseExports').disabled=!selected;
+  target.querySelectorAll('[data-hypercube-export-item]').forEach((checkbox)=>checkbox.addEventListener('change',()=>{if(checkbox.checked)view.selected.add(checkbox.dataset.hypercubeExportItem);else view.selected.delete(checkbox.dataset.hypercubeExportItem);renderHypercubeCaseExportItems();}));
+}
+function renderHypercubeExportActivity(status,snapshot){const view=state.hypercubeCaseExport,bar=$('hypercubeExportActivity'),progress=status.progress||{};bar.hidden=false;$('hypercubeExportActivityPhase').textContent=status.message||status.phase||'Preparing export…';$('hypercubeExportActivityDetail').textContent=status.detail||snapshot?.name||'';const pieces=[];if(snapshot?._batchTotal)pieces.push(`Package ${snapshot._batchIndex} of ${snapshot._batchTotal}`);if(progress.total)pieces.push(`${progress.completed||0} of ${progress.total} phases`);if(view.operationStartedAt)pieces.push(formatDuration(Date.now()-view.operationStartedAt));if(status.heartbeatAt)pieces.push(`heartbeat ${new Date(status.heartbeatAt).toLocaleTimeString()}`);if(status.filesTotal)pieces.push(`${status.filesCompleted||0} of ${status.filesTotal} CSVs`);if(status.artifactBytes)pieces.push(humanBytes(status.artifactBytes));$('hypercubeExportActivityMetrics').textContent=pieces.join(' · ');}
+async function runHypercubeCaseExport(snapshot){
+  const view=state.hypercubeCaseExport,operation=await post('/api/hypercube-exports/start',snapshot);view.operationId=operation.id;view.operationStartedAt=Date.now();$('cancelHypercubeCaseExport').hidden=false;renderHypercubeExportActivity(operation,snapshot);
+  try{while(true){const status=await request(`/api/hypercube-exports/status?id=${encodeURIComponent(operation.id)}`);$('hypercubeExportStatus').textContent=status.message||'Preparing export…';renderHypercubeExportActivity(status,snapshot);if(['waiting','running','cancelling'].includes(status.state)){await new Promise((resolve)=>setTimeout(resolve,700));continue;}if(status.state==='cancelled')return null;if(status.state!=='succeeded')throw new Error(status.message||'Hypercube case export failed');renderHypercubeExportActivity({...status,message:'Waiting for save location…',phase:'saving'},snapshot);const params=new URLSearchParams({id:operation.id}),saved=await saveBackendExport('hypercube-case-zip',params,status.filename);renderHypercubeExportActivity({...status,message:saved?'Export saved':'Save cancelled',phase:saved?'complete':'cancelled'},snapshot);return saved;} }finally{if(view.operationId===operation.id)view.operationId='';$('cancelHypercubeCaseExport').hidden=true;}
+}
+function queueHypercubeCaseExports(){
+  const view=state.hypercubeCaseExport,selections=view.items.filter((item)=>view.selected.has(item.id)).map((item)=>structuredClone({...item,projectId:view.projectId,itemId:item.id}));if(!selections.length)return;
+  const projectName=hypercubeWorkflowProjects().find((project)=>project.id===view.projectId)?.name||'Hypercube',batch={remaining:selections.length,saved:0,cancelled:0,failed:0};
+  view.selected.clear();renderHypercubeCaseExportItems();
+  selections.forEach((snapshot,index)=>{snapshot._batchIndex=index+1;snapshot._batchTotal=selections.length;enqueueExport(`Hypercube case ZIP · ${snapshot.name}`,async()=>{try{const saved=await runHypercubeCaseExport(snapshot);if(saved)batch.saved+=1;else batch.cancelled+=1;return saved;}catch(error){batch.failed+=1;nativeNotification(`${snapshot.name} export failed`,error.message||String(error),{outcome:'failed',force:true});throw error;}finally{batch.remaining-=1;if(!batch.remaining){const details=[batch.saved?`${batch.saved} saved`:null,batch.cancelled?`${batch.cancelled} cancelled`:null,batch.failed?`${batch.failed} failed`:null].filter(Boolean).join(' · '),outcome=batch.failed?'failed':batch.saved?'succeeded':'cancelled';nativeNotification(`${projectName} export ${batch.failed?'finished with issues':'complete'}`,details||'No packages were saved.',{outcome,force:true});}}});});
+  $('hypercubeExportStatus').textContent=`Queued ${selections.length} ${selections.length===1?'package':'packages'}.`;
+}
+async function cancelHypercubeCaseExport(){const id=state.hypercubeCaseExport.operationId;if(id)await post('/api/hypercube-exports/cancel',{id});}
+
+function relocateHypercubeSurfaces(){
+  const build=$('createHypercube'),analysis=$('hypercubeAnalysisData');
+  if(build&&build.parentElement!==$('hypercubeBuildMount')){$('hypercubeBuildMount').appendChild(build);build.classList.remove('create-subpage');build.classList.add('hypercube-relocated-surface');}
+  if(analysis&&analysis.parentElement!==$('hypercubeAnalyzeMount')){$('hypercubeAnalyzeMount').appendChild(analysis);analysis.classList.remove('subpage');analysis.classList.add('hypercube-relocated-surface');}
+}
+function switchHypercubeSubpage(pageId){
+  if(state.activeHypercubeSubpage==='hypercubeExportPage'&&pageId!=='hypercubeExportPage'){state.hypercubeCaseExport.selected.clear();state.hypercubeCaseExport.query='';}
+  state.activeHypercubeSubpage=pageId;
+  document.querySelectorAll('.hypercube-subpage').forEach((page)=>page.classList.toggle('active',page.id===pageId));
+  document.querySelectorAll('[data-hypercube-subpage]').forEach((button)=>button.classList.toggle('active',button.dataset.hypercubeSubpage===pageId));
+  if(pageId==='hypercubeBuildPage')renderHypercubeSetup();
+  if(pageId==='hypercubeReviewPage')renderHypercubeWorkflowReview();
+  if(pageId==='hypercubeRunPage')renderHypercubeRun();
+  if(pageId==='hypercubeAnalyzePage'&&!state.hypercubeAnalysis.options)loadHypercubeAnalysisProjects();
+  if(pageId==='hypercubeExportPage')loadHypercubeCaseExportOptions();
+  syncMenuContext();
+}
+function hypercubeWorkflowProjects(){return (state.data?.projects||[]).filter((project)=>project.projectType==='hypercube');}
+function fillHypercubeWorkflowSelect(select,generatedOnly=false){if(!select)return'';const projects=hypercubeWorkflowProjects().filter((project)=>!generatedOnly||(project.hypercubes||[]).length),prior=select.value||state.hypercubeProjectId;select.innerHTML=projects.length?projects.map((project)=>`<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join(''):'<option value="">No Hypercube projects</option>';select.value=projects.some((project)=>project.id===prior)?prior:projects[0]?.id||'';return select.value;}
+function renderHypercubeWorkflowReview(){
+  const id=fillHypercubeWorkflowSelect($('hypercubeReviewProject'),true),project=hypercubeWorkflowProjects().find((item)=>item.id===id),matrix=project?.hypercubes?.[0],target=$('hypercubeReviewContent');
+  if(!matrix){target.className='empty-state';target.textContent='Generate a matrix in Build to review it here.';return;}
+  const axes=matrix.axes||[],cases=matrix.scenarioIds||[],locations=(matrix.locations||[]).length?(matrix.locations||[]).join(', '):'Every matching row';
+  target.className='stack';target.innerHTML=`<div class="metric-grid">${metric('Generated cases',cases.length)}${metric('Parameter axes',axes.length)}${metric('Target year',matrix.year||'All rows')}${metric('Geography',matrix.geographyType==='all'?'All matching rows':matrix.geographyType)}</div><h4>Saved definition</h4><div class="table-wrap"><table><thead><tr><th>Input</th><th>Operation</th><th>Generated values</th></tr></thead><tbody>${axes.map((axis)=>`<tr><td>${escapeHtml(axis.filename)} / ${escapeHtml(axis.column)}</td><td>${escapeHtml(axis.operation)}</td><td>${(axis.values||[]).map(escapeHtml).join(', ')}</td></tr>`).join('')}</tbody></table></div><dl class="runtime-detail-list"><dt>Scope</dt><dd>${escapeHtml(locations)}</dd><dt>Model package</dt><dd>${escapeHtml(project.template?.name||project.templateId||'Recorded with project')}</dd><dt>Generated</dt><dd>${escapeHtml(matrix.generatedAt||matrix.createdAt||'Recorded definition')}</dd></dl><div id="hypercubeReviewResourceEstimate" class="hypercube-resource-estimate">Calculating current runtime, memory, and disk estimates…</div>`;
+  hypercubeResourcePlan(project).then((plan)=>{const node=$('hypercubeReviewResourceEstimate');if(node&&$('hypercubeReviewProject').value===id){const concurrency=state.data?.runtime?.adapter==='native'?1:Number(state.desktop?.resources?.maxConcurrentRuns||1);node.innerHTML=hypercubeResourceEstimateMarkup({caseCount:cases.length,concurrency,project,plan});bindHypercubeResourceLinks(node);}}).catch((error)=>{const node=$('hypercubeReviewResourceEstimate');if(node)node.textContent=`Resource estimate unavailable: ${error.message}`;});
+}
+function hypercubeRunPlan(project){
+  const jobs=(state.data?.jobs||[]).filter((job)=>job.projectId===project?.id),latest=new Map();
+  jobs.sort((a,b)=>String(a.createdAt||'').localeCompare(String(b.createdAt||''))).forEach((job)=>latest.set(job.baseline?'baseline':job.variationId,job));
+  const ids=project?.hypercubes?.[0]?.scenarioIds||[],hasCurrent=(id)=>(project?.resultStatuses?.[id]||[]).some((item)=>item.status==='current');
+  const classify=(id)=>{const job=latest.get(id);if(job&&['waiting','preparing','running','exporting','stopping'].includes(job.state))return job.state;if(hasCurrent(id))return'successful';if(job&&['failed','cleanup_failed'].includes(job.state))return'failed';return'missing';};
+  const entry=(id,name,baseline=false)=>({id,name,baseline,status:classify(id),jobId:latest.get(id)?.id||''});
+  const entries=[entry('baseline','Baseline',true),...ids.map((id)=>{const variation=(project.variations||[]).find((item)=>item.id===id);return entry(id,variation?.name||id,false)})];
+  return{entries,counts:entries.reduce((result,item)=>(result[item.status]=(result[item.status]||0)+1,result),{}),jobs,latest};
+}
+
+function hypercubeCaseIndex(project,variationId){
+  const variation=(project?.variations||[]).find((item)=>item.id===variationId);
+  const explicit=Number(variation?.hypercube?.caseIndex);
+  if(Number.isFinite(explicit)&&explicit>0)return explicit;
+  const index=(project?.hypercubes?.[0]?.scenarioIds||[]).indexOf(variationId);
+  return index>=0?index+1:NaN;
+}
+
+function hypercubeSuccessfulDurations(project){
+  const template=String(project?.template?.fingerprint||''),library=String(project?.inputLibrary?.fingerprint||'');
+  return (state.data?.jobs||[]).filter((job)=>job.projectId===project?.id&&job.state==='succeeded'&&job.startedAt&&job.finishedAt&&(!template||job.templateFingerprint===template)&&(!library||job.inputLibraryFingerprint===library))
+    .sort((a,b)=>new Date(b.finishedAt||0)-new Date(a.finishedAt||0)).slice(0,25).map(jobRuntimeMilliseconds).filter((value)=>Number.isFinite(value)&&value>0);
+}
+
+function hypercubeEtaEstimate(project,plan=hypercubeRunPlan(project)){
+  const samples=hypercubeSuccessfulDurations(project);
+  const currentJobs=plan.entries.map((entry)=>({entry,job:plan.latest.get(entry.baseline?'baseline':entry.id)}));
+  const active=currentJobs.filter(({job})=>job&&activeJobStates.has(job.state)&&job.state!=='stopping');
+  const stopping=currentJobs.filter(({job})=>job?.state==='stopping');
+  const waiting=currentJobs.filter(({job})=>job?.state==='waiting');
+  const representative=active[0]?.job||waiting[0]?.job||stopping[0]?.job;
+  const configured=Math.max(1,Number(state.desktop?.resources?.maxConcurrentRuns||state.data?.queue?.maxActive||1));
+  const slotCount=Math.max(1,Math.min(plan.entries.length,representative?.batchMode==='queued'?1:configured));
+  const otherBatchActive=(state.data?.jobs||[]).some((job)=>job.projectId!==project?.id&&activeJobStates.has(job.state)),queuedBehind=!active.length&&!stopping.length&&waiting.length>0&&otherBatchActive;
+  const estimate=WorkbenchHypercubeSummary.estimateEta({successfulDurationsMs:samples,activeElapsedMs:active.filter(({job})=>job.state!=='preparing').map(({job})=>jobRuntimeMilliseconds(job)),preparingCount:active.filter(({job})=>job.state==='preparing').length,stoppingCount:stopping.length,waitingCount:waiting.length,concurrency:slotCount,queuedBehind});
+  const {remainingMs,perRunMs,measured}=estimate,source=measured?`measured median of ${estimate.sampleCount} recent compatible completed case${estimate.sampleCount===1?'':'s'}`:'11-minute Apple Silicon planning value';
+  const duration=remainingMs?approximateDuration(remainingMs):'',complete=plan.entries.every((entry)=>entry.status==='successful'),idleIncomplete=!remainingMs&&!complete;
+  return{remainingMs,perRunMs,samples:estimate.sampleCount,measured,source,slotCount,activeCount:active.length+stopping.length,waitingCount:waiting.length,queuedBehind,shortLabel:remainingMs?queuedBehind?`~${duration.replace(/^about /,'')} after start`:`~${duration.replace(/^about /,'')} left`:idleIncomplete?'Not running':'Complete',detail:remainingMs?queuedBehind?`Approx. ${duration.replace(/^about /,'')} of runtime after starting · ${source}`:`Approx. ${duration.replace(/^about /,'')} remaining · ${source}`:idleIncomplete?'No Hypercube cases are currently running or queued.':'All generated cases are complete.'};
+}
+
+function hypercubeRunAggregate(project){
+  const plan=hypercubeRunPlan(project),eta=hypercubeEtaEstimate(project,plan),activeStates=new Set(['preparing','running','exporting','stopping']);
+  const current=plan.entries.map((entry)=>({entry,job:plan.latest.get(entry.baseline?'baseline':entry.id)})),active=current.filter(({job})=>job&&activeStates.has(job.state)),waiting=current.filter(({job})=>job?.state==='waiting');
+  const activeCases=active.map(({entry})=>entry.baseline?NaN:hypercubeCaseIndex(project,entry.id)).filter(Number.isFinite).sort((a,b)=>a-b),scenarioTotal=project?.hypercubes?.[0]?.scenarioIds?.length||project?.variations?.length||0;
+  const startedCases=current.filter(({entry,job})=>!entry.baseline&&job?.startedAt).map(({entry})=>hypercubeCaseIndex(project,entry.id)).filter(Number.isFinite),furthest=startedCases.length?Math.max(...startedCases):0;
+  const done=plan.counts.successful||0,failed=plan.counts.failed||0,cancelled=plan.jobs.some((job)=>job.state==='cancelled'),unresolved=active.length+waiting.length;
+  const section=active.length?'active':waiting.length?'waiting':'history',stateLabel=active.length?'running':waiting.length?'waiting':done===plan.entries.length?'succeeded':failed?'failed':cancelled?'cancelled':'waiting';
+  const statusLabel=active.length?'RUNNING':waiting.length?(eta.queuedBehind?'QUEUED BEHIND ACTIVE BATCH':'WAITING'):done===plan.entries.length?'SUCCEEDED':failed?'NEEDS ATTENTION':cancelled?'STOPPED':'INCOMPLETE';
+  const caseLabel=activeCases.length?`Cases ${String(activeCases[0]).padStart(3,'0')}${activeCases.length>1?`–${String(activeCases.at(-1)).padStart(3,'0')}`:''} running${furthest?` · case ${furthest} of ${scenarioTotal} started`:''}`:active.some(({entry})=>entry.baseline)?`Baseline running${furthest?` · case ${furthest} of ${scenarioTotal} started`:''}`:furthest?`Case ${furthest} of ${scenarioTotal} started`:`${scenarioTotal.toLocaleString()} generated cases`;
+  const progressLabel=`${done} of ${plan.entries.length} complete${waiting.length?` · ${waiting.length} waiting`:''}${failed?` · ${failed} failed`:''}`;
+  const sortDates=plan.jobs.map((job)=>new Date(job.startedAt||job.finishedAt||job.createdAt||0).getTime()).filter(Number.isFinite),sortTime=sortDates.length?(section==='history'?Math.max(...sortDates):Math.min(...sortDates)):0;
+  const item={project,plan,eta,jobs:plan.jobs,section,state:stateLabel,statusLabel,activeCount:active.length,queuePosition:Math.min(...waiting.map(({job})=>Number(job.queuePosition)||1e9),1e9),sortTime,slotLabel:`${active.length}/${eta.slotCount} active slots`,caseLabel,progressLabel};
+  item.accessibleSummary=`${statusLabel}. ${item.slotLabel}. ${caseLabel}. ${progressLabel}. ${eta.detail}`;
+  return item;
+}
+
+function openHypercubeRunProject(projectId){
+  state.hypercubeProjectId=projectId;
+  if(!openHypercubeArea('hypercubeRunPage'))return;
+  fillHypercubeWorkflowSelect($('hypercubeRunProject'),true);
+  selectedOption($('hypercubeRunProject'),projectId);
+  renderHypercubeRun();
+}
+function renderHypercubeRun(){const id=fillHypercubeWorkflowSelect($('hypercubeRunProject'),true),project=hypercubeWorkflowProjects().find((item)=>item.id===id),target=$('hypercubeRunCounts'),stopButton=$('stopHypercubeRuns');if(!project){target.innerHTML='';setButtonAvailability(stopButton,false,'Choose a Hypercube project first.');renderRunHistoryActions();return;}const plan=hypercubeRunPlan(project),counts=plan.counts,eta=hypercubeEtaEstimate(project,plan);target.innerHTML=['successful','missing','failed','waiting','running'].map((key)=>metric(key[0].toUpperCase()+key.slice(1),counts[key]||0)).join('');$('runMissingHypercube').disabled=!(counts.missing);$('retryFailedHypercube').disabled=!(counts.failed);const total=plan.entries.length,done=counts.successful||0,stoppable=(counts.waiting||0)+(counts.preparing||0)+(counts.running||0)+(counts.exporting||0),active=stoppable+(counts.stopping||0),stopping=state.hypercubeStopPendingProject===project.id;stopButton.textContent=stopping?'Stopping Hypercube…':'Stop This Hypercube';setButtonAvailability(stopButton,Boolean(stoppable)&&!stopping,stopping||(!stoppable&&(counts.stopping||0))?'This Hypercube is already stopping.':'This Hypercube has no active or waiting runs.');const concurrency=1,waves=total,runtime=WorkbenchHypercubeSummary.elapsedRuntime({jobs:plan.jobs}),elapsed=runtime.started?formatDuration(runtime.elapsedMs):'Not started';$('hypercubeBatchCard').className='panel';$('hypercubeBatchCard').innerHTML=`<div class="section-title"><div><h3>${escapeHtml(project.name)}</h3><p>${done} of ${total} complete${active?` · ${active} active or queued`:''}</p></div><span class="pill">${Math.round(done/Math.max(1,total)*100)}%</span></div><div class="metric-grid">${metric('Queued cases',waves)}${metric('Elapsed',elapsed)}${metric('Native slots',concurrency)}${metric('Estimated remaining',eta.remainingMs?approximateDuration(eta.remainingMs):eta.shortLabel)} ${metric('Status',active?'Processing':done===total?'Complete':'Ready')}</div><p class="hypercube-eta-source" role="status" aria-live="polite">${escapeHtml(eta.queuedBehind?`${eta.detail}. This Hypercube is queued behind another active batch.`:eta.detail)}</p><p class="hypercube-parallel-guidance"><span>Windows runs one VisionEval case at a time through the installed native runtime. Results retain Datastores only; Hypercube runs do not generate the optional full CSV tree.</span></p><progress max="${total}" value="${done}"></progress>`;$('hypercubeRunCases').innerHTML=plan.entries.map((item)=>`<button type="button" class="hypercube-case-row" data-hypercube-run-job="${escapeHtml(item.jobId)}" ${item.jobId?'':'disabled'}><span>${escapeHtml(item.name)}</span><span class="pill">${escapeHtml(item.status)}</span></button>`).join('');const history=plan.jobs;$('hypercubeRunHistory').className='run-history-scroll'+(history.length?'':' empty-state');$('hypercubeRunHistory').innerHTML=history.length?history.map((job)=>`<button class="job-card" type="button" data-hypercube-history-job="${escapeHtml(job.id)}"><strong>${escapeHtml(jobDisplayName(job))}</strong><span>${escapeHtml(job.state)} · ${escapeHtml(jobRuntime(job))}</span></button>`).join(''):'No Hypercube jobs.';document.querySelectorAll('[data-hypercube-run-job],[data-hypercube-history-job]').forEach((button)=>button.addEventListener('click',()=>showHypercubeJobLog(button.dataset.hypercubeRunJob||button.dataset.hypercubeHistoryJob)));renderRunHistoryActions();}
+async function showHypercubeJobLog(jobId){if(!jobId)return;const job=(state.data?.jobs||[]).find((item)=>item.id===jobId);$('hypercubeRunLogTitle').textContent=job?`${jobDisplayName(job)} · ${job.state}`:'Run log';$('hypercubeRunLog').textContent='Loading log…';try{const chunk=await request(`/api/run-log?id=${encodeURIComponent(jobId)}&offset=0`);$('hypercubeRunLog').textContent=chunk.text||'No log output was recorded.';}catch(error){$('hypercubeRunLog').textContent=error.message;}}
+async function startHypercubePlannedRun(kind){const project=hypercubeWorkflowProjects().find((item)=>item.id===$('hypercubeRunProject').value);if(!project)return;const mode=state.data?.runtime?.adapter==='native'?'queued':'parallel';try{await post('/api/hypercube-run/start',{projectId:project.id,selection:kind,mode});notify(`${kind==='failed'?'Failed':'Missing'} Hypercube work was queued behind any active batch.`,'success');await refreshState({quiet:true});renderHypercubeRun();}catch(error){notify(error.message,'error');}}
+async function stopSelectedHypercube(){const project=hypercubeWorkflowProjects().find((item)=>item.id===$('hypercubeRunProject').value);if(!project)return;const jobs=(state.data?.jobs||[]).filter((job)=>job.projectId===project.id),active=jobs.filter((job)=>activeJobStates.has(job.state)&&job.state!=='stopping').length,waiting=jobs.filter((job)=>job.state==='waiting').length;if(!active&&!waiting)return notify('This Hypercube has no active or waiting runs.','error');if(!await confirmWorkbench(`Stop ${project.name}?\n\nThis will stop ${active} active ${active===1?'run':'runs'} and remove ${waiting} waiting ${waiting===1?'run':'runs'} for this Hypercube. Other queued batches and completed results are preserved.`,{title:'Stop this Hypercube?',confirmLabel:'Stop Hypercube',cancelLabel:'Keep Running'}))return;state.hypercubeStopPendingProject=project.id;renderHypercubeRun();try{const result=await post('/api/hypercube-run/stop',{projectId:project.id}),message=`Stopped ${result.stopped||0} active ${(result.stopped||0)===1?'run':'runs'} and removed ${result.removed||0} queued ${(result.removed||0)===1?'run':'runs'}.`;for(let attempt=0;attempt<80;attempt+=1){await refreshState({quiet:true});renderHypercubeRun();const unresolved=(state.data?.jobs||[]).some((job)=>job.projectId===project.id&&(job.state==='waiting'||activeJobStates.has(job.state)));if(!unresolved)break;await new Promise((resolve)=>setTimeout(resolve,250));}const remains=(state.data?.jobs||[]).filter((job)=>job.projectId===project.id&&(job.state==='waiting'||activeJobStates.has(job.state))).length;notify(remains?`${message} ${remains} ${remains===1?'run is':'runs are'} still finishing cleanup.`:result.failures?.length?`${message} ${result.failures.length} action failed.`:message,remains||result.failures?.length?'error':'success');}catch(error){notify(error.message,'error')}finally{state.hypercubeStopPendingProject='';renderHypercubeRun();}}
+function openHypercubeArea(subpage='hypercubeBuildPage'){
+  state.activeHypercubeSubpage=subpage;
+  if(!state.hypercubeSafetyAcknowledged){renderHypercubeSafetyEstimate();if(!$('hypercubeSafetyDialog').open)$('hypercubeSafetyDialog').showModal();return false;}
+  switchPage('hypercubePage');switchHypercubeSubpage(subpage);return true;
+}
+function switchPage(pageId, {restoreScroll = true} = {}) {
+  if(pageId==='hypercubePage'&&!state.hypercubeSafetyAcknowledged){renderHypercubeSafetyEstimate();if(!$('hypercubeSafetyDialog').open)$('hypercubeSafetyDialog').showModal();return;}
+  const outgoing = document.querySelector(".page.active")?.id;
+  if (outgoing === pageId) {
+    if (!restoreScroll) window.scrollTo({left:0, top:0});
+    return;
+  }
+  if (outgoing && outgoing !== pageId) state.primaryPageScroll.set(outgoing, {left:window.scrollX,top:window.scrollY});
+  closeLocationPopovers();
+  state.activePrimaryPage = pageId;
+  const token = ++state.pageNavigationToken;
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".primary-tab[data-page]").forEach((button) => button.classList.toggle("active", button.dataset.page === pageId));
-  if (pageId === "createPage") switchCreateSubpage("createSetup", false);
-  if (pageId === "runPage") setRunHistoryHidden(false);
-  if (pageId === "runPage" || pageId === "comparePage") refreshState({ quiet: true });
-  window.scrollTo({left:0, top:0});
+  if (pageId === "explorePage") switchExploreSubpage(state.activeExploreSubpage, false);
+  if (pageId === "createPage") switchCreateSubpage(state.activeCreateSubpage, false);
+  if (pageId === "comparePage") switchSubpage(state.activeCompareSubpage);
+  if (pageId === "hypercubePage") switchHypercubeSubpage(state.activeHypercubeSubpage);
+  const refresh = pageId === "runPage" || pageId === "comparePage" ? refreshState({ quiet: true }) : null;
+  if (restoreScroll) {
+    restorePrimaryPageScroll(pageId, token);
+    refresh?.finally(() => restorePrimaryPageScroll(pageId, token));
+  } else window.scrollTo({left:0, top:0});
   syncMenuContext();
 }
 function switchSubpage(pageId) {
+  state.activeCompareSubpage = pageId;
   document.querySelectorAll(".subpage").forEach((page) => page.classList.toggle("active", page.id === pageId));
   document.querySelectorAll(".subtab").forEach((button) => button.classList.toggle("active", button.dataset.subpage === pageId));
+  if(pageId==='compareData'&&!state.comparisonSelectionInitialized)initializeComparisonView('compare');
+  if(pageId==='mapData'&&!state.mapSelectionInitialized)initializeComparisonView('map');
+  if(pageId==='dashboardData'&&!state.dashboardSelectionInitialized)initializeComparisonView('dashboard');
+  if (pageId === "hypercubeAnalysisData") loadHypercubeAnalysisProjects();
   syncMenuContext();
+}
+function initializeComparisonView(view){
+  const ids=state.recentComparisonPair,fields={compare:['compareReference','compareComparison'],map:['mapReference','mapComparison'],dashboard:['dashboardReference','dashboardComparison']}[view];
+  if(!fields)return;renderDatastores();
+  if(ids[0])selectedOption($(fields[0]),ids[0]);if(ids[1])selectedOption($(fields[1]),ids[1]);
+  syncComparePairOptions();
+  if(view==='compare'){state.comparisonSelectionInitialized=true;if($(fields[0]).value)loadCompareSelection();}
+  if(view==='map'){state.mapSelectionInitialized=true;if($(fields[0]).value&&$(fields[1]).value)loadComparisonMapOptions();}
+  if(view==='dashboard'){state.dashboardSelectionInitialized=true;if($(fields[0]).value&&$(fields[1]).value)loadDashboardSelection();}
 }
 document.querySelectorAll(".primary-tab[data-page]").forEach((button) => button.addEventListener("click", () => guardUnsaved(() => switchPage(button.dataset.page))));
 document.querySelectorAll(".subtab[data-subpage]").forEach((button) => button.addEventListener("click", () => switchSubpage(button.dataset.subpage)));
+document.querySelectorAll('[data-hypercube-subpage]').forEach((button)=>button.addEventListener('click',()=>switchHypercubeSubpage(button.dataset.hypercubeSubpage)));
+$('hypercubeReviewProject')?.addEventListener('change',renderHypercubeWorkflowReview);
+$('hypercubeRunProject')?.addEventListener('change',renderHypercubeRun);
+$('runMissingHypercube')?.addEventListener('click',()=>startHypercubePlannedRun('missing'));
+$('retryFailedHypercube')?.addEventListener('click',()=>startHypercubePlannedRun('failed'));
+$('stopHypercubeRuns')?.addEventListener('click',stopSelectedHypercube);
+$('hypercubeExportProject')?.addEventListener('change',()=>{state.hypercubeCaseExport.projectId=$('hypercubeExportProject').value;loadHypercubeCaseExportOptions();});
+$('hypercubeExportSearch')?.addEventListener('input',(event)=>{state.hypercubeCaseExport.query=event.target.value;renderHypercubeCaseExportItems();});
+$('queueHypercubeCaseExports')?.addEventListener('click',queueHypercubeCaseExports);
+$('cancelHypercubeCaseExport')?.addEventListener('click',cancelHypercubeCaseExport);$('closeHypercubeOutputRanking')?.addEventListener('click',closeHypercubeOutputRanking);$('hypercubeOutputRankingSort')?.addEventListener('change',renderHypercubeOutputRanking);
+$('hypercubeAnalysisProject').addEventListener('change',loadHypercubeAnalysisProject);
+$('refreshHypercubeAnalysis').addEventListener('click',()=>loadHypercubeAnalysisProject());
+$('hypercubeAnalysisTable').addEventListener('change',()=>{renderHypercubeAnalysisVariables();loadHypercubeAnalysisGeography();});
+$('hypercubeAnalysisVariable').addEventListener('change',()=>{renderHypercubeAnalysisYears();loadHypercubeAnalysisGeography();});
+$('hypercubeAnalysisYear').addEventListener('change',loadHypercubeAnalysisGeography);
+$('hypercubeAnalysisAggregation').addEventListener('change',()=>{state.hypercubeAnalysis.matrix=null;state.hypercubeAnalysis.selectedCases=[];setHypercubeAnalysisExportAvailability();});
+$('hypercubeDiscoveryYear').addEventListener('change',()=>{state.hypercubeAnalysis.discoveryResult=null;$('hypercubeDiscoveryStatus').textContent='Checking for matching cached results…';$('hypercubeDiscoveryResults').innerHTML='';restoreCachedHypercubeDiscovery();});
+$('hypercubeDiscoveryAggregation').addEventListener('change',()=>{state.hypercubeAnalysis.discoveryResult=null;$('hypercubeDiscoveryStatus').textContent='Checking for matching cached results…';$('hypercubeDiscoveryResults').innerHTML='';restoreCachedHypercubeDiscovery();});
+$('hypercubeAnalysisGeography').addEventListener('change',renderHypercubeLocations);
+['hypercubeAnalysisXAxis','hypercubeAnalysisYAxis'].forEach((id)=>$(id).addEventListener('change',()=>{if($('hypercubeAnalysisXAxis').value===$('hypercubeAnalysisYAxis').value){const axes=state.hypercubeAnalysis.options?.hypercube?.axes||[],alternate=axes.find((axis)=>axis.id!==$(id).value);if(alternate)$(id==='hypercubeAnalysisXAxis'?'hypercubeAnalysisYAxis':'hypercubeAnalysisXAxis').value=alternate.id;}renderHypercubeAnalysisSlices();state.hypercubeAnalysis.matrix=null;setHypercubeAnalysisExportAvailability();}));
+$('swapHypercubeAxes').addEventListener('click',()=>{const x=$('hypercubeAnalysisXAxis').value;$('hypercubeAnalysisXAxis').value=$('hypercubeAnalysisYAxis').value;$('hypercubeAnalysisYAxis').value=x;renderHypercubeAnalysisSlices();if(state.hypercubeAnalysis.matrix)renderHypercubeAnalysis();});
+$('updateHypercubeAnalysis').addEventListener('click',updateHypercubeAnalysis);
+$('hypercubeCaseSort').addEventListener('change',()=>{if(state.hypercubeAnalysis.matrix&&state.hypercubeAnalysis.view==='table')renderHypercubeCaseTable(state.hypercubeAnalysis.matrix);});
+[['hypercubeAnalysisHeatmapView','matrix'],['hypercubeAnalysisTableView','table']].forEach(([id,view])=>$(id).addEventListener('click',()=>{state.hypercubeAnalysis.view=view;['hypercubeAnalysisHeatmapView','hypercubeAnalysisTableView'].forEach((button)=>$(button).classList.toggle('active',button===id));if(state.hypercubeAnalysis.matrix)renderHypercubeAnalysis();}));
+$('openHypercubeMap').addEventListener('click',openHypercubeInMap);
+[['exportHypercubePng','png'],['exportHypercubeSvg','svg'],['exportHypercubePdf','pdf']].forEach(([id,format])=>$(id).addEventListener('click',()=>{const snapshot={svgText:hypercubeVisualSvg(),filename:compareExportFilename('hypercube analysis',format)};enqueueHypercubeExport(`Hypercube ${format.toUpperCase()}`,()=>exportHypercubeVisual(format,snapshot));}));$('exportHypercubeCsv').addEventListener('click',exportHypercubeCsv);
+$('exportHypercubeExcel').addEventListener('click',()=>{const override={analysisRequest:structuredClone(hypercubeAnalysisRequest())},request=structuredClone(workbookRequest('hypercube-analysis',override));enqueueHypercubeExport('Hypercube Excel',()=>exportArtifact('hypercube-analysis',{...override,request}));});
+$('discoverHypercubeOutputs').addEventListener('click',()=>startHypercubeDiscovery().catch((error)=>notify(error.message,'error')));$('cancelHypercubeDiscovery').addEventListener('click',cancelActiveHypercubeAnalysis);$('cancelHypercubeAnalysis').addEventListener('click',cancelActiveHypercubeAnalysis);
+["runComparison","findChangedOutputs","generateMap","generateDashboard","updateHypercubeAnalysis","discoverHypercubeOutputs"].forEach((id)=>$(id)?.addEventListener("click",(event)=>{if(!exportLaneBusy())return;event.preventDefault();event.stopImmediatePropagation();notify("Wait for queued exports to finish.","error");},true));
+async function cancelActiveHypercubeAnalysis(){const analysis=state.hypercubeAnalysis;if(analysis.matrixOperationId)await post('/api/hypercube-analysis/operations/cancel',{id:analysis.matrixOperationId});if(analysis.discoveryOperationId)await post('/api/hypercube-analysis/discovery/cancel',{id:analysis.discoveryOperationId});renderHypercubeActivity({message:'Cancellation requested…',progress:{}});}
 document.querySelectorAll("[data-explore-subpage]").forEach((button) => button.addEventListener("click", () => switchExploreSubpage(button.dataset.exploreSubpage)));
 $("exploreExplanations").addEventListener("change", () => { state.exploreExplanationId = $("exploreExplanations").value; loadExploreFiles(state.exploreLibraryId); });
 $("exploreSearch").addEventListener("input", renderExploreFiles);
@@ -4979,13 +7333,17 @@ $("dependencySearch").addEventListener("keydown",event=>{if(event.key!=="Enter")
 $("settingsGear").addEventListener("click",()=>openSettings());
 window.addEventListener("resize", () => requestAnimationFrame(fitDependencyGraph));
 document.addEventListener("keydown", (event) => {
+  if(event.key==='Escape'&&!$('hypercubeOutputRankingPane')?.hidden){closeHypercubeOutputRanking();return;}
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
     event.preventDefault();
     if (state.csv && state.editorDirty) saveFileChanges();
   }
 });
-$("refreshCreate").addEventListener("click", () => refreshState());
+$("refreshCreate").addEventListener("click", () => guardUnsaved(() => refreshState()));
 $("refreshJobs").addEventListener("click", () => refreshState());
+async function clearRunHistory(){try{const impact=await request('/api/runs/history/impact');if(impact.blocked)return notify('Clear history will be available after all running and queued jobs finish.','error');if(!impact.terminalJobs)return notify('There is no terminal run history to clear.','success');const confirmed=await confirmWorkbench(`Remove ${impact.terminalJobs} terminal job record${impact.terminalJobs===1?'':'s'}, ${impact.logs} log${impact.logs===1?'':'s'}, and approximately ${humanBytes(impact.removableBytes)}?\n\nProjects, registered results, Datastores, and comparison data are preserved.`,{title:'Clear Run History?',confirmLabel:'Clear Run History'});if(!confirmed)return;const result=await post('/api/runs/history/clear',{});state.selectedJob=null;await refreshState({quiet:true});renderHypercubeRun();notify(`Cleared ${result.removedJobs} terminal run record${result.removedJobs===1?'':'s'}.`,'success');}catch(error){notify(error.message,'error');}}
+$('clearRunHistory')?.addEventListener('click',clearRunHistory);
+$('clearHypercubeRunHistory')?.addEventListener('click',clearRunHistory);
 function setRunHistoryHidden(hidden) {
   state.runHistoryHidden = Boolean(hidden);
   $("runLayout")?.classList.toggle("history-hidden", state.runHistoryHidden);
@@ -4995,11 +7353,17 @@ $("hideRunHistory").addEventListener("click", () => setRunHistoryHidden(true));
 $("showRunHistory").addEventListener("click", () => setRunHistoryHidden(false));
 $("reloadWorkbench").addEventListener("click", () => window.location.reload());
 
+relocateHypercubeSurfaces();
+prunePlatformSpecificContent();
 renderPlatformShortcuts();
 initializeComparisonMap3dCapability();
 setApplicationZoom(appZoomValue()).catch(()=>{});
-refreshState({ quiet: true });
+async function pollAutomaticUpdateStatus(attempt=0){
+  try{const payload=await request("/api/updates/status");state.data.updates=payload;renderUpdateIndicator(payload);if(payload.checking&&attempt<4)setTimeout(()=>pollAutomaticUpdateStatus(attempt+1),2500)}catch(_error){}
+}
+refreshState({ quiet: true }).then(()=>{const message=sessionStorage.getItem("visioneval-settings-reset-message");if(message){sessionStorage.removeItem("visioneval-settings-reset-message");notify(message,"success")}pollAutomaticUpdateStatus();pollActiveOperationBadge()});
 setInterval(() => {
   if ($("runPage").classList.contains("active") && !state.selectedJob) refreshState({ quiet: true });
+  if ($("hypercubePage").classList.contains("active") && state.activeHypercubeSubpage==='hypercubeRunPage') refreshState({quiet:true}).then(renderHypercubeRun);
 }, 5000);
 setInterval(() => { if ($("runPage").classList.contains("active")) pollBackgroundJobLogs(); }, 1800);

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import csv
+import copy
+import hashlib
 import json
 import re
 import shutil
 import tempfile
+import unicodedata
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -12,7 +15,7 @@ from typing import Any
 
 from .region_packages import RegionPackageService, safe_package_path
 from .transit_inputs import TRANSIT_NORMALIZATION_RULE, normalize_virginia_transit_inputs
-from .workspace import Workspace, WorkspaceError, fingerprint_tree, make_id, now_iso, read_json, write_json
+from .workspace import Workspace, WorkspaceError, asset_display_name, fingerprint_tree, make_id, now_iso, read_json, write_json
 
 
 SAFE_ASSET_NAME = re.compile(r"[^A-Za-z0-9 _.-]+")
@@ -24,18 +27,16 @@ def clean_asset_name(value: str) -> str:
     return name[:80]
 
 
-def custom_region_identity(payload: dict[str, Any]) -> tuple[str, str] | None:
-    if str(payload.get("geographyMode", "official")).strip().lower() != "custom":
-        return None
-    raw_name = str(payload.get("regionName", "")).strip()
-    if not raw_name:
+def region_code_from_name(value: str) -> str:
+    """Build the internal VisionEval Region value from a user-facing name."""
+    visible_name = str(value).strip()
+    if not visible_name:
         raise WorkspaceError("Region name is required")
-    name = clean_asset_name(raw_name)
-    raw_code = str(payload.get("regionCode", "")).strip().lower()
-    code = re.sub(r"[^a-z0-9_]+", "_", raw_code).strip("_")
-    if not raw_code or not code:
-        raise WorkspaceError("Custom region code is required")
-    return name, code
+    ascii_name = unicodedata.normalize("NFKD", visible_name).encode("ascii", "ignore").decode("ascii")
+    code = re.sub(r"[^a-z0-9]+", "_", ascii_name.strip().lower()).strip("_")
+    if not code:
+        code = f"region_{hashlib.sha256(visible_name.encode('utf-8')).hexdigest()[:12]}"
+    return code[:80].rstrip("_")
 
 
 def read_csv_dicts(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -60,7 +61,87 @@ class RegionBuilderService:
         self.packages = packages or RegionPackageService(workspace)
 
     def catalog(self) -> dict[str, Any]:
-        return {"packages": self.packages.list()}
+        regional = [{**item, "sourceKind": "region-builder"} for item in self.packages.list()]
+        return {"packages": [*regional, *self._model_bundle_sources()]}
+
+    def _model_bundle_sources(self) -> list[dict[str, Any]]:
+        sources: list[dict[str, Any]] = []
+        settings = self.workspace.settings()
+        map_contexts = []
+        for path in self.workspace.map_contexts.iterdir():
+            if path.is_dir():
+                manifest = read_json(path / "workbench-map-context.json", {})
+                if manifest.get("type") == "map-context" and manifest.get("comparisonMap", {}).get("enabled"):
+                    map_contexts.append((path, manifest))
+        for registration in settings.get("assetRegistrations", []):
+            if not isinstance(registration, dict) or registration.get("type") != "model-bundle":
+                continue
+            assets = registration.get("assets", [])
+            library_ids = [str(item.get("id")) for item in assets if isinstance(item, dict) and item.get("kind") == "input-library" and item.get("id")]
+            template_ids = [str(item.get("id")) for item in assets if isinstance(item, dict) and item.get("kind") == "model-template" and item.get("id")]
+            if len(library_ids) != 1 or len(template_ids) != 1:
+                continue
+            library_id, template_id = library_ids[0], template_ids[0]
+            try:
+                pairing = self.workspace.input_library_pairing(library_id)
+                template_path, template = self.workspace.template(template_id)
+            except WorkspaceError:
+                continue
+            if pairing.get("status") != "paired" or pairing.get("templateId") != template_id:
+                continue
+            context = next((manifest for _, manifest in map_contexts if manifest.get("componentOf") == registration.get("id") and (not manifest.get("compatibleTemplateIds") or template_id in manifest.get("compatibleTemplateIds", []))), None)
+            if not context or not (template_path / "defs" / "geo.csv").is_file():
+                continue
+            display_name = asset_display_name(template.get("name") or registration.get("id"))
+            sources.append({
+                "id": str(registration.get("id")),
+                "name": display_name,
+                "version": str(registration.get("version", "")),
+                "coverage": asset_display_name(context.get("coverage") or display_name or "Installed model"),
+                "description": f"View and build subregions contained in the installed {display_name or 'model'} geography.",
+                "sourceKind": "model-bundle",
+                "templateId": template_id,
+                "inputLibraryId": library_id,
+                "mapContextId": str(context.get("id", "")),
+            })
+        return sorted(sources, key=lambda item: item["name"].lower())
+
+    def _model_bundle_source(self, package_id: str) -> dict[str, Any] | None:
+        return next((item for item in self._model_bundle_sources() if item["id"] == package_id), None)
+
+    def _model_scope(self, package_id: str) -> dict[str, Any]:
+        source = self._model_bundle_source(package_id)
+        if not source:
+            raise WorkspaceError("Unknown model-package Develop source")
+        template_path, template, fields, rows = self._source(source["templateId"])
+        bzones = {str(row.get("Bzone", "")).strip() for row in rows if str(row.get("Bzone", "")).strip() not in {"", "NA"}}
+        azone_by_fips: dict[str, str] = {}
+        for row in rows:
+            bzone = str(row.get("Bzone", "")).strip()
+            azone = str(row.get("Azone", "")).strip()
+            if bzone and azone:
+                azone_by_fips.setdefault(bzone[:5], azone)
+        if not bzones or not azone_by_fips:
+            raise WorkspaceError("The paired model package does not contain usable Azone/Bzone geography")
+        library_path = self.workspace.within(self.workspace.input_library / source["inputLibraryId"], self.workspace.input_library)
+        available = set(bzones)
+        lat_lon = library_path / "bzone_lat_lon.csv"
+        if lat_lon.is_file():
+            columns, values = read_csv_dicts(lat_lon)
+            if "Geo" in columns:
+                available &= {str(row.get("Geo", "")).strip() for row in values}
+        if available != bzones:
+            raise WorkspaceError("The paired model package and Input Library do not contain the same Bzone geography. Repair or reinstall the package.")
+        config = (template_path / "visioneval.cnf").read_text(encoding="utf-8", errors="replace")
+        def config_value(name: str, fallback: str = "") -> str:
+            match = re.search(rf"(?mi)^\s*{re.escape(name)}\s*:\s*([^#\r\n]+)", config)
+            return match.group(1).strip() if match else fallback
+        return {
+            "source": source, "templatePath": template_path, "template": template,
+            "libraryPath": library_path, "fields": fields, "rows": rows,
+            "bzones": bzones, "azoneByFips": azone_by_fips,
+            "state": config_value("State", "VA"), "regionCode": config_value("Region", package_id),
+        }
 
     @staticmethod
     def _normalize_crosswalk(crosswalk: dict[str, Any]) -> dict[str, Any]:
@@ -122,6 +203,21 @@ class RegionBuilderService:
         return root, manifest, registry, crosswalk
 
     def reference(self, package_id: str) -> dict[str, Any]:
+        model_source = self._model_bundle_source(package_id)
+        if model_source:
+            context_root, context = self.packages.comparison_map_context(model_source["mapContextId"])
+            source_path = safe_package_path(context_root, str(context.get("sourcesDocument", "")))
+            return {
+                "package": {
+                    "id": package_id, "name": model_source["name"], "version": model_source["version"],
+                    "coverage": model_source["coverage"], "description": model_source["description"],
+                    "state": self._model_scope(package_id)["state"],
+                },
+                "terminology": {"regionSelector": "Installed model scope", "regionSingular": "Model scope"},
+                "sources": context.get("sources", []),
+                "sourcesDocument": source_path.read_text(encoding="utf-8", errors="replace") if source_path.is_file() else "",
+                "crosswalk": {},
+            }
         root, manifest, _, crosswalk = self._package_context(package_id)
         source_path = safe_package_path(root, str(manifest["sourcesDocument"]))
         return {
@@ -151,6 +247,19 @@ class RegionBuilderService:
         return localities
 
     def regions(self, package_id: str) -> dict[str, Any]:
+        model_source = self._model_bundle_source(package_id)
+        if model_source:
+            scope = self._model_scope(package_id)
+            name = asset_display_name(scope["template"].get("name") or model_source["name"])
+            region = {
+                "id": "installed-model-scope", "name": f"{name} installed scope", "shortName": name,
+                "selectionMethod": "installed-model-scope", "definitionQuality": "installed-model-geography",
+                "regionType": "model-scope", "fips": scope["azoneByFips"],
+                "azones": sorted(set(scope["azoneByFips"].values()), key=str.lower),
+                "defaultRegionName": f"{name} Subregion", "defaultRegionCode": f"{scope['regionCode']}_subregion", "state": scope["state"],
+                "selectedCount": len(scope["bzones"]),
+            }
+            return {"regions": [region], "package": {"id": package_id, "name": name, "coverage": model_source["coverage"]}, "source": {}, "boundarySource": {}, "boundaryGeneratedAt": ""}
         root, manifest, registry, crosswalk = self._package_context(package_id)
         regions = registry["regions"]
         spatial_regions = crosswalk.get("regions", {}) if isinstance(crosswalk.get("regions"), dict) else {}
@@ -255,7 +364,122 @@ class RegionBuilderService:
             features.extend(page.get("features", []))
         return {"type": "FeatureCollection", "features": features}
 
+    @staticmethod
+    def _derived_state_boundary(azones: dict[str, Any]) -> dict[str, Any]:
+        """Dissolve locality polygons into a compact exterior-line feature."""
+        polygons: list[list[list[list[float]]]] = []
+        points: list[list[float]] = []
+        for feature in azones.get("features", []):
+            geometry = feature.get("geometry") or {}
+            coordinates = geometry.get("coordinates") or []
+            parts = [coordinates] if geometry.get("type") == "Polygon" else coordinates if geometry.get("type") == "MultiPolygon" else []
+            polygons.extend(parts)
+            points.extend(point for polygon in parts for ring in polygon for point in ring)
+        if not points:
+            return {"type": "Feature", "properties": {"name": "Virginia"}, "geometry": {"type": "MultiLineString", "coordinates": []}}
+        min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
+        min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
+        scale = min(1000 / max(max_x - min_x, 1e-9), 620 / max(max_y - min_y, 1e-9))
+        project = lambda point: ((point[0] - min_x) * scale, (max_y - point[1]) * scale)
+        projected = [[[project(point) for point in ring] for ring in polygon] for polygon in polygons]
+        indexed = []
+        for rings in projected:
+            polygon_points = [point for ring in rings for point in ring]
+            indexed.append((rings, (
+                min(point[0] for point in polygon_points), min(point[1] for point in polygon_points),
+                max(point[0] for point in polygon_points), max(point[1] for point in polygon_points),
+            )))
+
+        def in_ring(point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+            inside = False
+            x, y = point
+            for index, first in enumerate(ring):
+                second = ring[index - 1]
+                if (first[1] > y) != (second[1] > y) and x < (second[0] - first[0]) * (y - first[1]) / ((second[1] - first[1]) or 1e-12) + first[0]:
+                    inside = not inside
+            return inside
+
+        def contains(point: tuple[float, float]) -> bool:
+            x, y = point
+            return any(
+                bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]
+                and rings and in_ring(point, rings[0]) and not any(in_ring(point, hole) for hole in rings[1:])
+                for rings, bounds in indexed
+            )
+
+        lines: list[list[list[float]]] = []
+        for polygon in polygons:
+            for ring in polygon:
+                for index in range(1, len(ring)):
+                    first, second = ring[index - 1], ring[index]
+                    a, b = project(first), project(second)
+                    dx, dy = b[0] - a[0], b[1] - a[1]
+                    length = (dx * dx + dy * dy) ** .5
+                    if not length:
+                        continue
+                    middle = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                    normal = (-dy / length, dx / length)
+                    exterior = False
+                    for offset in (.8, 1.6, 2.8):
+                        left = contains((middle[0] + normal[0] * offset, middle[1] + normal[1] * offset))
+                        right = contains((middle[0] - normal[0] * offset, middle[1] - normal[1] * offset))
+                        if left != right:
+                            exterior = True
+                            break
+                        if left and right:
+                            break
+                    if exterior:
+                        lines.append([first, second])
+        return {"type": "Feature", "properties": {"name": "Virginia"}, "geometry": {"type": "MultiLineString", "coordinates": lines}}
+
+    @classmethod
+    def _ensure_derived_state_geometry(cls, data: dict[str, Any]) -> bool:
+        if data.get("derivedGeometryVersion") == 1 and data.get("stateBoundary"):
+            return False
+        data["stateBoundary"] = cls._derived_state_boundary(data.get("azones") or {})
+        data["derivedGeometryVersion"] = 1
+        return True
+
     def statewide_map_data(self, package_id: str) -> dict[str, Any]:
+        model_source = self._model_bundle_source(package_id)
+        if model_source:
+            scope = self._model_scope(package_id)
+            data = copy.deepcopy(self.statewide_map_data(model_source["mapContextId"]))
+            bzones = set(scope["bzones"])
+            fips = set(scope["azoneByFips"])
+            candidates = data.get("regions", [])
+            matching = sorted(
+                candidates,
+                key=lambda item: (len(set(map(str, item.get("azoneFips", []))) & fips), -abs(len(set(map(str, item.get("azoneFips", [])))) - len(fips))),
+                reverse=True,
+            )
+            matched = matching[0] if matching and set(map(str, matching[0].get("azoneFips", []))) & fips else None
+            region_id = str((matched or {}).get("id", ""))
+            official_id = str((matched or {}).get("officialMpoId", ""))
+            data["packageId"] = package_id
+            data["scope"] = "installed-model"
+            data["azones"]["features"] = [
+                feature for feature in data.get("azones", {}).get("features", [])
+                if str(feature.get("properties", {}).get("azoneId") or feature.get("properties", {}).get("Azones") or "") in fips
+            ]
+            data["bzones"]["features"] = [
+                feature for feature in data.get("bzones", {}).get("features", [])
+                if str(feature.get("properties", {}).get("bzoneId") or feature.get("properties", {}).get("GEOID") or "") in bzones
+            ]
+            data["mpos"]["features"] = [
+                feature for feature in data.get("mpos", {}).get("features", [])
+                if str(feature.get("properties", {}).get("regionId", "")) == region_id
+                or (official_id and str(feature.get("properties", {}).get("officialMpoId") or feature.get("properties", {}).get("MPO_ID") or "") == official_id)
+            ]
+            data["localities"] = [item for item in data.get("localities", []) if str(item.get("azoneId", "")) in fips]
+            data["regions"] = [{
+                "id": "installed-model-scope", "name": f"{asset_display_name(scope['template'].get('name') or model_source['name'])} installed scope",
+                "shortName": asset_display_name(scope["template"].get("name") or model_source["name"]),
+                "officialMpoId": official_id, "azoneFips": sorted(fips), "selectedBzones": sorted(bzones),
+                "includedBoundaryBzones": [], "excludedBoundaryBzones": [], "includedBoundaryCases": [], "excludedBoundaryCases": [],
+            }]
+            data["summary"] = {"mpos": len(data["mpos"]["features"]), "azones": len(data["azones"]["features"]), "bzones": len(data["bzones"]["features"])}
+            return data
         root, manifest, registry, crosswalk = self._map_package_context(package_id)
         sources = crosswalk.get("sources", {})
         mpo_source = sources.get("mpo", {}) if isinstance(sources.get("mpo"), dict) else {}
@@ -279,6 +503,8 @@ class RegionBuilderService:
         cache_path = cache_root / "statewide.json"
         cached = read_json(cache_path, {})
         if cached.get("sourceFingerprint") == fingerprint:
+            if self._ensure_derived_state_geometry(cached):
+                write_json(cache_path, cached)
             cached["cached"] = True
             return cached
 
@@ -361,10 +587,25 @@ class RegionBuilderService:
                 "zones": {"label": "VisionEval Azone/Bzone geography", "url": bzone_url.rsplit("/", 1)[0]},
             },
         }
+        self._ensure_derived_state_geometry(result)
         write_json(cache_path, result)
         return result
 
     def map_data(self, package_id: str, region_id: str) -> dict[str, Any]:
+        if self._model_bundle_source(package_id):
+            if region_id not in {"", "installed-model-scope"}:
+                raise WorkspaceError("Choose the installed model scope")
+            data = self.statewide_map_data(package_id)
+            return {
+                "schemaVersion": 1, "packageId": package_id, "regionId": "installed-model-scope",
+                "regionName": data.get("regions", [{}])[0].get("name", "Installed model"),
+                "cached": bool(data.get("cached")), "onlineGeometry": bool(data.get("onlineGeometry")),
+                "summary": {"selectedBzones": data.get("summary", {}).get("bzones", 0), "includedBoundaryBzones": 0, "excludedBoundaryBzones": 0, "azones": data.get("summary", {}).get("azones", 0)},
+                "mpo": data.get("mpos", {"type": "FeatureCollection", "features": []}),
+                "azones": data.get("azones", {"type": "FeatureCollection", "features": []}),
+                "bzones": data.get("bzones", {"type": "FeatureCollection", "features": []}),
+                "sources": data.get("sources", {}),
+            }
         _, manifest, registry, crosswalk = self._package_context(package_id)
         region = next((item for item in registry["regions"] if item.get("id") == region_id), None)
         spatial = crosswalk.get("regions", {}).get(region_id)
@@ -432,6 +673,15 @@ class RegionBuilderService:
         return result
 
     def sources(self, package_id: str) -> dict[str, Any]:
+        model_source = self._model_bundle_source(package_id)
+        if model_source:
+            library = next((item for item in self.workspace.list_input_libraries() if item["id"] == model_source["inputLibraryId"]), None)
+            if not library:
+                raise WorkspaceError("The model package's paired Input Library is missing")
+            return {"packageId": package_id, "sources": [{
+                "id": f"workspace:{library['id']}", "name": library["name"], "kind": "workspace",
+                "fileCount": library["fileCount"], "pairedTemplateId": model_source["templateId"],
+            }]}
         root, manifest, _, _ = self._package_context(package_id)
         input_config = manifest["inputLibrary"]
         packaged = safe_package_path(root, str(input_config["path"]))
@@ -454,6 +704,13 @@ class RegionBuilderService:
         return {"packageId": package_id, "sources": sources}
 
     def _source_library_path(self, package_id: str, source_library_id: str) -> tuple[Path, dict[str, Any]]:
+        model_source = self._model_bundle_source(package_id)
+        if model_source:
+            expected = f"workspace:{model_source['inputLibraryId']}"
+            if source_library_id != expected:
+                raise WorkspaceError("Choose the Input Library paired with this model package")
+            path = self.workspace.within(self.workspace.input_library / model_source["inputLibraryId"], self.workspace.input_library)
+            return path, {"id": expected, "name": model_source["inputLibraryId"], "kind": "workspace"}
         root, manifest, _, _ = self._package_context(package_id)
         if source_library_id == f"package:{package_id}":
             config = manifest["inputLibrary"]
@@ -463,7 +720,7 @@ class RegionBuilderService:
             library_id = source_library_id.split(":", 1)[1]
             path = self.workspace.within(self.workspace.input_library / library_id, self.workspace.input_library)
             return path, {"id": source_library_id, "name": library_id, "kind": "workspace"}
-        raise WorkspaceError("Choose a compatible source InputLibrary")
+        raise WorkspaceError("Choose a compatible source Input Library")
 
     def _region(self, package_id: str, region_id: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
         _, manifest, _, crosswalk = self._package_context(package_id)
@@ -492,12 +749,41 @@ class RegionBuilderService:
             }
 
     def geography_options(self, package_id: str, source_library_id: str, region_id: str) -> dict[str, Any]:
+        if self._model_bundle_source(package_id):
+            if region_id != "installed-model-scope":
+                raise WorkspaceError("Choose the installed model scope")
+            scope = self._model_scope(package_id)
+            self._source_library_path(package_id, source_library_id)
+            by_fips: dict[str, set[str]] = {fips: set() for fips in scope["azoneByFips"]}
+            for bzone in scope["bzones"]:
+                by_fips.setdefault(bzone[:5], set()).add(bzone)
+            azones = [
+                {"fips": fips, "name": scope["azoneByFips"][fips], "bzoneCount": len(by_fips[fips])}
+                for fips in sorted(by_fips, key=lambda value: scope["azoneByFips"][value].lower())
+            ]
+            bzones = [
+                {"id": bzone, "fips": fips, "azone": scope["azoneByFips"][fips], "official": True}
+                for fips in sorted(by_fips, key=lambda value: scope["azoneByFips"][value].lower())
+                for bzone in sorted(by_fips[fips])
+            ]
+            boundary = None
+            try:
+                map_data = self.statewide_map_data(package_id)
+                boundary = next((feature.get("geometry") for feature in map_data.get("mpos", {}).get("features", [])), None)
+            except WorkspaceError:
+                pass
+            return {
+                "region": {"id": region_id, "name": f"{asset_display_name(scope['template'].get('name') or 'Installed model')} installed scope"},
+                "azones": azones, "bzones": bzones, "officialBzones": sorted(scope["bzones"]),
+                "mpos": [{"id": region_id, "name": scope["template"].get("name", "Installed model"), "officialMpoId": "", "boundary": boundary, "bzones": sorted(scope["bzones"])}],
+                "counts": {"azones": len(azones), "bzones": len(bzones), "officialBzones": len(bzones)},
+            }
         package_root, package_manifest, _, _ = self._package_context(package_id)
         input_path, _ = self._source_library_path(package_id, source_library_id)
         region, crosswalk, manifest = self._region(package_id, region_id)
         bzone_path = input_path / "bzone_lat_lon.csv"
         if not bzone_path.is_file():
-            raise WorkspaceError("The regional InputLibrary must contain bzone_lat_lon.csv")
+            raise WorkspaceError("The regional Input Library must contain bzone_lat_lon.csv")
         fields, rows = read_csv_dicts(bzone_path)
         if "Geo" not in fields:
             raise WorkspaceError("bzone_lat_lon.csv must contain Geo")
@@ -598,7 +884,7 @@ class RegionBuilderService:
         template_path, template = self.workspace.template(template_id)
         geo_path = template_path / "defs" / "geo.csv"
         if not geo_path.is_file():
-            raise WorkspaceError("The source template is missing defs/geo.csv")
+            raise WorkspaceError("The source model package is missing defs/geo.csv")
         fields, rows = read_csv_dicts(geo_path)
         for field in ("Azone", "Bzone", "Marea"):
             if field not in fields:
@@ -648,7 +934,7 @@ class RegionBuilderService:
     def _input_plan(self, template_path: Path, selection: dict[str, Any]) -> tuple[list[dict[str, Any]], list[str]]:
         inputs = template_path / "inputs"
         if not inputs.is_dir():
-            raise WorkspaceError("The source template is missing inputs/")
+            raise WorkspaceError("The source model package is missing inputs/")
         plan: list[dict[str, Any]] = []
         errors: list[str] = []
         selected_by_level = {
@@ -686,7 +972,7 @@ class RegionBuilderService:
 
     def _input_plan_from_path(self, inputs: Path, selection: dict[str, Any], default_files: set[str] | None = None) -> tuple[list[dict[str, Any]], list[str]]:
         if not inputs.is_dir():
-            raise WorkspaceError("The source InputLibrary is missing")
+            raise WorkspaceError("The source Input Library is missing")
         plan: list[dict[str, Any]] = []
         errors: list[str] = []
         selected_by_level = {"bzone": selection["bzones"], "azone": selection["azones"], "marea": selection["mareas"]}
@@ -713,7 +999,7 @@ class RegionBuilderService:
             else:
                 plan.append({"file": source.name, "action": "copy", "rowsBefore": len(rows), "rowsAfter": len(rows), "level": ""})
         present = {item["file"] for item in plan}
-        years = sorted(selection["years"])
+        years = sorted(selection.get("years", set()))
         for missing in sorted((default_files or set()) - present):
             plan.append({
                 "file": missing,
@@ -738,7 +1024,7 @@ class RegionBuilderService:
     def _package_selection(self, input_path: Path, region: dict[str, Any], crosswalk: dict[str, Any], manifest: dict[str, Any], payload: dict[str, Any] | None = None, locality_names: dict[str, str] | None = None) -> dict[str, Any]:
         bzone_path = input_path / "bzone_lat_lon.csv"
         if not bzone_path.is_file():
-            raise WorkspaceError("The regional InputLibrary must contain bzone_lat_lon.csv")
+            raise WorkspaceError("The regional Input Library must contain bzone_lat_lon.csv")
         fips_to_azone = {str(key): str(value) for key, value in dict(region.get("fips") or {}).items()}
         if not fips_to_azone:
             raise WorkspaceError("The selected region does not define locality-to-Azone mappings")
@@ -767,7 +1053,7 @@ class RegionBuilderService:
             ineligible = sorted(custom_bzones - available_bzones)
             if ineligible:
                 raise WorkspaceError(
-                    "Custom Bzones are not available in the selected regional InputLibrary: " + ", ".join(ineligible[:8])
+                    "Custom Bzones are not available in the selected regional Input Library: " + ", ".join(ineligible[:8])
                 )
             bzones = sorted(custom_bzones)
             selection_method = "custom-bzone-selection"
@@ -775,7 +1061,7 @@ class RegionBuilderService:
             missing = sorted(spatial_bzones - available_bzones)
             if missing:
                 raise WorkspaceError(
-                    f"The regional boundary crosswalk contains {len(missing)} Bzones absent from this InputLibrary; install or choose the matching data vintage"
+                    f"The regional boundary crosswalk contains {len(missing)} Bzones absent from this Input Library; install or choose the matching data vintage"
                 )
             bzones = sorted(spatial_bzones)
             selection_method = "official-boundary-bzone-crosswalk"
@@ -821,7 +1107,6 @@ class RegionBuilderService:
         }
 
     def _preview_package_region(self, payload: dict[str, Any]) -> dict[str, Any]:
-        identity = custom_region_identity(payload)
         package_id = str(payload.get("packageId", "")).strip()
         package_root, _, _, _ = self._package_context(package_id)
         input_path, source = self._source_library_path(package_id, str(payload.get("sourceLibraryId", "")).strip())
@@ -835,13 +1120,10 @@ class RegionBuilderService:
         warnings = self._boundary_warnings(manifest, selection) + self._warnings_for_plan(input_plan, manifest)
         if self._transit_normalization_rule(package_id, manifest):
             warnings.append("Missing Virginia transit technology fields will be completed with documented service-derived compatibility assumptions during build.")
-        preview_region = dict(region)
-        if identity:
-            preview_region["name"], preview_region["defaultRegionCode"] = identity
         return {
             "package": {"id": manifest["id"], "name": manifest["name"], "version": manifest["version"], "coverage": manifest["coverage"]},
             "sourceLibrary": source,
-            "region": preview_region,
+            "region": region,
             "selection": {
                 "geoRows": len(selection["geoRows"]),
                 "azones": sorted(selection["azones"], key=str.lower),
@@ -868,7 +1150,7 @@ class RegionBuilderService:
         if selection and selection.get("selectionMethod") == "package-statewide":
             return [
                 f"This build includes the complete packaged geography: {len(selection.get('azones', [])):,} localities and {len(selection.get('bzones', [])):,} Bzones.",
-                "Statewide model generation and execution can require substantial memory, disk space, and runtime. Review Docker resources before running.",
+                "Statewide model generation and execution can require substantial memory, disk space, and runtime. Windows runs it in the shared native FIFO slot.",
             ]
         if selection and selection.get("selectionMethod") == "official-boundary-bzone-crosswalk":
             boundary = selection.get("boundary", {})
@@ -889,11 +1171,46 @@ class RegionBuilderService:
 
     def preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("packageId"):
+            if self._model_bundle_source(str(payload.get("packageId", ""))):
+                if str(payload.get("geographyMode", "official")).lower() != "custom":
+                    raise WorkspaceError("Choose Build your own region before previewing new region assets")
+                scope = self._model_scope(str(payload["packageId"]))
+                transformed = dict(payload)
+                transformed.pop("packageId", None)
+                transformed["sourceTemplateId"] = scope["source"]["templateId"]
+                transformed["sourceInputLibraryId"] = scope["source"]["inputLibraryId"]
+                custom = True
+                result = self.preview(transformed)
+                selection = result["selection"]
+                selection.update({
+                    "method": "custom-bzone-selection",
+                    "boundary": {
+                        "selectedCount": len(selection.get("bzones", [])), "boundaryCount": 0,
+                        "excludedBoundaryCount": 0, "boundaryBzones": [], "excludedBoundaryBzones": [],
+                        "officialSelectedCount": len(scope["bzones"]), "customized": True,
+                        "addedBzones": [], "removedBzones": sorted(scope["bzones"] - set(selection.get("bzones", []))),
+                    },
+                })
+                result.update({
+                    "package": {"id": scope["source"]["id"], "name": scope["source"]["name"], "version": scope["source"]["version"], "coverage": scope["source"]["coverage"]},
+                    "sourceLibrary": {"id": f"workspace:{scope['source']['inputLibraryId']}", "name": scope["source"]["inputLibraryId"], "kind": "workspace"},
+                    "region": self.regions(str(payload["packageId"]))["regions"][0],
+                    "warnings": [
+                        "This subregion is limited to geography contained in the installed model package.",
+                        "Azone and Marea values remain whole-locality values and require review before policy use.",
+                    ],
+                })
+                return result
             return self._preview_package_region(payload)
         source_template_id = str(payload.get("sourceTemplateId", "")).strip()
         template_path, template, geo_fields, geo_rows = self._source(source_template_id)
         selection = self._selection(geo_rows, payload)
-        input_plan, _ = self._input_plan(template_path, selection)
+        source_library_id = str(payload.get("sourceInputLibraryId", "")).strip()
+        if source_library_id:
+            input_path = self.workspace.within(self.workspace.input_library / source_library_id, self.workspace.input_library)
+            input_plan = self._input_plan_for_library(input_path, selection)
+        else:
+            input_plan, _ = self._input_plan(template_path, selection)
         return {
             "sourceTemplate": {"id": template["id"], "name": template["name"], "fingerprint": template.get("fingerprint", "")},
             "selection": {
@@ -917,14 +1234,30 @@ class RegionBuilderService:
 
     def build(self, payload: dict[str, Any]) -> dict[str, Any]:
         if payload.get("packageId"):
+            if self._model_bundle_source(str(payload.get("packageId", ""))):
+                if str(payload.get("geographyMode", "official")).lower() != "custom":
+                    raise WorkspaceError("Choose Build your own region before building new region assets")
+                scope = self._model_scope(str(payload["packageId"]))
+                transformed = dict(payload)
+                transformed.pop("packageId", None)
+                transformed["sourceTemplateId"] = scope["source"]["templateId"]
+                transformed["sourceInputLibraryId"] = scope["source"]["inputLibraryId"]
+                return self.build(transformed)
             return self._build_package_region(payload)
         region_name = clean_asset_name(str(payload.get("regionName", "")))
         source_template_id = str(payload.get("sourceTemplateId", "")).strip()
         state_abbr = str(payload.get("stateAbbr", "VA")).strip().upper()[:8] or "VA"
-        region_code = re.sub(r"[^a-z0-9_]+", "_", str(payload.get("regionCode", region_name)).strip().lower()).strip("_") or region_name.lower().replace(" ", "_")
+        explicit_code = str(payload.get("regionCode", "")).strip()
+        region_code = region_code_from_name(explicit_code or region_name)
         template_path, template, geo_fields, geo_rows = self._source(source_template_id)
         selection = self._selection(geo_rows, payload)
-        input_plan, _ = self._input_plan(template_path, selection)
+        source_library_id = str(payload.get("sourceInputLibraryId", "")).strip()
+        source_inputs = template_path / "inputs"
+        if source_library_id:
+            source_inputs = self.workspace.within(self.workspace.input_library / source_library_id, self.workspace.input_library)
+            input_plan = self._input_plan_for_library(source_inputs, selection)
+        else:
+            input_plan, _ = self._input_plan(template_path, selection)
 
         library_id = region_name
         library_target = self.workspace.input_library / library_id
@@ -947,7 +1280,7 @@ class RegionBuilderService:
             write_csv_dicts(template_stage / "defs" / "geo.csv", geo_fields, selection["geoRows"])
 
             plan_by_file = {item["file"]: item for item in input_plan}
-            for source in sorted((path for path in (template_path / "inputs").iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+            for source in sorted((path for path in source_inputs.iterdir() if path.is_file() and path.name != "region_builder_manifest.json"), key=lambda path: path.name.lower()):
                 library_output = library_stage / source.name
                 template_output = template_stage / "inputs" / source.name
                 item = plan_by_file[source.name]
@@ -970,7 +1303,7 @@ class RegionBuilderService:
 
             validation = self.workspace.validate_template(template_stage)
             if not validation["valid"]:
-                raise WorkspaceError("Generated model template is invalid: " + "; ".join(validation["errors"]))
+                raise WorkspaceError("Generated model package is invalid: " + "; ".join(validation["errors"]))
             template_record = {
                 "version": 1,
                 "id": template_id,
@@ -1010,13 +1343,28 @@ class RegionBuilderService:
             settings["defaultInputLibraryId"] = library_id
             settings["defaultTemplateId"] = template_id
             write_json(self.workspace.settings_path, settings)
+            self.workspace.record_asset_registration({
+                "id": f"region-builder:{template_id}",
+                "type": "region-builder-output",
+                "version": 1,
+                "installedAt": now_iso(),
+                "assets": [
+                    {"kind": "input-library", "id": library_id},
+                    {"kind": "model-template", "id": template_id},
+                ],
+            })
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
         return {
             "inputLibrary": {"id": library_id, "name": library_id},
             "modelTemplate": {"id": template_id, "name": region_name},
-            "selection": self.preview({**payload, "sourceTemplateId": template_id})["selection"],
+            "selection": {
+                "geoRows": len(selection["geoRows"]),
+                "azones": sorted(selection["azones"], key=str.lower),
+                "bzones": sorted(selection["bzones"]),
+                "mareas": sorted(selection["mareas"], key=str.lower),
+            },
         }
 
     def _default_rows(self, filename: str, input_path: Path, selection: dict[str, Any]) -> tuple[list[str], list[dict[str, str]], str]:
@@ -1055,13 +1403,18 @@ class RegionBuilderService:
             write_csv_dicts(target, fields, rows)
 
     def _build_package_region(self, payload: dict[str, Any]) -> dict[str, Any]:
-        custom_region_identity(payload)
         package_id = str(payload.get("packageId", "")).strip()
         package_root, package_manifest, _, _ = self._package_context(package_id)
         input_path, source = self._source_library_path(package_id, str(payload.get("sourceLibraryId", "")).strip())
         region, crosswalk, package_manifest = self._region(package_id, str(payload.get("regionId", "")).strip())
         region_name = clean_asset_name(str(payload.get("regionName", "")).strip() or str(region.get("name", "")))
-        region_code = re.sub(r"[^a-z0-9_]+", "_", str(payload.get("regionCode", "") or region.get("defaultRegionCode") or region_name).strip().lower()).strip("_")
+        explicit_code = str(payload.get("regionCode", "")).strip()
+        if explicit_code:
+            region_code = region_code_from_name(explicit_code)
+        elif str(payload.get("geographyMode", "official")).lower() == "custom":
+            region_code = region_code_from_name(region_name)
+        else:
+            region_code = region_code_from_name(str(region.get("defaultRegionCode") or region_name))
         state_abbr = str(payload.get("stateAbbr", "") or region.get("state") or package_manifest.get("state") or "").strip().upper()[:8]
         selection = self._package_selection(
             input_path, region, crosswalk, package_manifest, payload,
@@ -1071,10 +1424,10 @@ class RegionBuilderService:
         input_plan = self._input_plan_for_library(input_path, selection, default_files)
         packaged_template = str(package_manifest.get("builder", {}).get("modelTemplatePath", "")).strip()
         if not packaged_template:
-            raise WorkspaceError("The regional package does not declare a model template scaffold")
+            raise WorkspaceError("The regional package does not declare a model-package scaffold")
         base_template = safe_package_path(package_root, packaged_template)
         if not (base_template / "visioneval.cnf").is_file():
-            raise WorkspaceError("The regional package model template scaffold is unavailable")
+            raise WorkspaceError("The regional package model-package scaffold is unavailable")
 
         library_id = region_name
         library_target = self.workspace.input_library / library_id
@@ -1124,7 +1477,7 @@ class RegionBuilderService:
 
             validation = self.workspace.validate_template(template_stage)
             if not validation["valid"]:
-                raise WorkspaceError("Generated model template is invalid: " + "; ".join(validation["errors"]))
+                raise WorkspaceError("Generated model package is invalid: " + "; ".join(validation["errors"]))
             template_record = {
                 "version": 1,
                 "id": template_id,
@@ -1133,6 +1486,8 @@ class RegionBuilderService:
                 "sourceLibraryId": source["id"],
                 "regionPackageId": package_id,
                 "regionId": region["id"],
+                "regionType": region.get("regionType", ""),
+                "selectionMethod": selection.get("selectionMethod", ""),
                 "importedAt": now_iso(),
                 "fingerprint": validation["fingerprint"],
                 "inputFiles": validation["inputFiles"],
@@ -1172,6 +1527,16 @@ class RegionBuilderService:
             settings["defaultInputLibraryId"] = library_id
             settings["defaultTemplateId"] = template_id
             write_json(self.workspace.settings_path, settings)
+            self.workspace.record_asset_registration({
+                "id": f"region-builder:{template_id}",
+                "type": "region-builder-output",
+                "version": 1,
+                "installedAt": now_iso(),
+                "assets": [
+                    {"kind": "input-library", "id": library_id},
+                    {"kind": "model-template", "id": template_id},
+                ],
+            })
         finally:
             shutil.rmtree(staging, ignore_errors=True)
         return {

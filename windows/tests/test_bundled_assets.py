@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.workbench.bundled_assets import BundledAssetService
 from backend.workbench.explore import ExploreService
@@ -118,7 +119,8 @@ class BundledAssetTests(unittest.TestCase):
             text=True,
         )
         record = ModelPackageService(self.workspace).install(archive)
-        self.assertEqual(record["name"], "PlanRVA MM")
+        self.assertEqual(record["name"], "PlanRVA")
+        self.assertEqual(record["version"], "2.0")
         self.assertTrue((self.workspace.input_library / "PlanRVA MM" / "bzone_employment.csv").is_file())
         self.assertTrue((self.workspace.templates / "template-planrva-mm-8f140cd4cb" / "visioneval.cnf").is_file())
         self.assertTrue((self.workspace.map_contexts / "planrva-virginia-map-context" / "workbench-map-context.json").is_file())
@@ -132,6 +134,38 @@ class BundledAssetTests(unittest.TestCase):
         self.assertEqual(len(regions["regions"]), 15)
         self.assertEqual(len(crosswalk["regions"]), 15)
         self.assertEqual(self.workspace.settings()["defaultInputLibraryId"], "PlanRVA MM")
+        library = next(item for item in self.workspace.list_input_libraries() if item["id"] == "PlanRVA MM")
+        self.assertEqual(library["name"], "PlanRVA")
+        self.assertEqual(library["pairingStatus"], "paired")
+        self.assertEqual(library["pairedTemplateId"], "template-planrva-mm-8f140cd4cb")
+        builder = RegionBuilderService(self.workspace, ROOT / "backend", RegionPackageService(self.workspace))
+        develop = builder.catalog()["packages"]
+        self.assertEqual([(item["id"], item["sourceKind"]) for item in develop], [("planrva-mm-v1", "model-bundle")])
+        contained = builder.regions("planrva-mm-v1")["regions"][0]
+        self.assertEqual(len(contained["fips"]), 8)
+        self.assertEqual(contained["selectedCount"], 749)
+        source_id = builder.sources("planrva-mm-v1")["sources"][0]["id"]
+        with patch.object(builder, "statewide_map_data", side_effect=WorkspaceError("offline")):
+            geography = builder.geography_options("planrva-mm-v1", source_id, contained["id"])
+        self.assertEqual(len(geography["azones"]), 8)
+        self.assertEqual(len(geography["bzones"]), 749)
+        selected = [item["id"] for item in geography["bzones"][:3]]
+        payload = {
+            "packageId": "planrva-mm-v1", "sourceLibraryId": source_id,
+            "regionId": contained["id"], "geographyMode": "custom",
+            "selectedBzones": selected, "regionName": "PlanRVA Tiny",
+            "regionCode": "planrva_tiny", "stateAbbr": "VA",
+        }
+        preview = builder.preview(payload)
+        self.assertEqual(preview["selection"]["bzones"], sorted(selected))
+        built = builder.build(payload)
+        generated_pair = self.workspace.input_library_pairing(built["inputLibrary"]["id"])
+        self.assertEqual(generated_pair["status"], "paired")
+        project = self.workspace.create_project({
+            "name": "PlanRVA Tiny Project", "inputLibraryId": built["inputLibrary"]["id"],
+            "baseline": {"strategy": "fresh"},
+        })
+        self.assertEqual(project["template"]["id"], generated_pair["templateId"])
         dependencies = self.workspace.asset_dependencies("input-library", "PlanRVA MM")
         self.assertEqual(dependencies["related"][0]["id"], "template-planrva-mm-8f140cd4cb")
 
@@ -141,6 +175,14 @@ class BundledAssetTests(unittest.TestCase):
         RegionPackageService(self.workspace)
         self.assertFalse(legacy_root.exists())
         self.assertTrue((context_root / "workbench-map-context.json").is_file())
+
+    def test_wppdc_release_repackager_adds_version_two_metadata_and_marea(self):
+        source = (ROOT / "packaging" / "repackage_wppdc.py").read_text(encoding="utf-8")
+        self.assertIn('VERSION = "2.0"', source)
+        self.assertIn('manifest["contentSourceVersion"] = source_version', source)
+        self.assertIn('manifest["intendedUse"]', source)
+        self.assertIn('"supportedVisionEvalVersions": ["VE-40-RC7"]', source)
+        self.assertIn('item.get("id") == "marea"', source)
 
     def test_separate_planrva_package_rejects_tampering(self):
         archive = Path(self.temp.name) / "planrva.zip"
@@ -215,6 +257,26 @@ class BundledAssetTests(unittest.TestCase):
         app.input_explanations.install(self.make_explanation_package())
         state = app.state()
         self.assertEqual(state["inputExplanations"][0]["name"], "NC Input Explanations")
+
+    def test_application_previews_model_bundle_before_install(self):
+        archive = Path(self.temp.name) / "planrva-2.0.zip"
+        subprocess.run(
+            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--output", str(archive)],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        app = WorkbenchApplication(Path(self.temp.name) / "preview-workspace", ROOT / "public", ROOT / "backend")
+
+        preview = app.preview_package(str(archive))
+
+        self.assertEqual(preview["type"], "model-bundle")
+        self.assertEqual(preview["name"], "PlanRVA")
+        self.assertEqual(preview["version"], "2.0")
+        record = app.model_packages.install(archive)
+        self.assertEqual(record["name"], "PlanRVA")
+        self.assertTrue((app.workspace.input_library / "PlanRVA MM").is_dir())
 
 
 if __name__ == "__main__":

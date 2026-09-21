@@ -1,13 +1,14 @@
 # VisionEval Workbench User Guide for Windows
 
-VisionEval Workbench 1.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios, running them through an existing `VE_Runtime`, and comparing completed datastores. Project data remains in the workspace you select.
+VisionEval Workbench 2.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios and bounded Hypercubes, running them through an existing `VE_Runtime`, and analyzing completed datastores. Project data remains in the workspace you select.
 
-The normal workflow has four parts:
+The normal workflow has five parts:
 
 1. **Explore** input files and model dependencies.
 2. **Create** a baseline and edited scenarios.
 3. **Run** VisionEval through the verified native runtime.
 4. **Compare** completed datastores and maps.
+5. **Hypercube** creates and analyzes bounded two-parameter experiments.
 
 ![Workbench workflow](images/workflow-overview.svg)
 
@@ -28,6 +29,7 @@ The normal workflow has four parts:
 - [Create and review scenarios](create-and-review.md)
 - [Run VisionEval](run.md)
 - [Compare results](compare.md)
+- [Create, run, analyze, and export Hypercubes](hypercube.md)
 - [Settings, workspaces, and storage](settings-workspaces-storage.md)
 - [Units, rounding, and provenance](data-units-provenance.md)
 - [Troubleshooting](troubleshooting.md)

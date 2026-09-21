@@ -12,7 +12,7 @@ from .workspace import Workspace, WorkspaceError, fingerprint_tree, now_iso, rea
 
 
 class ModelPackageService:
-    """Install a checked model template and InputLibrary as one optional package."""
+    """Install a checked model definition and Input Library as one optional package."""
 
     def __init__(self, workspace: Workspace):
         self.workspace = workspace
@@ -29,7 +29,7 @@ class ModelPackageService:
                 raise WorkspaceError(f"Model package {key} is required")
         library = manifest.get("inputLibrary") or {}
         template = manifest.get("modelTemplate") or {}
-        for label, record in (("InputLibrary", library), ("model template", template)):
+        for label, record in (("Input Library", library), ("model package", template)):
             if not str(record.get("id", "")).strip() or not str(record.get("path", "")).strip():
                 raise WorkspaceError(f"Model package {label} id and path are required")
         files = manifest.get("files")
@@ -56,10 +56,10 @@ class ModelPackageService:
         library_path = safe_package_path(root, str(library["path"]))
         template_path = safe_package_path(root, str(template["path"]))
         if not library_path.is_dir() or not any(library_path.glob("*.csv")):
-            raise WorkspaceError("Model package InputLibrary contains no CSV files")
+            raise WorkspaceError("Model package Input Library contains no CSV files")
         validation = self.workspace.validate_template(template_path)
         if not validation["valid"]:
-            raise WorkspaceError("Model package template is invalid: " + "; ".join(validation["errors"]))
+            raise WorkspaceError("Model package definition is invalid: " + "; ".join(validation["errors"]))
         map_record = manifest.get("comparisonMap") or {}
         if map_record:
             context_path = safe_package_path(root, str(map_record.get("path", "")))
@@ -132,8 +132,8 @@ class ModelPackageService:
                 "version": manifest["version"],
                 "installedAt": installed_at,
                 "assets": [
-                    {"kind": "input-library", "id": library["id"]},
-                    {"kind": "model-template", "id": template["id"]},
+                    {"kind": "input-library", "id": library["id"], "name": library.get("name", library["id"])},
+                    {"kind": "model-template", "id": template["id"], "name": template.get("name", template["id"])},
                     *([{"kind": "input-explanations", "id": explanation["id"]}] if explanation else []),
                 ],
             })

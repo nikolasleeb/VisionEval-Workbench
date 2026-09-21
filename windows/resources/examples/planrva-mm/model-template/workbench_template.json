@@ -1,9 +1,9 @@
 {
   "version": 1,
   "id": "template-planrva-mm-8f140cd4cb",
-  "name": "PlanRVA MM",
+  "name": "PlanRVA",
   "source": "bundled:planrva-mm-v1",
-  "importedAt": "bundled-release-1.0.0",
+  "importedAt": "bundled-release-2.2",
   "fingerprint": "20d581d194edb965960506ca61dcb320f7314ff1c80b79fe07ca2a25ffd274b8",
   "inputFiles": [
     "azone_carsvc_characteristics.csv",

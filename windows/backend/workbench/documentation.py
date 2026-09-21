@@ -10,7 +10,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-DOCUMENTATION_SCHEMA_VERSION = 1
+DOCUMENTATION_SCHEMA_VERSION = 2
 WORKSPACE_MANIFEST = ".workbench-documentation.json"
 MANAGED_GUIDE_DIRECTORY = "Workbench User Guide"
 SOURCE_MANIFEST = "documentation.json"
@@ -69,6 +69,7 @@ class DocumentationService:
     def source_root(self) -> Path:
         candidates = (
             self.resource_root / "docs" / "user",
+            self.resource_root.parent / "docs" / "user-macos",
             self.resource_root.parent / "docs" / "user",
         )
         for candidate in candidates:
@@ -84,6 +85,9 @@ class DocumentationService:
         return Path(*posix.parts)
 
     def _source_files(self, source: Path) -> list[Path]:
+        metadata = self._source_metadata(source)
+        if int(metadata.get("schemaVersion", 1)) >= 2:
+            return [source / document["filename"] for document in self._documents(metadata, source)]
         files = []
         for path in sorted(source.rglob("*")):
             if path.is_file() and path.name != SOURCE_MANIFEST and not path.is_symlink():
@@ -92,12 +96,81 @@ class DocumentationService:
             raise ValueError("The bundled user guide has no README.md")
         return files
 
+    def _source_metadata(self, source: Path | None = None) -> dict[str, Any]:
+        resolved_source = source or self.source_root()
+        metadata = _read_json(resolved_source / SOURCE_MANIFEST, {})
+        if not isinstance(metadata, dict):
+            raise ValueError("The bundled documentation catalog is invalid")
+        return metadata
+
+    def _documents(self, metadata: dict[str, Any], source: Path | None = None) -> list[dict[str, Any]]:
+        documents = metadata.get("documents", [])
+        if not isinstance(documents, list) or not documents:
+            raise ValueError("The bundled documentation catalog has no documents")
+        resolved_source = source or self.source_root()
+        normalized: list[dict[str, Any]] = []
+        identifiers: set[str] = set()
+        for item in documents:
+            if not isinstance(item, dict):
+                raise ValueError("The bundled documentation catalog contains an invalid document")
+            document_id = str(item.get("id", "")).strip()
+            if not document_id or not document_id.replace("-", "").isalnum() or document_id in identifiers:
+                raise ValueError("The bundled documentation catalog contains an invalid document ID")
+            relative = self._safe_relative(str(item.get("filename", "")))
+            if relative.suffix.lower() != ".pdf" or len(relative.parts) != 1:
+                raise ValueError(f"Documentation file must be an allowlisted PDF: {relative}")
+            source_path = resolved_source / relative
+            if not source_path.is_file() or source_path.is_symlink():
+                raise FileNotFoundError(f"Bundled documentation file not found: {relative}")
+            title = str(item.get("title", "")).strip()
+            description = str(item.get("description", "")).strip()
+            version = str(item.get("version", "")).strip()
+            page_count = int(item.get("pageCount", 0))
+            if not title or not description or not version or page_count < 1:
+                raise ValueError(f"Documentation metadata is incomplete for {document_id}")
+            identifiers.add(document_id)
+            normalized.append({
+                "id": document_id,
+                "title": title,
+                "description": description,
+                "filename": relative.as_posix(),
+                "format": "pdf",
+                "pageCount": page_count,
+                "version": version,
+            })
+        return normalized
+
+    def catalog(self) -> dict[str, Any]:
+        source = self.source_root()
+        metadata = self._source_metadata(source)
+        return {
+            "documentationVersion": str(metadata.get("documentationVersion", "")),
+            "title": str(metadata.get("title", "VisionEval Workbench Documentation")),
+            "documents": self._documents(metadata, source),
+        }
+
+    def document_path(self, document_id: str) -> Path:
+        catalog = self.catalog()
+        document = next((item for item in catalog["documents"] if item["id"] == document_id), None)
+        if document is None:
+            raise ValueError("Unknown documentation document")
+        relative = self._safe_relative(document["filename"])
+        installed = self.guide_root / relative
+        path = installed if installed.is_file() else self.source_root() / relative
+        resolved = path.resolve()
+        allowed_roots = (self.guide_root.resolve(), self.source_root().resolve())
+        if not resolved.is_file() or resolved.suffix.lower() != ".pdf":
+            raise FileNotFoundError("The requested documentation PDF is missing")
+        if not any(resolved.is_relative_to(root) for root in allowed_roots):
+            raise ValueError("Documentation file is outside the managed guide")
+        return resolved
+
     def sync(self) -> dict[str, Any]:
         self.documentation_root.mkdir(parents=True, exist_ok=True)
         (self.documentation_root / "User Notes").mkdir(parents=True, exist_ok=True)
         try:
             source = self.source_root()
-            source_metadata = _read_json(source / SOURCE_MANIFEST, {})
+            source_metadata = self._source_metadata(source)
             documentation_version = str(source_metadata.get("documentationVersion", "")).strip()
             if not documentation_version:
                 raise ValueError("The bundled user guide has no documentationVersion")
@@ -122,10 +195,14 @@ class DocumentationService:
                 current_paths.add(normalized)
                 managed_files.append({"path": normalized, "sha256": _sha256(target)})
 
+            documents = self._documents(source_metadata, source) if int(source_metadata.get("schemaVersion", 1)) >= 2 else []
+            document_links = "\n".join(
+                f"- [{item['title']}]({MANAGED_GUIDE_DIRECTORY.replace(' ', '%20')}/{item['filename']})"
+                for item in documents
+            )
             index_payload = (
                 "# VisionEval Workbench Documentation\n\n"
-                "Open the [Workbench User Guide](Workbench%20User%20Guide/README.md) "
-                "for setup instructions and the complete Explore → Create → Run → Compare workflow.\n\n"
+                f"{document_links or '- [Workbench User Guide](Workbench%20User%20Guide/README.md)'}\n\n"
                 "Files in `Workbench User Guide/` are maintained by VisionEval Workbench and may be "
                 "updated when the application is upgraded. Put personal documentation in `User Notes/`; "
                 "Workbench never modifies that folder.\n"
@@ -166,6 +243,7 @@ class DocumentationService:
                 "documentationVersion": documentation_version,
                 "entrypoint": "Documentation/README.md",
                 "managedFileCount": len(managed_files),
+                "documents": documents,
                 "message": "The Workbench User Guide is installed in this workspace.",
             }
         except Exception as exc:

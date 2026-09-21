@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
-  "releaseStatus": "public",
-  "applicationVersion": "1.0.0",
-  "releaseDate": "August 14, 2026",
+  "releaseStatus": "release-candidate-unsigned",
+  "applicationVersion": "2.0.0",
+  "releaseDate": "September 20, 2026",
   "platform": "Windows",
   "architecture": "x86_64",
   "runtimeAdapter": "native-ve-runtime",

@@ -14,6 +14,7 @@ datas = [
     (str(root / "backend" / "rda_reader.R"), "."),
     (str(root / "backend" / "comparison_scan.R"), "."),
     (str(root / "backend" / "comparison_cache_extract.R"), "."),
+    (str(root / "backend" / "hypercube_summary.R"), "."),
     (str(root / "backend" / "explore_catalog.json"), "."),
     (str(root / "backend" / "unit_conflicts.json"), "."),
     (str(root / "backend" / "dependency_catalog.json"), "."),
@@ -43,8 +44,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    # This binary is a background HTTP sidecar, not a second macOS GUI app.
-    # The windowed bootloader calls TransformProcessType/RegisterApplication
-    # and can abort when the Tauri app launches it as a child process.
+    # This binary is a background HTTP sidecar. Keep a console-capable
+    # bootloader so the Tauri parent can capture startup failures.
     console=True,
 )
