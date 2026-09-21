@@ -31,3 +31,5 @@ Choose **Stop Runs and Quit** to end Workbench-owned R processes and clean their
 ## Successful results
 
 After VisionEval exits successfully, Workbench verifies `results/Datastore/DatastoreListing.Rda`. Only then does the result become available in Compare.
+
+Each queued job records its result-retention mode. New Hypercube case and baseline runs keep the authoritative Datastore without generating the optional full CSV result tree. Standard-project runs follow the saved full-export preference that was active when the job entered the queue.

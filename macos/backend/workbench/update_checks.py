@@ -384,9 +384,14 @@ class UpdateCheckService:
                 message=f"A newer runtime image requires Workbench {minimum} or later. Update Workbench first.",
                 requires_workbench=minimum, runtime_profile=runtime_profile,
             )
-        update = bool(installed_digest and installed_digest != available_digest)
         if not installed_digest:
-            update = True
+            return self._record(
+                "runtimeImage", "install_required", installed="Not installed", available=vision_eval_version or available_digest,
+                url=release_url, release_notes_url=release_url,
+                message=f"VisionEval {vision_eval_version} is ready to install as the Workbench runtime.",
+                runtime_profile=runtime_profile,
+            )
+        update = installed_digest != available_digest
         return self._record(
             "runtimeImage", "update_available" if update else "current",
             installed=installed_version, available=vision_eval_version or available_digest,

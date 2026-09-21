@@ -2,12 +2,63 @@
 from __future__ import annotations
 
 import os
+import json
 import sys
 import threading
 import time
 from pathlib import Path
 
 from workbench.server import serve
+
+
+class WorkspaceLease:
+    """Process-lifetime exclusive ownership of one Workbench workspace."""
+
+    def __init__(self, workspace: Path, port: int):
+        self.path = workspace / ".workbench" / "backend.lock"
+        self.port = port
+        self.handle = None
+
+    def __enter__(self):
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+", encoding="utf-8")
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                self.handle.seek(0)
+                if not self.handle.read(1):
+                    self.handle.write("\0")
+                    self.handle.flush()
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            self.handle.close()
+            self.handle = None
+            raise RuntimeError("This workspace is already open in another VisionEval Workbench window")
+        self.handle.seek(0)
+        self.handle.truncate()
+        json.dump({"pid": os.getpid(), "port": self.port}, self.handle)
+        self.handle.write("\n")
+        self.handle.flush()
+        return self
+
+    def __exit__(self, _exc_type, _exc, _traceback):
+        if not self.handle:
+            return
+        try:
+            if sys.platform == "win32":
+                import msvcrt
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            self.handle.close()
+            self.handle = None
 
 
 def configure_macos_certificates() -> None:
@@ -73,7 +124,9 @@ def main() -> None:
     parent_pid = int(os.environ.get("WORKBENCH_PARENT_PID", "0") or 0)
     if parent_pid > 1:
         threading.Thread(target=watch_parent, args=(parent_pid,), name="workbench-parent-watch", daemon=True).start()
-    serve(workspace, public_root, resource_root, int(os.environ.get("PORT", "3000")))
+    port = int(os.environ.get("PORT", "3000"))
+    with WorkspaceLease(workspace, port):
+        serve(workspace, public_root, resource_root, port)
 
 
 if __name__ == "__main__":

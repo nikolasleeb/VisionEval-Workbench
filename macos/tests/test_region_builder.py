@@ -235,6 +235,17 @@ class UnpackedPackageTests(unittest.TestCase):
 
 
 class RegionBuilderTests(unittest.TestCase):
+    def test_state_boundary_dissolves_adjacent_polygon_edges(self):
+        square = lambda x0, x1: [[[x0, 0], [x1, 0], [x1, 1], [x0, 1], [x0, 0]]]
+        azones = {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": square(0, 1)}},
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": square(1, 2)}},
+        ]}
+        boundary = RegionBuilderService._derived_state_boundary(azones)
+        segments = boundary["geometry"]["coordinates"]
+        self.assertTrue(segments)
+        self.assertFalse(any(first[0] == second[0] == 1 for first, second in segments))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

@@ -10,7 +10,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-VERSION = "1.2"
+VERSION = "2.0"
 
 
 def sha256(path: Path) -> str:
@@ -44,8 +44,29 @@ def main() -> None:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if manifest.get("id") != "wppdc-mm-v1":
             raise ValueError("Unexpected WPPDC package identity")
+        source_version = str(manifest.get("version", ""))
         manifest["version"] = VERSION
+        manifest["contentSourceVersion"] = source_version
         manifest["name"] = "WPPDC"
+        manifest["description"] = "A ready-to-run VisionEval model and matching inputs for the WPPDC region."
+        manifest["compatibilitySummary"] = "VisionEval Workbench 2.0 on Apple Silicon Mac with the verified VE-40-RC7 runtime."
+        manifest["intendedUse"] = "Create and run WPPDC baseline, scenario, and Hypercube projects."
+        manifest["executionSupport"] = "Ready to run after Workbench verifies the supported VisionEval runtime."
+        manifest["capabilities"] = [
+            "Create WPPDC projects and scenarios",
+            "Run standard and Hypercube analyses",
+            "Compare results with Virginia map context",
+        ]
+        manifest["warnings"] = []
+        prior_compatibility = manifest.get("compatibility") or {}
+        manifest["compatibility"] = {
+            "minimumWorkbenchVersion": "2.0.0",
+            "testedWorkbenchVersion": "2.0.0",
+            "supportedVisionEvalVersions": ["VE-40-RC7"],
+            "runtimeApi": 1,
+            "architecture": "arm64",
+            "runtimeDigest": prior_compatibility.get("runtimeDigest", ""),
+        }
         manifest["inputLibrary"]["name"] = "WPPDC"
         manifest["modelTemplate"]["name"] = "WPPDC"
 
@@ -54,6 +75,19 @@ def main() -> None:
         template["name"] = "WPPDC"
         template["importedAt"] = f"package-release-{VERSION}"
         template_path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
+        map_context_path = package_root / manifest["comparisonMap"]["path"] / "workbench-map-context.json"
+        map_context = json.loads(map_context_path.read_text(encoding="utf-8"))
+        map_context["version"] = "2026.09.19.1"
+        geographies = map_context.get("comparisonMap", {}).setdefault("geographies", [])
+        if not any(item.get("id") == "marea" for item in geographies):
+            geographies.append({
+                "id": "marea",
+                "label": "Marea",
+                "geometry": "bzone",
+                "identifier": "Marea",
+                "technicalLevel": "Marea",
+            })
+        map_context_path.write_text(json.dumps(map_context, indent=2) + "\n", encoding="utf-8")
         notice_path = package_root / "NOTICE.md"
         notice_path.write_text(
             notice_path.read_text(encoding="utf-8").replace("# WPPDC MM package notice", "# WPPDC package notice"),

@@ -38,8 +38,8 @@ def decimal_text(value: Decimal) -> str:
 def range_values(start: Decimal, end: Decimal, interval: Decimal) -> list[Decimal]:
     if start > end:
         raise WorkspaceError("Hypercube start must be less than or equal to the end")
-    if interval <= 0:
-        raise WorkspaceError("Hypercube interval must be greater than zero")
+    if interval < 2:
+        raise WorkspaceError("Hypercube interval must be at least 2")
     values: list[Decimal] = []
     value = start
     while value <= end:
@@ -47,6 +47,8 @@ def range_values(start: Decimal, end: Decimal, interval: Decimal) -> list[Decima
         value += interval
     if not values or values[-1] != end:
         values.append(end)
+    if len(values) > 20:
+        raise WorkspaceError("A Hypercube parameter may contain no more than 20 values")
     return values
 
 
@@ -81,6 +83,8 @@ class HypercubeService:
             raw_axes = payload.get("axes") or []
             if not isinstance(raw_axes, list):
                 raise WorkspaceError("Hypercube parameters must be a list")
+            if len(raw_axes) > 2:
+                raise WorkspaceError("A Hypercube setup may contain no more than two parameter axes")
             axes = []
             library_id = str(project.get("inputLibrary", {}).get("id", ""))
             for index, raw in enumerate(raw_axes, 1):
@@ -181,6 +185,8 @@ class HypercubeService:
         raw_axes = payload.get("axes")
         if not isinstance(raw_axes, list) or not raw_axes:
             raise WorkspaceError("Choose at least one hypercube parameter")
+        if len(raw_axes) > 2:
+            raise WorkspaceError("A Hypercube matrix may contain no more than two parameter axes")
         geography_type = str(payload.get("geographyType") or "all")
         raw_locations = payload.get("locations") or []
         if not isinstance(raw_locations, list):
@@ -230,6 +236,9 @@ class HypercubeService:
                 "values": values,
                 "columnType": self.explore.input_column_types(filename, columns).get(column, "number"),
             })
+        case_count = math.prod(len(axis["values"]) for axis in axes)
+        if case_count > 400:
+            raise WorkspaceError("A Hypercube matrix may contain no more than 400 cases")
         return {
             "project": project,
             "projectId": project_id,
@@ -506,8 +515,6 @@ class HypercubeOperationManager:
             if not record or record != {"projectId": str(payload.get("projectId", "")), "draftRevision": draft_revision}:
                 raise WorkspaceError("Preview the current saved Hypercube setup before generating scenarios")
         preview = self.service.preview(payload)
-        if preview["largeMatrix"] and not bool(payload.get("acknowledgeLargeMatrix")):
-            raise WorkspaceError(f"Acknowledge the {preview['caseCount']} scenario matrix before generating it")
         operation_id = make_id("hypercube-operation", preview["name"])
         operation = {
             "id": operation_id,

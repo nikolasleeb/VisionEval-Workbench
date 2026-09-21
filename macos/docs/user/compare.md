@@ -1,12 +1,16 @@
 # Compare Results
 
-Compare shows observed differences between completed or previously registered datastores. It has **Load Data**, **Compare**, **Map Visualization**, and **Percent-Change Chart** subtabs.
+Compare shows observed differences between completed or previously registered datastores. **Compare**, **Map Visualization**, and **Percent-Change Chart** each have independent reference/comparison selectors and retained state. Hypercube analysis lives under **5 Hypercube → Analyze**.
+
+## Hypercube Analysis
+
+Choose a Hypercube project, actual VisionEval output, year, scope, aggregation, and metric to render its baseline-relative response matrix. Cell labels remain visible without color, and selected cases can be opened in Compare or Map or compared directly. Response curves, sliced matrices for additional axes, and a case table use the same calculation. Find All Changes runs only when requested and can be cancelled. Hypercube runs retain authoritative Datastores and use disposable analysis caches.
 
 ![Compare tab in an empty demonstration workspace](images/compare.png)
 
-## Load Data
+## Choose results
 
-Choose one reference datastore and optionally up to two comparison datastores. Loading only the reference opens a single-datastore view with variable explanations, geography filters, sorting, paging, statistics, and reference exports. Deltas, change scans, percent-change summaries, and charts become available when a comparison datastore is also selected. Each result shows project, scenario, template, runtime, completion time, and verification status.
+Choose a reference and optional single comparison in the same panel as ordinary Compare's output controls. Map and Percent-Change Chart have their own selectors. Reference-only inspection is supported. Ordinary selectors omit Hypercube cases; Hypercube Analyze drilldowns inject temporary labelled choices when needed.
 
 New results are registered when Workbench runs complete. Results imported by an older Workbench version remain selectable as read-only legacy records, but Compare no longer imports or manages external result folders.
 
@@ -36,10 +40,10 @@ Detailed comparisons, changed-output discovery, percent-change charts, and selec
 
 County filtering uses the result's model-template `defs/geo.csv` to map county labels to Azones and Bzones. Household, Vehicle, and Worker rows are included when their stored location belongs to a selected county in the reference or a comparison. County filtering is disabled for purely regional outputs that cannot be mapped safely.
 
-## Discover changed outputs
+## Find All Changes
 
-- **Find changed outputs** scans every comparable output across the selected results; it is independent of the Table and Variable used by the detailed comparison.
-- Each numeric result reports the total percent change in the variable's summed value relative to the reference. With two comparison datastores, each scenario receives its own total-percent-change value.
+- **Find All Changes** scans every comparable output across the selected results; it is independent of the Table and Variable used by the detailed comparison.
+- Each numeric result reports the total percent change in the variable's summed value relative to the reference.
 - **All locations** scans every location. **Selected locations** opens an independent cross-output location selector.
 
 The activity strip shows phase, elapsed time, completion/failure, and Stop when cancellation is supported. A cold scan loads each datastore once and caches its safely keyed statistics. Repeating the same roles, data, year, and geography can use the cache.
@@ -52,7 +56,7 @@ Unsafe unknown multi-row tables and variables whose value count does not match t
 
 Direct Azone and Bzone fields are preferred. Household and Worker outputs use their stored geography. Vehicle Bzones are derived independently in each result through `Vehicle.HhId -> Household.HhId -> Household.Bzone`; vehicles without a unique household match are counted as excluded rows. Every mapped numeric row contributes equally to the geographic mean, matching Workbench's ordinary Mean summaries rather than restricting calculations to entity IDs matched across scenarios.
 
-The default display is Change %. Zero-to-zero is 0%; a nonzero comparison with a zero reference has no defined percent and uses the unavailable hatch. Change metrics use a symmetric diverging scale centered on zero and saturate at the 95th percentile of absolute displayed values so outliers do not flatten the rest of the map. Adaptive labels move to usable polygon interiors, shrink and simplify from locality/ID/value to ID/value or value-only, and disappear when no readable label fits. Value labels add `▼ −` for decreases, `▲ +` for increases, and `•` for zero so direction is not communicated by color alone. **Map labels** and **Map value labels** remain independent.
+The default display is Change %. Zero-to-zero is 0%; a nonzero comparison with a zero reference has no defined percent and uses the unavailable hatch. Change metrics use a symmetric diverging scale centered on zero and sized to the largest visible absolute change. The saved palette is transformed through a square-root perceptual ramp so small nonzero values remain visible without changing their ordering; exact zero remains neutral. Adaptive labels move to usable polygon interiors, shrink and simplify from locality/ID/value to ID/value or value-only, and disappear when no readable label fits. The two Marea labels are retained at stable anchors in their largest visible components. Value labels add `▼ −` for decreases, `▲ +` for increases, and `•` for zero so direction is not communicated by color alone. **Map labels** and **Map value labels** remain independent.
 
 The optional **3D map** view runs from bundled MapLibre assets without web tiles. The two-part **2D map / 3D map** switch changes only the presentation. **Azone context** and **Bzone context** are independent background layers; the Geography field above the map still determines the generated project geography. **Map labels** and **Map value labels** can also be shown independently in either view.
 

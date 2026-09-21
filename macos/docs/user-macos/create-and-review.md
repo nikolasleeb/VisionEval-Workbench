@@ -47,10 +47,7 @@ Setup imports assets, creates projects, and manages saved and archived projects.
 
 An existing completed baseline is available only after a verified compatible baseline has run successfully with the same Model package and Input Library. Failed, missing, unverified, or incompatible results cannot be selected as a project baseline.
 
-Choose a project type when creating a project:
-
-- **Standard scenario project** supports ordinary scenarios, Batch Change, and single-file editing.
-- **Hypercube project** contains one parameter matrix and only the cases generated from that matrix. It opens directly in the Hypercube builder and does not accept ordinary scenarios or copied-in scenarios.
+Setup creates Standard scenario projects for ordinary scenarios, Batch Change, and single-file editing. Hypercube projects are created only from **5 Hypercube → Build** and contain one parameter matrix plus its generated cases.
 
 A Hypercube matrix can be replaced only before any generated case has been submitted to Run and before the project has results. After that point, create a new Hypercube project for a revised matrix. Copying the full project preserves its Hypercube type. Copying an individual generated case into a Standard project turns the case into an ordinary standalone scenario.
 
@@ -66,7 +63,7 @@ For a Standard project, the trash button beside a scenario opens a compact summa
 
 The sidebar represents the project:
 
-1. **New Scenario** creates an editable scenario container and opens Batch Change with clean controls.
+1. **New Scenario** creates an editable scenario container and opens Batch Change with clean controls. Scenario names are unique without regard to capitalization, so `Scenario A` and `scenario a` cannot coexist in one project. Its suggested name is the lowest unused `Scenario N` name; duplication and cross-project copies resolve conflicts with the next available copy suffix using the same case-insensitive rule.
 2. **New File** opens one input CSV inside that scenario and clears file-dependent controls until a file is selected.
 3. Repeat New File for other individual inputs.
 4. Use **Batch Change** when the same operation should affect several input files.
@@ -92,29 +89,13 @@ Selections are remembered separately for each scenario and file, including after
 
 ### Batch mode
 
-Select one or more files and fields, then use the same geography, year, operation, and value controls. **Apply and Save Batch Changes** persists the changes immediately. Files that cannot represent the selected geography are listed and skipped before you confirm. Select **Apply from untouched baseline** to calculate the targeted cells from the original inputs, preserve unrelated changes, and skip the overlap warning for that operation. Otherwise an overlap offers **From baseline**, **Apply additional operation**, and **Cancel**. Apply controls are disabled while work is in progress so a rapid repeated click cannot submit the same operation twice.
+Select one or more files and fields, then use the same geography, year, operation, and value controls. **Apply and Save Batch Changes** persists the changes immediately. Files that cannot represent the selected geography are listed and skipped before you confirm. In **Choose the starting values**, leave **Start this batch from the untouched baseline** off to apply the operation on top of current scenario changes. Turn it on to replace earlier changes only within the selected files, columns, year, and locations using untouched baseline values. Apply controls are disabled while work is in progress so a rapid repeated click cannot submit the same operation twice.
 
 The Notes panel stays at the top of the active workspace and shows only the note relevant to the current mode: the scenario note in Batch Change, or the selected file's note in single-file editing. Both note types save automatically after a short pause or when you leave the field, without saving pending CSV changes.
 
 Compact provenance emblems identify **Batch change**, **Single-file change**, or **Batch and single-file changes** in Editor, Review, and Setup → Saved Work. Hover or move keyboard focus to an emblem for its full label. Existing changes without source metadata are never guessed and show no emblem.
 
-## Hypercube workflow
-
-The Hypercube project name is also the matrix name. Add parameter axes first; after every selected input file finishes loading, Workbench reveals the shared year, geography, and location scope. It offers only geography levels supported by every selected axis file and uses the locations shared by those files.
-
-Hypercube parameters and shared scope save automatically after each change without creating cases. The status shows **Saving…**, **Saved**, or **Not saved—retry**; a failed save provides a retry action. Navigation waits for the save and stays on Hypercube if saving fails. Complete the setup and preview the latest saved revision before choosing **Generate Scenarios**. Only Generate Scenarios creates cases, and it always uses the exact saved revision that was previewed.
-
-Hypercubes are best suited to parallel execution on a computer dedicated to the workload or on a scalable cloud VM. A 9 × 9 matrix creates 81 complete scenario runs. The safety disclosure and matrix preview estimate execution waves, elapsed time when comparable completed runs exist, peak Docker memory, and retained disk space. For an MPO/regional model, four active runs use a planning range of 10–14 GB of Docker memory. Estimates remain advisory and vary with model stages, population, years, outputs, computer performance, and resource contention. Use **Settings → Resources** to review concurrency and Docker guidance.
-
-For a specific geography such as County, open the compact location selector to search, select all, clear, or choose individual locations. The selector summary reports how many compatible locations are selected.
-
-While a parameter file is loading, its column control shows a loading state and the shared scope remains hidden. If loading fails, the parameter row shows the error and a retry action without leaving the Hypercube builder.
-
-**All matching rows** applies every matrix combination to every compatible row in each parameter file. For example, an Azone input with eight matching rows applies each case to all eight Azone rows. It does not aggregate values to the MPO and does not create eight additional scenarios. The compact location selector appears only when a narrower shared geography can be selected.
-
-Preview shows the exact axis counts, multiplication formula, scenario total, per-file row scope, example combinations, and an explanatory diagram: a number line for one axis, a grid for two, a cube for three, and layered slices for additional axes. The diagram explains the matrix structure; the exact counts beside it remain authoritative.
-
-**Shared target year** selects which dated CSV rows receive the matrix changes; it does not change the years configured in the model. Files without a year field remain unaffected by this filter. The same editing-year behavior remains available in Batch Change and single-file editing.
+Hypercube projects now live in the primary **5 Hypercube** workflow rather than Create. Use its Build, Review, Run, and Analyze subtabs; see [Hypercube workflow](hypercube.md).
 
 ## Geography selection
 

@@ -72,6 +72,30 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertIn("updateChecks", stored)
         self.assertNotIn("checkVisionEvalUpdates", stored)
 
+    def test_missing_runtime_is_reported_as_install_required(self):
+        releases, manifest, vision = self.responses()
+        def fetch(url):
+            if "VisionEval-4" in url:
+                return vision
+            if url == self.manifest_url:
+                return manifest
+            return releases
+        with patch("backend.workbench.update_checks._platform_name", return_value="macos"), patch("backend.workbench.update_checks._architecture", return_value="arm64"):
+            service = UpdateCheckService(
+                self.workspace,
+                "1.0.0",
+                "VE-40-RC6",
+                lambda: "",
+                "docker",
+                runtime_profiles=lambda: {"active": {"visionEvalVersion": "VE-40-RC7"}},
+                http_get=fetch,
+            )
+        runtime = service.check(force=True)["statuses"]["runtimeImage"]
+        self.assertEqual(runtime["status"], "install_required")
+        self.assertEqual(runtime["installedVersion"], "Not installed")
+        self.assertEqual(runtime["availableVersion"], "sha256:" + "2" * 64)
+        self.assertIn("ready to install", runtime["message"])
+
     def test_runtime_candidate_revalidates_complete_cached_index_fields(self):
         service = self.service(lambda _url: [])
         digest = "sha256:" + "2" * 64

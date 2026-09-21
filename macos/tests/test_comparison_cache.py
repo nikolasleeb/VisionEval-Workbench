@@ -11,6 +11,25 @@ from backend.workbench.workspace import Workspace, WorkspaceError
 
 
 class ComparisonCacheTests(unittest.TestCase):
+    def test_output_inventory_walks_once_until_listing_fingerprint_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            workspace = Workspace(Path(directory) / "workspace")
+            datastore = workspace.models / "fixture" / "results" / "Datastore"
+            table = datastore / "2045" / "Azone"; table.mkdir(parents=True)
+            listing = datastore / "DatastoreListing.Rda"; listing.write_bytes(b"one")
+            (table / "Value.Rda").touch()
+            cache = ComparisonCache(workspace, "unused", Path(directory) / "extractor.R")
+            calls = []
+            first = cache.output_inventory(datastore, lambda: calls.append("metadata") or {"Azone/Value": {"type": "numeric"}})
+            (table / "Added.Rda").touch()
+            second = cache.output_inventory(datastore, lambda: calls.append("unexpected") or {})
+            listing.write_bytes(b"changed")
+            third = cache.output_inventory(datastore, lambda: calls.append("metadata") or {})
+            self.assertEqual([item["name"] for item in first["items"]], ["Value"])
+            self.assertEqual([item["name"] for item in second["items"]], ["Value"])
+            self.assertEqual({item["name"] for item in third["items"]}, {"Value", "Added"})
+            self.assertEqual(calls, ["metadata", "metadata"])
+
     def test_cache_imports_keys_once_and_reuses_fingerprinted_variable(self):
         with tempfile.TemporaryDirectory() as directory:
             workspace = Workspace(Path(directory) / "workspace")

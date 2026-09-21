@@ -16,10 +16,9 @@ def read_json(path: Path) -> dict:
 
 def build_manifest(runtime_index: dict | None = None) -> dict:
     mac = read_json(ROOT / "macos" / "docs" / "compatibility-manifest.json")
-    intel = read_json(ROOT / "intel" / "docs" / "compatibility-manifest.json")
     version = read_json(ROOT / "macos" / "desktop" / "src-tauri" / "tauri.conf.json")["version"]
-    if str(mac.get("applicationVersion")) != str(version) or str(intel.get("applicationVersion")) != str(version):
-        raise SystemExit("Compatibility manifests and Tauri version do not match")
+    if str(mac.get("applicationVersion")) != str(version):
+        raise SystemExit("macOS compatibility manifest and Tauri version do not match")
 
     def image(record: dict, architecture: str) -> dict:
         runtime = record["runtimeImage"]
@@ -35,11 +34,14 @@ def build_manifest(runtime_index: dict | None = None) -> dict:
             "visionEvalVersion": str(record["visionEvalVersion"]),
         }
 
-    runtime_images = [image(mac, "arm64"), image(intel, "x86_64")]
+    runtime_images = [image(mac, "arm64")]
     vision_eval_version = str(mac["visionEvalVersion"])
     if runtime_index is not None:
         if runtime_index.get("schemaVersion") != 1 or runtime_index.get("runtimeApi") != 1:
-            raise SystemExit("Runtime index is not compatible with Workbench 1.1")
+            raise SystemExit("Runtime index is not compatible with Workbench 2.0")
+        minimum_workbench = str(runtime_index.get("minimumWorkbenchVersion") or "")
+        if minimum_workbench != str(version):
+            raise SystemExit("Runtime index minimum Workbench version does not match this build")
         indexed = runtime_index.get("images")
         if not isinstance(indexed, list) or {item.get("architecture") for item in indexed} != {"arm64", "x86_64"}:
             raise SystemExit("Runtime index must contain ARM64 and x86_64 images")
@@ -54,7 +56,7 @@ def build_manifest(runtime_index: dict | None = None) -> dict:
                 "architecture": str(item["architecture"]),
                 "reference": reference,
                 "digest": digest,
-                "minimumWorkbenchVersion": "1.1.0",
+                "minimumWorkbenchVersion": minimum_workbench,
                 "visionEvalVersion": str(runtime_index["preferredVisionEvalVersion"]),
                 "runtimeApi": 1,
                 "downloadSizeBytes": int(item.get("downloadSizeBytes") or 0),

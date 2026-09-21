@@ -1,13 +1,14 @@
 # VisionEval Workbench User Guide
 
-VisionEval Workbench 1.1.0 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, and comparing the resulting datastores. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
+VisionEval Workbench 2.0.0 is a local desktop application for learning a VisionEval model, designing repeatable input scenarios, running those scenarios in an isolated Docker runtime, comparing resulting Datastores, and exploring bounded Hypercube experiments. It is intended to make the full scenario workflow inspectable without editing model folders by hand.
 
-The normal workflow has four parts:
+The normal workflow has five parts:
 
 1. **Explore** input files and possible model dependencies.
 2. **Create** a baseline and edited scenarios.
 3. **Run** VisionEval through the verified Docker runtime.
 4. **Compare** completed datastores to see what actually changed.
+5. **Hypercube** builds, runs, and analyzes bounded parameter matrices on suitable hardware.
 
 ![Workbench workflow](images/workflow-overview.svg)
 
@@ -31,6 +32,7 @@ The normal workflow has four parts:
 - [Create and review scenarios](create-and-review.md)
 - [Run VisionEval](run.md)
 - [Compare results](compare.md)
+- [Hypercube workflow](hypercube.md)
 - [Build your own package](package-authoring.md)
 - [Virginia MPO package](virginia-package.md)
 - [Settings, workspaces, and storage](settings-workspaces-storage.md)

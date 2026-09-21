@@ -642,7 +642,7 @@ class WorkspaceTests(unittest.TestCase):
             source["id"], [variation["id"]], target_project_id=target["id"], include_results=True,
         )
         copied = result["variations"][0]
-        self.assertEqual(copied["name"], f"{variation['name']} Copy")
+        self.assertEqual(copied["name"], f"{variation['name']} (copy)")
         self.assertNotIn("hypercube", copied)
         copied_path, overlay = self.workspace.input_file("Plan", "bzone_network_design.csv", target["id"], copied["id"])
         self.assertTrue(overlay)
@@ -656,13 +656,21 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(source_variation["notes"]["bzone_network_design.csv"], "Copied file note")
         copied_record = next(item for item in self.workspace.catalog()["datastores"] if item["id"] in result["project"]["datastoreIds"])
         self.assertEqual(copied_record["variationId"], copied["id"])
+        self.assertEqual(copied_record["variationName"], copied["name"])
+        self.assertEqual(copied_record["label"], f"Existing target — {copied['name']}")
         self.assertNotEqual(Path(copied_record["path"]), result_root)
+
+        second = self.workspace.copy_variations(
+            source["id"], [variation["id"]], target_project_id=target["id"], include_results=False,
+        )
+        self.assertEqual(second["variations"][0]["name"], f"{variation['name']} (copy 2)")
 
         created = self.workspace.copy_variations(source["id"], [variation["id"]], new_project_name="Selected scenarios")
         self.assertTrue(created["createdProject"])
         self.assertEqual(created["project"]["template"]["fingerprint"], source["template"]["fingerprint"])
         self.assertEqual(created["project"]["baseline"], source["baseline"])
         self.assertNotIn("resultLinks", created["project"])
+        self.assertEqual(created["variations"][0]["name"], variation["name"])
         self.assertEqual(created["variations"][0]["scenarioNote"], "Copied policy")
         self.assertEqual(created["variations"][0]["notes"]["bzone_network_design.csv"], "Copied file note")
 

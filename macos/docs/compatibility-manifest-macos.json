@@ -1,19 +1,21 @@
 {
   "schemaVersion": 1,
   "releaseStatus": "public",
-  "applicationVersion": "1.0.0",
+  "applicationVersion": "2.0.0",
   "platform": "macOS",
   "architecture": "arm64",
   "runtimeAdapter": "docker",
   "minimumSystemVersion": "12.0",
-  "visionEvalVersion": "VE-40-RC6",
-  "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
+  "visionEvalVersion": "VE-40-RC7",
+  "visionEvalCommit": "7852dc58fad460ff279f5eebf4dd55fe191470ad",
   "runtimeImage": {
-    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-    "localAlias": "local/visioneval:1.0.0-arm64",
-    "digest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
+    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:VE-40-RC7-arm64-1212c2310f14",
+    "localAlias": "local/visioneval:2.0.0-arm64",
+    "digest": "sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+    "immutableTag": "VE-40-RC7-arm64-1212c2310f14",
     "published": true,
-    "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
+    "compatibilityPatch": "none"
   },
   "github": "https://github.com/nikolasleeb/VisionEval-Workbench"
 }

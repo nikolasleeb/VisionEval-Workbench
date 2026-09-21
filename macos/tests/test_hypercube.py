@@ -51,7 +51,7 @@ class HypercubeTests(unittest.TestCase):
             "geographyType": "county", "locations": ["Test County"],
             "axes": [
                 {"filename": "bzone_network_design.csv", "column": "D3", "operation": "percent", "start": "10", "end": "20", "interval": "6"},
-                {"filename": "bzone_network_design.csv", "column": "D4", "operation": "add", "start": "1", "end": "2", "interval": "1"},
+                {"filename": "bzone_network_design.csv", "column": "D4", "operation": "add", "start": "1", "end": "2", "interval": "2"},
             ],
         }
 
@@ -59,7 +59,9 @@ class HypercubeTests(unittest.TestCase):
         self.assertEqual(range_values(Decimal("10"), Decimal("20"), Decimal("6")), [Decimal("10"), Decimal("16"), Decimal("20")])
         self.assertEqual(range_values(Decimal("10"), Decimal("15"), Decimal("2.5")), [Decimal("10"), Decimal("12.5"), Decimal("15.0")])
         with self.assertRaises(WorkspaceError):
-            range_values(Decimal("20"), Decimal("10"), Decimal("1"))
+            range_values(Decimal("20"), Decimal("10"), Decimal("2"))
+        with self.assertRaisesRegex(WorkspaceError, "at least 2"):
+            range_values(Decimal("1"), Decimal("2"), Decimal("1"))
 
     def test_preview_reports_full_cartesian_matrix(self):
         preview = self.service.preview(self.payload())
@@ -118,7 +120,8 @@ class HypercubeTests(unittest.TestCase):
             manager.start(request)
         preview = manager.preview(request)
         operation = manager.start({**request, "previewToken": preview["previewToken"]})
-        self.assertIn(operation["state"], {"waiting", "running"})
+        # Small fixtures may complete before start() returns on a fast host.
+        self.assertIn(operation["state"], {"waiting", "running", "succeeded"})
         deadline = time.time() + 5
         while time.time() < deadline and manager.status(operation["id"])["state"] in {"waiting", "running"}:
             time.sleep(0.01)
@@ -145,7 +148,7 @@ class HypercubeTests(unittest.TestCase):
             "projectId": self.project["id"], "year": "2045", "geographyType": "all", "locations": [],
             "axes": [{
                 "filename": "azone_hh_pop_by_age.csv", "column": "Age0to14", "operation": "percent",
-                "start": "10", "end": "10", "interval": "1",
+                "start": "10", "end": "10", "interval": "2",
             }],
         }
         preview = self.service.preview(payload)
@@ -225,8 +228,8 @@ class HypercubeTests(unittest.TestCase):
             "projectId": self.project["id"], "name": "Types", "year": "2045",
             "geographyType": "all", "locations": [],
             "axes": [
-                {"filename": "azone_hh_pop_by_age.csv", "column": "Age0to14", "operation": "set", "start": "2.5", "end": "2.5", "interval": "1"},
-                {"filename": "azone_hh_pop_by_age.csv", "column": "PropTest", "operation": "add", "start": "2", "end": "2", "interval": "1"},
+                {"filename": "azone_hh_pop_by_age.csv", "column": "Age0to14", "operation": "set", "start": "2.5", "end": "2.5", "interval": "2"},
+                {"filename": "azone_hh_pop_by_age.csv", "column": "PropTest", "operation": "add", "start": "2", "end": "2", "interval": "2"},
             ],
         }
         result = self.service.generate(payload, threading.Event(), lambda _completed, _total: None)
@@ -250,22 +253,25 @@ class HypercubeTests(unittest.TestCase):
         self.assertEqual(project["name"], "Changed during hypercube")
         self.assertEqual(project["variations"], [])
 
-    def test_large_matrix_requires_acknowledgement(self):
+    def test_builder_limits_axis_values_and_total_cases(self):
         payload = self.payload()
         payload["geographyType"] = "all"
         payload["locations"] = []
         payload["axes"] = [
-            {"filename": "bzone_network_design.csv", "column": "D3", "operation": "percent", "start": "0", "end": "100", "interval": "1"},
-            {"filename": "bzone_network_design.csv", "column": "D4", "operation": "add", "start": "0", "end": "1", "interval": "1"},
+            {"filename": "bzone_network_design.csv", "column": "D3", "operation": "percent", "start": "0", "end": "100", "interval": "2"},
+            {"filename": "bzone_network_design.csv", "column": "D4", "operation": "add", "start": "0", "end": "2", "interval": "2"},
         ]
-        manager = HypercubeOperationManager(self.service)
-        with self.assertRaisesRegex(WorkspaceError, "Acknowledge"):
-            manager.start(payload)
+        with self.assertRaisesRegex(WorkspaceError, "20 values"):
+            self.service.preview(payload)
 
     def test_duplicate_axis_and_empty_scope_are_rejected(self):
         payload = self.payload()
-        payload["axes"].append(dict(payload["axes"][0]))
+        payload["axes"][1] = dict(payload["axes"][0])
         with self.assertRaisesRegex(WorkspaceError, "selected more than once"):
+            self.service.preview(payload)
+        payload = self.payload()
+        payload["axes"].append({**payload["axes"][0], "column": "Other"})
+        with self.assertRaisesRegex(WorkspaceError, "no more than two"):
             self.service.preview(payload)
         payload = self.payload()
         payload["year"] = "2099"

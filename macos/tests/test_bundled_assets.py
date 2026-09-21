@@ -120,6 +120,7 @@ class BundledAssetTests(unittest.TestCase):
         )
         record = ModelPackageService(self.workspace).install(archive)
         self.assertEqual(record["name"], "PlanRVA")
+        self.assertEqual(record["version"], "2.0")
         self.assertTrue((self.workspace.input_library / "PlanRVA MM" / "bzone_employment.csv").is_file())
         self.assertTrue((self.workspace.templates / "template-planrva-mm-8f140cd4cb" / "visioneval.cnf").is_file())
         self.assertTrue((self.workspace.map_contexts / "planrva-virginia-map-context" / "workbench-map-context.json").is_file())
@@ -174,6 +175,14 @@ class BundledAssetTests(unittest.TestCase):
         RegionPackageService(self.workspace)
         self.assertFalse(legacy_root.exists())
         self.assertTrue((context_root / "workbench-map-context.json").is_file())
+
+    def test_wppdc_release_repackager_adds_version_two_metadata_and_marea(self):
+        source = (ROOT / "packaging" / "repackage_wppdc.py").read_text(encoding="utf-8")
+        self.assertIn('VERSION = "2.0"', source)
+        self.assertIn('manifest["contentSourceVersion"] = source_version', source)
+        self.assertIn('manifest["intendedUse"]', source)
+        self.assertIn('"supportedVisionEvalVersions": ["VE-40-RC7"]', source)
+        self.assertIn('item.get("id") == "marea"', source)
 
     def test_separate_planrva_package_rejects_tampering(self):
         archive = Path(self.temp.name) / "planrva.zip"
@@ -248,6 +257,26 @@ class BundledAssetTests(unittest.TestCase):
         app.input_explanations.install(self.make_explanation_package())
         state = app.state()
         self.assertEqual(state["inputExplanations"][0]["name"], "NC Input Explanations")
+
+    def test_application_previews_model_bundle_before_install(self):
+        archive = Path(self.temp.name) / "planrva-2.0.zip"
+        subprocess.run(
+            [sys.executable, str(ROOT / "packaging/build_planrva_package.py"), "--output", str(archive)],
+            cwd=ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        app = WorkbenchApplication(Path(self.temp.name) / "preview-workspace", ROOT / "public", ROOT / "backend")
+
+        preview = app.preview_package(str(archive))
+
+        self.assertEqual(preview["type"], "model-bundle")
+        self.assertEqual(preview["name"], "PlanRVA")
+        self.assertEqual(preview["version"], "2.0")
+        record = app.model_packages.install(archive)
+        self.assertEqual(record["name"], "PlanRVA")
+        self.assertTrue((app.workspace.input_library / "PlanRVA MM").is_dir())
 
 
 if __name__ == "__main__":

@@ -364,6 +364,82 @@ class RegionBuilderService:
             features.extend(page.get("features", []))
         return {"type": "FeatureCollection", "features": features}
 
+    @staticmethod
+    def _derived_state_boundary(azones: dict[str, Any]) -> dict[str, Any]:
+        """Dissolve locality polygons into a compact exterior-line feature."""
+        polygons: list[list[list[list[float]]]] = []
+        points: list[list[float]] = []
+        for feature in azones.get("features", []):
+            geometry = feature.get("geometry") or {}
+            coordinates = geometry.get("coordinates") or []
+            parts = [coordinates] if geometry.get("type") == "Polygon" else coordinates if geometry.get("type") == "MultiPolygon" else []
+            polygons.extend(parts)
+            points.extend(point for polygon in parts for ring in polygon for point in ring)
+        if not points:
+            return {"type": "Feature", "properties": {"name": "Virginia"}, "geometry": {"type": "MultiLineString", "coordinates": []}}
+        min_x, max_x = min(point[0] for point in points), max(point[0] for point in points)
+        min_y, max_y = min(point[1] for point in points), max(point[1] for point in points)
+        scale = min(1000 / max(max_x - min_x, 1e-9), 620 / max(max_y - min_y, 1e-9))
+        project = lambda point: ((point[0] - min_x) * scale, (max_y - point[1]) * scale)
+        projected = [[[project(point) for point in ring] for ring in polygon] for polygon in polygons]
+        indexed = []
+        for rings in projected:
+            polygon_points = [point for ring in rings for point in ring]
+            indexed.append((rings, (
+                min(point[0] for point in polygon_points), min(point[1] for point in polygon_points),
+                max(point[0] for point in polygon_points), max(point[1] for point in polygon_points),
+            )))
+
+        def in_ring(point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+            inside = False
+            x, y = point
+            for index, first in enumerate(ring):
+                second = ring[index - 1]
+                if (first[1] > y) != (second[1] > y) and x < (second[0] - first[0]) * (y - first[1]) / ((second[1] - first[1]) or 1e-12) + first[0]:
+                    inside = not inside
+            return inside
+
+        def contains(point: tuple[float, float]) -> bool:
+            x, y = point
+            return any(
+                bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]
+                and rings and in_ring(point, rings[0]) and not any(in_ring(point, hole) for hole in rings[1:])
+                for rings, bounds in indexed
+            )
+
+        lines: list[list[list[float]]] = []
+        for polygon in polygons:
+            for ring in polygon:
+                for index in range(1, len(ring)):
+                    first, second = ring[index - 1], ring[index]
+                    a, b = project(first), project(second)
+                    dx, dy = b[0] - a[0], b[1] - a[1]
+                    length = (dx * dx + dy * dy) ** .5
+                    if not length:
+                        continue
+                    middle = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                    normal = (-dy / length, dx / length)
+                    exterior = False
+                    for offset in (.8, 1.6, 2.8):
+                        left = contains((middle[0] + normal[0] * offset, middle[1] + normal[1] * offset))
+                        right = contains((middle[0] - normal[0] * offset, middle[1] - normal[1] * offset))
+                        if left != right:
+                            exterior = True
+                            break
+                        if left and right:
+                            break
+                    if exterior:
+                        lines.append([first, second])
+        return {"type": "Feature", "properties": {"name": "Virginia"}, "geometry": {"type": "MultiLineString", "coordinates": lines}}
+
+    @classmethod
+    def _ensure_derived_state_geometry(cls, data: dict[str, Any]) -> bool:
+        if data.get("derivedGeometryVersion") == 1 and data.get("stateBoundary"):
+            return False
+        data["stateBoundary"] = cls._derived_state_boundary(data.get("azones") or {})
+        data["derivedGeometryVersion"] = 1
+        return True
+
     def statewide_map_data(self, package_id: str) -> dict[str, Any]:
         model_source = self._model_bundle_source(package_id)
         if model_source:
@@ -427,6 +503,8 @@ class RegionBuilderService:
         cache_path = cache_root / "statewide.json"
         cached = read_json(cache_path, {})
         if cached.get("sourceFingerprint") == fingerprint:
+            if self._ensure_derived_state_geometry(cached):
+                write_json(cache_path, cached)
             cached["cached"] = True
             return cached
 
@@ -509,6 +587,7 @@ class RegionBuilderService:
                 "zones": {"label": "VisionEval Azone/Bzone geography", "url": bzone_url.rsplit("/", 1)[0]},
             },
         }
+        self._ensure_derived_state_geometry(result)
         write_json(cache_path, result)
         return result
 

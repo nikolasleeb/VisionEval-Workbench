@@ -89,7 +89,7 @@
       const {x, y, radius} = entry.label;
       if (x < view.x || x > view.x + view.width || y < view.y || y > view.y + view.height) continue;
       const radiusPx = radius * scale;
-      if (radiusPx < minFontPx * 0.75) continue;
+      if (!entry.force && radiusPx < minFontPx * 0.75) continue;
       const fontPx = Math.max(minFontPx, Math.min(maxFontPx, radiusPx * 0.24));
       for (const lines of entry.candidates || []) {
         if (!lines?.length) continue;
@@ -107,8 +107,8 @@
         });
         group.append(clip, text);
         const measured = text.getBoundingClientRect(), box = padded(measured);
-        const fits = measured.width > 0 && measured.height > 0 && measured.width <= radiusPx * 1.85 && measured.height <= radiusPx * 1.85;
-        if (fits && !occupied.some((item) => overlaps(item, box))) {
+        const fits = entry.force || measured.width > 0 && measured.height > 0 && measured.width <= radiusPx * 1.85 && measured.height <= radiusPx * 1.85;
+        if (fits && (entry.force || !occupied.some((item) => overlaps(item, box)))) {
           occupied.push(box); accepted.push({entry, text, clip, box}); break;
         }
         text.remove(); clip.remove();

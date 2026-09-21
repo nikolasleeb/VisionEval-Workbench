@@ -1,6 +1,6 @@
 # Runtime image maintenance
 
-The preferred runtime API v1 image is built from official `VisionEval/VisionEval-4` tag `VE-40-RC7` at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad` with R 4.5.1. It carries no unofficial VisionEval source patch. Workbench 1.1.0 also accepts the pinned RC6 profile as a legacy rollback image.
+The preferred runtime API v1 image is built from official `VisionEval/VisionEval-4` tag `VE-40-RC7` at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad` with R 4.5.1. It carries no unofficial VisionEval source patch. Workbench 2.0.0 also accepts the pinned RC6 profile as a legacy rollback image.
 
 ## Updating VisionEval
 

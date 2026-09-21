@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -19,11 +20,13 @@ from .transit_inputs import FILE_GROUPS, validate_transit_inputs
 from .workspace import RUN_VERSION, Workspace, WorkspaceError, make_id, now_iso, read_json, write_json
 
 
-ARM64_LOCAL_IMAGE = "local/visioneval:1.0.0-arm64"
+ARM64_LOCAL_IMAGE = "local/visioneval:2.0.0-arm64"
 AMD64_LOCAL_IMAGE = "local/visioneval:2.0.0-amd64"
 RUNTIME_REPOSITORY = "ghcr.io/nikolasleeb/visioneval-workbench-runtime"
-PINNED_ARM64_RUNTIME_DIGEST = "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa"
+PINNED_ARM64_RUNTIME_DIGEST = "sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791"
 PINNED_ARM64_RUNTIME_REFERENCE = f"{RUNTIME_REPOSITORY}@{PINNED_ARM64_RUNTIME_DIGEST}"
+LEGACY_ARM64_RUNTIME_DIGEST = "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa"
+LEGACY_ARM64_RUNTIME_REFERENCE = f"{RUNTIME_REPOSITORY}@{LEGACY_ARM64_RUNTIME_DIGEST}"
 
 
 def docker_platform() -> str:
@@ -54,12 +57,27 @@ COMPATIBILITY_PATCH = "2026-08-03-composite-household-id-alignment"
 SUPPORTED_RUNTIME_API = 1
 RC7_RELEASE_TAG = "VE-40-RC7"
 RC7_RELEASE_COMMIT = "7852dc58fad460ff279f5eebf4dd55fe191470ad"
+PINNED_RUNTIME_PROFILE = {
+    "runtimeApi": 1,
+    "visionEvalVersion": RC7_RELEASE_TAG,
+    "visionEvalCommit": RC7_RELEASE_COMMIT,
+    "digest": PINNED_ARM64_RUNTIME_DIGEST,
+    "reference": PINNED_ARM64_RUNTIME_REFERENCE,
+    "platform": "macos",
+    "architecture": "arm64",
+    "capabilities": ["doctor", "verify-upstream-release", "verify-household-id-alignment", "run", "export"],
+    "verificationCommands": ["doctor", "verify-upstream-release", "verify-household-id-alignment"],
+    "compatibilityPatch": "none",
+    "minimumWorkbenchVersion": "2.0.0",
+    "downloadSizeBytes": 3042051717,
+    "storageSizeBytes": 4386387432,
+}
 LEGACY_RUNTIME_PROFILE = {
     "runtimeApi": 0,
     "visionEvalVersion": "VE-40-RC6",
     "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
-    "digest": PINNED_ARM64_RUNTIME_DIGEST,
-    "reference": PINNED_ARM64_RUNTIME_REFERENCE,
+    "digest": LEGACY_ARM64_RUNTIME_DIGEST,
+    "reference": LEGACY_ARM64_RUNTIME_REFERENCE,
     "platform": "macos",
     "architecture": "arm64",
     "capabilities": ["doctor", "verify-upstream-release", "verify-alignment-patch", "run", "export"],
@@ -284,9 +302,11 @@ class RuntimeManager:
         self.workers: dict[str, threading.Thread] = {}
         self.cancelled: set[str] = set()
         self.stop_all_in_progress = False
+        self.stopping_projects: set[str] = set()
         self.queue_state_path = self.workspace.runs / "queue.json"
         self.runtime_profile_path = self.workspace.exchange / "system" / "runtime-profile.json"
-        self.active_runtime_profile = dict(LEGACY_RUNTIME_PROFILE)
+        self.workspace_id = str(read_json(self.workspace.marker_path, {}).get("id") or "")
+        self.active_runtime_profile = dict(PINNED_RUNTIME_PROFILE)
         self.previous_runtime_profile: dict[str, Any] | None = None
         self._load_runtime_profiles()
         self._prefer_installed_image()
@@ -320,7 +340,7 @@ class RuntimeManager:
             try:
                 self.active_runtime_profile = self._validate_runtime_profile(active, allow_legacy=True)
             except WorkspaceError:
-                self.active_runtime_profile = dict(LEGACY_RUNTIME_PROFILE)
+                self.active_runtime_profile = dict(PINNED_RUNTIME_PROFILE)
         if isinstance(previous, dict):
             try:
                 self.previous_runtime_profile = self._validate_runtime_profile(previous, allow_legacy=True)
@@ -330,9 +350,8 @@ class RuntimeManager:
             self.image = str(self.active_runtime_profile["reference"])
             self.expected_digest = str(self.active_runtime_profile["digest"])
         elif not os.environ.get("VISIONEVAL_EXPECTED_DIGEST"):
-            # Workbench 1.0 stored the verified RC6 image under a readable local
-            # alias. Keep that existing installation usable until 1.1 records
-            # its first active immutable profile.
+            # A fresh Version 2 workspace starts from the approved RC7 digest.
+            # Existing workspaces retain any valid saved legacy profile above.
             self.expected_digest = str(self.active_runtime_profile["digest"])
 
     def _save_runtime_profiles(self) -> None:
@@ -352,7 +371,7 @@ class RuntimeManager:
         version = str(value.get("visionEvalVersion") or "")
         commit = str(value.get("visionEvalCommit") or "")
         capabilities = list(map(str, value.get("capabilities") or []))
-        if runtime_api == 0 and allow_legacy and digest == PINNED_ARM64_RUNTIME_DIGEST:
+        if runtime_api == 0 and allow_legacy and digest == LEGACY_ARM64_RUNTIME_DIGEST:
             return {**LEGACY_RUNTIME_PROFILE, **value}
         if runtime_api != SUPPORTED_RUNTIME_API:
             raise WorkspaceError(f"Runtime API {runtime_api} is not supported by this Workbench release.")
@@ -669,13 +688,15 @@ class RuntimeManager:
         unfinished = self._unfinished_jobs_locked() if unfinished is None else unfinished
         if not unfinished:
             return None
-        state = self._queue_state() if state is None else state
-        persisted = state.get("modeLock")
-        if persisted in {"queued", "parallel"}:
-            return persisted
-        # Older workspaces may contain batches from both modes. The oldest
-        # unfinished job establishes the lock without cancelling any live work.
-        return "queued" if self.adapter == "native" else self._job_mode(unfinished[0])
+        active_batch = self._active_batch_id_locked(unfinished)
+        owner = next(
+            (
+                job for job in unfinished
+                if str(job.get("batchId") or job.get("id") or "") == active_batch
+            ),
+            unfinished[0],
+        )
+        return "queued" if self.adapter == "native" else self._job_mode(owner)
 
     def _write_queue_state_locked(self, revision: int, mode_lock: str | None) -> None:
         try:
@@ -727,6 +748,7 @@ class RuntimeManager:
                 "jobs": jobs,
                 "maxActive": self._effective_max_active_locked(mode_lock),
                 "modeLock": mode_lock,
+                "activeBatchId": self._active_batch_id_locked(),
             }
 
     @property
@@ -742,8 +764,27 @@ class RuntimeManager:
         return read_json(self.workspace.runs / f"{batch_id}.json", {})
 
     def _eligible_locked(self, job: dict[str, Any]) -> bool:
+        active_batch = self._active_batch_id_locked()
+        job_batch = str(job.get("batchId") or job.get("id") or "")
+        if active_batch and job_batch != active_batch:
+            return False
         mode_lock = self._mode_lock_locked()
         return mode_lock != "queued" or not any(worker_id != job.get("id") for worker_id in self.workers)
+
+    def _active_batch_id_locked(self, unfinished: list[dict[str, Any]] | None = None) -> str | None:
+        """Return the only submitted batch currently entitled to runtime slots."""
+        unfinished = self._unfinished_jobs_locked() if unfinished is None else unfinished
+        active = sorted(
+            (job for job in unfinished if job.get("state") in ACTIVE_STATES),
+            key=lambda item: (item.get("startedAt") or item.get("createdAt", ""), item.get("id", "")),
+        )
+        if active:
+            return str(active[0].get("batchId") or active[0].get("id") or "")
+        waiting = sorted(
+            (job for job in unfinished if job.get("state") == "waiting"),
+            key=lambda item: (item.get("queuePosition", 10**12), item.get("createdAt", ""), item.get("id", "")),
+        )
+        return str(waiting[0].get("batchId") or waiting[0].get("id") or "") if waiting else None
 
     def _next_waiting_job_locked(self, waiting: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Return an eligible job that has not already reserved a runtime slot.
@@ -792,10 +833,15 @@ class RuntimeManager:
             if result.returncode:
                 return False
             labels = json.loads(result.stdout or "{}") or {}
-            return labels.get("com.visioneval.workbench") == "true" and (
+            identity_matches = labels.get("com.visioneval.workbench") == "true" and (
                 labels.get("com.visioneval.job") == job.get("id") or
                 (not labels.get("com.visioneval.job") and name == f"ve-{job.get('id')}")
             )
+            expected_workspace = str(job.get("workspaceId") or self.workspace_id or "")
+            expected_attempt = str(job.get("executionAttempt") or "")
+            workspace_matches = not expected_workspace or not labels.get("com.visioneval.workspace") or labels.get("com.visioneval.workspace") == expected_workspace
+            attempt_matches = not expected_attempt or labels.get("com.visioneval.attempt") == expected_attempt
+            return identity_matches and workspace_matches and attempt_matches
         except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError):
             return False
 
@@ -865,12 +911,12 @@ class RuntimeManager:
             )
         if exit_code == 137:
             return RunFailure(
-                "This run was forcibly stopped. Memory pressure is the most common cause of exit code 137; check Resources and the run log before retrying.",
-                kind="memory_suspected",
+                "This run was forcibly stopped, but Docker did not report an out-of-memory event. Check whether Workbench, Docker, or the computer stopped the container before retrying.",
+                kind="interrupted",
                 exit_code=exit_code,
                 oom_killed=oom_killed,
                 technical_detail=technical,
-                recommended_action="Open Settings → Resources, check Docker Desktop’s allocation and Workbench’s per-run limit, then retry.",
+                recommended_action="Review the run log and Docker status, then retry. Reduce concurrency only if memory pressure is independently confirmed.",
             )
         if exit_code in {125, 126, 127}:
             return RunFailure(
@@ -1098,7 +1144,7 @@ class RuntimeManager:
         with self.lock:
             if self._unfinished_jobs_locked():
                 raise WorkspaceError("Finish or stop all active and waiting runs before changing the runtime.")
-        target = self._validate_runtime_profile(profile, allow_legacy=True) if profile else dict(LEGACY_RUNTIME_PROFILE)
+        target = self._validate_runtime_profile(profile, allow_legacy=True) if profile else dict(PINNED_RUNTIME_PROFILE)
         target_reference = str(target["reference"])
         pull = self.runner(
             [executable, "pull", "--platform", "linux/arm64", target_reference],
@@ -1483,17 +1529,17 @@ class RuntimeManager:
         with self.condition:
             if self.stop_all_in_progress:
                 raise WorkspaceError("Wait for Stop All to finish before starting new runs")
+            if project_id in self.stopping_projects:
+                raise WorkspaceError("Wait for this project's runs to finish stopping before starting new work")
             waiting = self._normalize_queue_locked()
             queue_state = self._queue_state()
-            mode_lock = self._mode_lock_locked(queue_state)
-            if mode_lock and mode != mode_lock:
-                raise WorkspaceError(
-                    f"This workspace is currently running in {mode_lock} mode. "
-                    "Finish or remove every active and waiting run before changing execution mode."
-                )
-            mode_lock = mode_lock or mode
             next_position = len(waiting) + 1
             revision = int(queue_state.get("revision", 0)) + 1
+            result_retention_mode = (
+                "datastore_only"
+                if project.get("projectType") == "hypercube"
+                else "datastore_and_csv" if self.workspace.settings().get("retainFullExports", True) else "datastore_only"
+            )
             for index, (variation_id, variation_name, baseline) in enumerate(selected):
                 job_id = make_id("run", variation_name)
                 directory = self.workspace.runs / job_id
@@ -1515,8 +1561,10 @@ class RuntimeManager:
                     "image": self.image,
                     "imageDigest": image_digest,
                     "inputStateFingerprint": self.workspace.scenario_input_fingerprint(project, variation_id),
+                    "resultRetentionMode": result_retention_mode,
                     "containerId": "",
                     "containerName": f"ve-{job_id}",
+                    "executionAttempt": "",
                     "state": "waiting",
                     "message": "Waiting to run",
                     "createdAt": now_iso(),
@@ -1541,7 +1589,7 @@ class RuntimeManager:
         project["runIds"].extend(job["id"] for job in jobs)
         self.workspace.save_project(project)
         with self.condition:
-            self._write_queue_state_locked(revision, mode_lock)
+            self._write_queue_state_locked(revision, self._mode_lock_locked())
             self._normalize_queue_locked()
             self.condition.notify_all()
         return {**batch, "jobs": jobs, "reusedResults": reused_results, "validation": validation}
@@ -1577,24 +1625,6 @@ class RuntimeManager:
 
     def _finalize_success(self, job_id: str, executable: str) -> None:
         job = self.job(job_id); model_path = Path(job["modelPath"])
-        self._save_job(job, state="exporting", message="Exporting results")
-        environment = None
-        if self.adapter == "native":
-            export, environment = self._native_command("export", str(model_path))
-        else:
-            export = [executable, "run", "--rm", "--platform", self.container_platform, *self._container_resource_args(), *self._workspace_mount_args(), self.image, "export", job_id]
-        with open(job["logPath"], "a", encoding="utf-8") as log:
-            export_result = subprocess.run(export, stdout=log, stderr=subprocess.STDOUT, text=True, env=environment)
-        if export_result.returncode:
-            raise RunFailure(
-                "VisionEval finished, but Workbench could not export its results. Review the run log, then retry.",
-                kind="export",
-                exit_code=export_result.returncode,
-                technical_detail=f"Result export exited with code {export_result.returncode}",
-                recommended_action="Review the export section of the run log and export diagnostics before retrying.",
-            )
-        if job_id in self.cancelled:
-            self._cleanup_cancelled_job(job_id); return
         datastore = model_path / "results" / "Datastore"
         if not (datastore / "DatastoreListing.Rda").is_file():
             raise RunFailure(
@@ -1603,6 +1633,28 @@ class RuntimeManager:
                 technical_detail="Run finished but DatastoreListing.Rda was not created",
                 recommended_action="Review the end of the run log and export diagnostics before retrying.",
             )
+        retention_mode = str(job.get("resultRetentionMode") or "datastore_and_csv")
+        if retention_mode == "datastore_and_csv":
+            self._save_job(job, state="exporting", message="Exporting full CSV results")
+            environment = None
+            if self.adapter == "native":
+                export, environment = self._native_command("export", str(model_path))
+            else:
+                export = [executable, "run", "--rm", "--platform", self.container_platform, *self._container_resource_args(), *self._workspace_mount_args(), self.image, "export", job_id]
+            with open(job["logPath"], "a", encoding="utf-8") as log:
+                export_result = subprocess.run(export, stdout=log, stderr=subprocess.STDOUT, text=True, env=environment)
+            if export_result.returncode:
+                raise RunFailure(
+                    "VisionEval finished, but Workbench could not export its results. Review the run log, then retry.",
+                    kind="export",
+                    exit_code=export_result.returncode,
+                    technical_detail=f"Result export exited with code {export_result.returncode}",
+                    recommended_action="Review the export section of the run log and export diagnostics before retrying.",
+                )
+        else:
+            self._append_log(job, "Workbench retained the authoritative Datastore and skipped the optional full CSV export.\n")
+        if job_id in self.cancelled:
+            self._cleanup_cancelled_job(job_id); return
         record = self.workspace.register_datastore({
             "label": f"{job['projectName']} — {job['variationName']}", "path": str(datastore),
             "role": "baseline" if job["baseline"] else "scenario", "projectId": job["projectId"],
@@ -1618,18 +1670,65 @@ class RuntimeManager:
             "resultVersion": 1,
         })
         job = self.job(job_id)
-        self._save_job(job, state="succeeded", message="Run completed", exitCode=0, finishedAt=now_iso(), resultPath=str(datastore), verification="verified", datastoreId=record["id"])
+        self._save_job(job, state="succeeded", message="Run completed", exitCode=0, finishedAt=now_iso(), resultPath=str(datastore), verification="verified", datastoreId=record["id"], resultRetentionMode=retention_mode)
+
+    def export_model_results(
+        self,
+        model_path: str | Path,
+        log_path: str | Path,
+        cancelled: Callable[[], bool] | None = None,
+    ) -> None:
+        """Generate disposable CSV outputs for a prepared model copy."""
+        model = self.workspace.within(Path(model_path), self.workspace.models)
+        log = Path(log_path)
+        environment = None
+        if self.adapter == "native":
+            command, environment = self._native_command("export", str(model))
+        else:
+            executable = find_docker_executable()
+            if not executable:
+                raise WorkspaceError("Docker is not available for CSV export")
+            command = [
+                executable, "run", "--rm", "--platform", self.container_platform,
+                *self._container_resource_args(), *self._workspace_mount_args(), self.image,
+                "export", model.name,
+            ]
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as handle:
+            process = subprocess.Popen(command, stdout=handle, stderr=subprocess.STDOUT, text=True, env=environment)
+            while process.poll() is None:
+                if cancelled and cancelled():
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                    raise WorkspaceError("Hypercube case export cancelled")
+                time.sleep(.25)
+        if process.returncode:
+            raise WorkspaceError(f"VisionEval CSV export exited with code {process.returncode}")
 
     def _run_job(self, job_id: str) -> None:
-        job = self.job(job_id)
-        if job_id in self.cancelled:
-            self._cleanup_cancelled_job(job_id)
-            return
+        with self.lock:
+            job = self.job(job_id)
+            if job.get("state") != "waiting":
+                return
+            if job_id in self.cancelled:
+                self._cleanup_cancelled_job(job_id)
+                return
+            attempt_id = make_id("attempt")
+            job.update(
+                state="preparing",
+                message="Preparing runnable model",
+                startedAt=now_iso(),
+                executionAttempt=attempt_id,
+                workspaceId=self.workspace_id,
+            )
+            write_json(self.workspace.runs / job_id / "job.json", job)
         exit_code: int | None = None
         container_state: dict[str, Any] = {}
         executable = ""
         try:
-            self._save_job(job, state="preparing", message="Preparing runnable model", startedAt=now_iso())
             model_path, provenance = self.workspace.prepare_model(job["projectId"], job["variationId"], job_id, job["baseline"])
             if job_id in self.cancelled:
                 self._cleanup_cancelled_job(job_id)
@@ -1662,7 +1761,11 @@ class RuntimeManager:
                     )
                 command = [
                     executable, "run", "--platform", self.container_platform, *self._container_resource_args(), "--name", job["containerName"],
-                    "--label", "com.visioneval.workbench=true", "--label", f"com.visioneval.job={job_id}", *self._workspace_mount_args(), self.image, "run", job_id,
+                    "--label", "com.visioneval.workbench=true",
+                    "--label", f"com.visioneval.workspace={self.workspace_id}",
+                    "--label", f"com.visioneval.job={job_id}",
+                    "--label", f"com.visioneval.attempt={attempt_id}",
+                    *self._workspace_mount_args(), self.image, "run", job_id,
                 ]
             self._save_job(job, state="running", message="VisionEval is running")
             mirror_stop = threading.Event()
@@ -1817,6 +1920,52 @@ class RuntimeManager:
                 "datastoreId": job.get("datastoreId", ""),
             }
 
+    def history_clear_impact(self, older_than_days: int | None = None) -> dict[str, Any]:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(0, int(older_than_days))) if older_than_days is not None else None
+        jobs: list[dict[str, Any]] = []
+        log_count = removable_bytes = 0
+        for job in self.list_jobs(include_archived=True):
+            if job.get("state") not in TERMINAL_STATES or job.get("id") in self.workers or job.get("id") in self.processes:
+                continue
+            if cutoff:
+                timestamp = str(job.get("finishedAt") or job.get("createdAt") or "").replace("Z", "+00:00")
+                try:
+                    if datetime.fromisoformat(timestamp) >= cutoff:
+                        continue
+                except ValueError:
+                    continue
+            run_dir = self.workspace.within(self.workspace.runs / str(job["id"]), self.workspace.runs)
+            for item in (run_dir / "job.json", run_dir / "run.log"):
+                try:
+                    if item.is_file():
+                        removable_bytes += item.stat().st_size
+                        log_count += int(item.name == "run.log")
+                except OSError:
+                    pass
+            jobs.append(job)
+        unfinished = [job for job in self.list_jobs(include_archived=True) if job.get("state") not in TERMINAL_STATES]
+        return {
+            "terminalJobs": len(jobs), "logs": log_count, "removableBytes": removable_bytes,
+            "jobIds": [str(job["id"]) for job in jobs], "blocked": bool(unfinished),
+            "unfinishedJobs": len(unfinished),
+        }
+
+    def clear_history(self, older_than_days: int | None = None, *, require_idle: bool = False) -> dict[str, Any]:
+        with self.condition:
+            impact = self.history_clear_impact(older_than_days)
+            if require_idle and impact["blocked"]:
+                raise WorkspaceError("Clear history will be available after all running and queued jobs finish")
+            removed = []
+            for job_id in impact["jobIds"]:
+                try:
+                    removed.append(self.remove_history(job_id))
+                except WorkspaceError:
+                    # Age-based maintenance remains safe if job state changes.
+                    if require_idle:
+                        raise
+                    continue
+        return {**impact, "removedJobs": len(removed), "resultsPreserved": True}
+
     def retry_cleanup(self, job_id: str) -> dict[str, Any]:
         job = self.job(job_id)
         if job.get("state") != "cleanup_failed":
@@ -1896,9 +2045,69 @@ class RuntimeManager:
                 self.condition.notify_all()
         return {"stopped": stopped, "removed": removed, "failures": failures}
 
+    def stop_project(self, project_id: str) -> dict[str, Any]:
+        """Stop only active and waiting work owned by one Hypercube project."""
+        with self.workspace.activity_lock:
+            return self._stop_project_locked(project_id)
+
+    def _stop_project_locked(self, project_id: str) -> dict[str, Any]:
+        _, project = self.workspace.project(project_id)
+        if project.get("projectType") != "hypercube":
+            raise WorkspaceError("Scoped Hypercube stopping requires a Hypercube project")
+        failures: list[dict[str, str]] = []
+        removed = 0
+        with self.condition:
+            if self.stop_all_in_progress or project_id in self.stopping_projects:
+                raise WorkspaceError("Stopping runs is already in progress")
+            self.stopping_projects.add(project_id)
+            jobs = [
+                job for job in self.list_jobs(include_archived=True)
+                if job.get("projectId") == project_id
+            ]
+            waiting = [job for job in jobs if job.get("state") == "waiting"]
+            active = [job for job in jobs if job.get("state") in ACTIVE_STATES]
+            for job in waiting:
+                job_id = str(job.get("id", ""))
+                try:
+                    self.cancelled.add(job_id)
+                    if job_id in self.workers:
+                        self._save_job(job, state="stopping", message="Removing queued Hypercube run", verification="cancelled")
+                    else:
+                        self._cleanup_cancelled_job(job_id)
+                    removed += 1
+                except Exception as exc:
+                    failures.append({"jobId": job_id, "action": "remove", "error": str(exc)})
+            self._normalize_queue_locked(increment=True)
+            self.condition.notify_all()
+
+        stopped = 0
+        result_lock = threading.Lock()
+
+        def stop(job: dict[str, Any]) -> None:
+            nonlocal stopped
+            try:
+                self.cancel(str(job["id"]))
+                with result_lock:
+                    stopped += 1
+            except Exception as exc:
+                with result_lock:
+                    failures.append({"jobId": str(job.get("id", "")), "action": "stop", "error": str(exc)})
+
+        threads = [threading.Thread(target=stop, args=(job,), daemon=True) for job in active]
+        try:
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+        finally:
+            with self.condition:
+                self.stopping_projects.discard(project_id)
+                self.condition.notify_all()
+        return {"projectId": project_id, "stopped": stopped, "removed": removed, "failures": failures}
+
     def shutdown(self, cancel_active: bool = False, timeout: float = 30.0) -> dict[str, Any]:
         """Gracefully stop only active Workbench jobs before the sidecar exits."""
-        active = [job for job in self.list_jobs(include_archived=True) if job.get("state") in ACTIVE_STATES]
+        active = [job for job in self.list_jobs(include_archived=True) if job.get("state") in ACTIVE_STATES | {"waiting"}]
         if active and not cancel_active:
             return {"ok": False, "requiresConfirmation": True, "jobs": [{"id": job["id"], "name": job.get("variationName", job["id"]), "state": job["state"]} for job in active]}
         failures = []

@@ -1819,14 +1819,12 @@ class Workspace:
         return copied_project
 
     @staticmethod
-    def _unique_variation_name(existing: set[str], requested: str) -> str:
-        if requested.lower() not in existing:
-            existing.add(requested.lower())
-            return requested
-        base = f"{requested} Copy"
-        candidate, number = base, 2
+    def _unique_variation_name(preferred: str, existing: set[str]) -> str:
+        base = str(preferred).strip() or "Scenario"
+        candidate = base
+        number = 1
         while candidate.lower() in existing:
-            candidate = f"{base} {number}"
+            candidate = f"{base} (copy)" if number == 1 else f"{base} (copy {number})"
             number += 1
         existing.add(candidate.lower())
         return candidate
@@ -1932,7 +1930,9 @@ class Workspace:
                 copied_variation = copy.deepcopy(source_variation)
                 copied_variation.update({
                     "id": copied_id,
-                    "name": self._unique_variation_name(existing_names, str(source_variation.get("name", "Scenario"))),
+                    "name": self._unique_variation_name(
+                        str(source_variation.get("name", "Scenario")), existing_names,
+                    ),
                     "overlays": [],
                     "copiedFrom": {"projectId": source["id"], "variationId": source_id, "copiedAt": copied_at},
                 })
@@ -3049,6 +3049,7 @@ class Workspace:
         for record in catalog.get("datastores", []):
             project = project_by_id.get(str(record.get("projectId", "")))
             if project:
+                record["projectType"] = self.project_type(project)
                 project_name = str(project.get("name") or record.get("projectName") or "Project")
                 role = str(record.get("role", ""))
                 variation_id = str(record.get("variationId", ""))
@@ -3070,6 +3071,7 @@ class Workspace:
                     or template_names.get(str(record.get("templateId", "")), "")
                 )
             else:
+                record["projectType"] = "imported"
                 record["displayProjectName"] = str(record.get("projectName") or "Previously registered")
                 record["displayVariationName"] = str(record.get("variationName") or record.get("role") or "Result")
                 record["displayLabel"] = str(record.get("label") or record["displayVariationName"])
