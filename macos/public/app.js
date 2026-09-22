@@ -11,6 +11,8 @@ window.visualViewport?.addEventListener('resize', syncWorkbenchViewport);
 window.visualViewport?.addEventListener('scroll', syncWorkbenchViewport);
 window.addEventListener('resize', syncWorkbenchViewport);
 
+const WORKBENCH_WEBSITE_URL = "https://sites.google.com/view/ve-workbench/home";
+
 const state = {
   data: null,
   updateNotificationKey: "",
@@ -31,6 +33,7 @@ const state = {
   editorPendingOperations: [],
   editorSavedOperations: [],
   editorManualEdit: false,
+  editorValidationErrors: [],
   batchFiles: {},
   batchBaselineFiles: {},
   batchSelectedFiles: new Set(),
@@ -2609,8 +2612,9 @@ function meaningfulEditOperations(operations, source = "") {
 function combinedOperationFields(operations) {
   const rawOperations = operations.map((item) => String(item.operation || ""));
   const operationValues = [...new Set(rawOperations.filter(Boolean))];
-  const rawAmounts = operations.map((item) => item.value === undefined || item.value === null || item.value === "" ? "" : String(item.value));
-  const amounts = [...new Set(rawAmounts.filter(Boolean))];
+  const valuesPresent = operations.every((item) => item.value !== undefined && item.value !== null);
+  const rawAmounts = operations.map((item) => item.value === undefined || item.value === null ? "" : String(item.value));
+  const amounts = [...new Set(rawAmounts)];
   const years = [...new Set(operations.map((item) => String(item.year || "")).filter(Boolean))];
   const scopeUnavailable = !operations.every((item) => item.allLocations === true || (item.allLocations === false && Boolean(item.geographyType)));
   const scopes = scopeUnavailable ? [] : operations.map((item) => ({type:item.allLocations ? "all" : String(item.geographyType || ""),label:String(item.geographyLabel || (item.allLocations ? "All locations" : item.geographyType || "Selected locations")),all:Boolean(item.allLocations),locations:[...new Set((item.locations || []).map(String))]}));
@@ -2619,8 +2623,8 @@ function combinedOperationFields(operations) {
   const mixedScopes = scopeKinds.size > 1 ? uniqueScopes : [];
   return {
     operation:rawOperations.every(Boolean) && operationValues.length === 1 ? operationValues[0] : rawOperations.every(Boolean) && operationValues.length > 1 ? MIXED_EDITOR_VALUE : "",
-    value:rawAmounts.every(Boolean) && amounts.length === 1 ? amounts[0] : "",
-    mixedValue:rawAmounts.every(Boolean) && amounts.length > 1,
+    value:valuesPresent && amounts.length === 1 ? amounts[0] : "",
+    mixedValue:valuesPresent && amounts.length > 1,
     year:years.length === 1 ? years[0] : years.includes("2045") ? "2045" : years[0] || "2045",
     geographyType:scopeUnavailable ? "" : mixedScopes.length ? MIXED_EDITOR_VALUE : scopes[0]?.type || "",
     locations:scopeUnavailable || mixedScopes.length || scopes[0]?.all ? [] : [...new Set(scopes.flatMap((scope) => scope.locations))],
@@ -2679,27 +2683,28 @@ function setSelectDraftValue(select, value, mixedLabel) {
   } else if ([...select.options].some((option) => option.value === value)) select.value = value;
 }
 function fileDraftFromControls() {
-  return {columns:selectedEditorColumns(),geographyType:$('editorLocationField').value,locations:[...state.editorSelectedLocations],year:$('editorYear').value,operation:$('editorOperation').value,value:$('editorValue').value,mixedValue:$('editorValue').placeholder === "Mixed",mixedScopes:structuredClone(state.editorMixedScopes),scopeUnavailable:state.editorScopeUnavailable,locationSearch:$('editorLocationSearch').value};
+  return {columns:selectedEditorColumns(),geographyType:$('editorLocationField').value,locations:[...state.editorSelectedLocations],year:$('editorYear').value,operation:$('editorOperation').value,value:editorControlValue(),valueType:selectedEditorKind(),mixedValue:$('editorValue').placeholder === "Mixed",mixedScopes:structuredClone(state.editorMixedScopes),scopeUnavailable:state.editorScopeUnavailable,locationSearch:$('editorLocationSearch').value};
 }
 function persistFileDraft() {
   if (!state.editorFileName || !state.csv) return;
   storeEditorDraft("file", fileDraftFromControls(), state.editorFileName);
 }
 function batchDraftFromControls() {
-  return {files:[...state.batchSelectedFiles],columns:Object.fromEntries([...state.batchSelectedColumns].map(([filename,columns]) => [filename,[...columns]])),geographyType:$('batchLocationType').value,locations:[...state.batchSelectedLocations],year:$('batchYear').value,operation:$('batchOperation').value,value:$('batchValue').value,mixedValue:$('batchValue').placeholder === "Mixed",mixedScopes:structuredClone(state.batchMixedScopes),scopeUnavailable:state.batchDraftScopeUnavailable,locationSearch:$('batchLocationSearch').value,fromBaseline:$("batchFromBaseline").checked};
+  return {files:[...state.batchSelectedFiles],columns:Object.fromEntries([...state.batchSelectedColumns].map(([filename,columns]) => [filename,[...columns]])),geographyType:$('batchLocationType').value,locations:[...state.batchSelectedLocations],year:$('batchYear').value,operation:$('batchOperation').value,value:batchControlValue(),valueType:selectedBatchKind(),mixedValue:$('batchValue').placeholder === "Mixed",mixedScopes:structuredClone(state.batchMixedScopes),scopeUnavailable:state.batchDraftScopeUnavailable,locationSearch:$('batchLocationSearch').value,fromBaseline:$("batchFromBaseline").checked};
 }
 function persistBatchDraft() {
   if (!state.editorVariationId || state.editorMode !== "scenario") return;
   storeEditorDraft("batch", batchDraftFromControls());
 }
 
-const protectedColumn = (name) => { const value = String(name).toLowerCase(); return ["geo", "year", "county", "bzone", "azone", "marea", "zone", "taz", "id"].includes(value) || value.endsWith("id") || value.endsWith("_id") || value.endsWith("code"); };
-function roundedValue(value, column = "") {
+const protectedColumn = (name) => { const value = String(name).toLowerCase(),compact=value.replace(/[^a-z0-9]+/g,""); return ["geo", "year", "county", "bzone", "azone", "marea", "zone", "taz", "id"].includes(value) || value.endsWith("_id") || ["hhid","vehid","wkrid"].includes(compact) || compact.endsWith("code"); };
+function roundedValue(value, column = "", csv = state.csv) {
   const text = String(value ?? "");
   if (!text.trim() || protectedColumn(column)) return text;
   const numeric = Number(text);
   if (!Number.isFinite(numeric)) return text;
-  return new Intl.NumberFormat(undefined, {maximumFractionDigits:precisionFor("output"), useGrouping:false}).format(numeric);
+  const required = Number(columnDetails(csv,column)?.precision || 0);
+  return new Intl.NumberFormat(undefined, {maximumFractionDigits:Math.max(precisionFor("output"),required), useGrouping:false}).format(numeric);
 }
 function numericPrecisionSettings() {
   return state.data?.workspaceSettings?.numericPrecision || {default:2,singleFile:null,batch:null,output:null,percentage:null};
@@ -2709,14 +2714,16 @@ function precisionFor(context = "output") {
   return Number.isInteger(settings[context]) ? settings[context] : fallback;
 }
 function calculatedValue(next, context = "singleFile", csv = null, column = "") {
-  if (csv?.columnTypes?.[column] === "integer") return String(Math.round(next));
-  return String(Number(Number(next).toFixed(precisionFor(context))));
+  const details=columnDetails(csv,column);
+  if (details.integer || csv?.columnTypes?.[column] === "integer") return String(Math.round(next));
+  const precision=Math.max(precisionFor(context),Number(details.precision||0));
+  return Number(next).toFixed(Math.min(12,precision)).replace(/\.?0+$/,"");
 }
 function newOperationId(prefix = "operation") {
   return globalThis.crypto?.randomUUID?.() || `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 function operationRounding(csv, columns, context) {
-  return {precision:precisionFor(context),integerColumns:integerColumns(csv, columns)};
+  return {precision:Math.max(precisionFor(context),...columns.map((column)=>Number(columnDetails(csv,column).precision||0))),integerColumns:integerColumns(csv, columns)};
 }
 function rowsDifferAt(leftRows, rightRows, rowIndex, columnIndex) {
   return String(leftRows?.[rowIndex]?.[columnIndex] ?? "") !== String(rightRows?.[rowIndex]?.[columnIndex] ?? "");
@@ -2735,48 +2742,51 @@ function operationsWithBaselineOverride(operations, nextOperation) {
   return [...prior.filter((operation) => !sameOperationScope(operation,nextOperation)),nextOperation];
 }
 function integerColumns(csv, columns) { return columns.filter((column) => csv?.columnTypes?.[column] === "integer"); }
-function numericColumns(csv) { return csv.columns.filter((column, index) => !protectedColumn(column) && csv.rows.some((row) => row[index] !== "" && Number.isFinite(Number(row[index])))); }
+function numericColumns(csv) { return csv.columns.filter((column) => columnDetails(csv,column).kind === "numeric"); }
+function columnDetails(csv, column) {
+  const supplied = csv?.columnMetadata?.[column];
+  if (supplied) return supplied;
+  const index = csv?.columns?.indexOf(column) ?? -1, values = index < 0 ? [] : [...new Set(csv.rows.map((row) => String(row[index] ?? "")))], nonblank = values.filter((value) => value.trim());
+  const numeric = nonblank.length > 0 && nonblank.every((value) => Number.isFinite(Number(value)));
+  if (protectedColumn(column)) return {kind:"protected",bulkEditable:false,type:csv?.columnTypes?.[column]||""};
+  if (numeric) return {kind:"numeric",bulkEditable:true,type:csv?.columnTypes?.[column]||"number"};
+  if (nonblank.length >= 2 && nonblank.length <= 50) return {kind:"categorical",bulkEditable:true,type:csv?.columnTypes?.[column]||"character",options:values};
+  return {kind:"text",bulkEditable:false,type:csv?.columnTypes?.[column]||"character"};
+}
+function bulkEditableColumns(csv) { return (csv?.columns || []).filter((column) => columnDetails(csv,column).bulkEditable); }
+function columnKind(csv,column) { return columnDetails(csv,column).kind; }
+function categoryOptions(csv,column) { return (columnDetails(csv,column).options || []).map(String); }
+function columnGroup(csv,column){return columnDetails(csv,column).group||null;}
+function hypercubeAxisColumns(csv){return (csv?.columns||[]).filter((column)=>{const details=columnDetails(csv,column);return details.kind==="numeric"&&details.bulkEditable&&!details.group;});}
+function categoricalLabel(value) { return value === "" ? "Blank" : value; }
+function numericValueError(details,value){
+  const text=String(value??"").trim(),number=Number(text);
+  if(!text||text.toUpperCase()==="NA"||!Number.isFinite(number))return "Enter a finite numeric value.";
+  if(details.integer&&!Number.isInteger(number))return "Enter a whole number.";
+  if(details.minimum!==null&&details.minimum!==undefined&&number<Number(details.minimum))return `Minimum ${details.minimum}.`;
+  if(details.maximum!==null&&details.maximum!==undefined&&number>Number(details.maximum))return `Maximum ${details.maximum}.`;
+  return "";
+}
+function rowIdentity(csv,row,rowIndex){const parts=["Geo","Year","Level"].filter((name)=>csv.columns.includes(name)&&String(row[csv.columns.indexOf(name)]??"").trim()).map((name)=>`${name} ${row[csv.columns.indexOf(name)]}`);return parts.join(" · ")||`row ${rowIndex+2}`;}
+function clientValidationErrors(csv,rows,priorRows){
+  const errors=[];
+  rows.forEach((row,rowIndex)=>csv.columns.forEach((column,columnIndex)=>{
+    if(String(row[columnIndex]??"")===String(priorRows?.[rowIndex]?.[columnIndex]??""))return;
+    const details=columnDetails(csv,column),value=String(row[columnIndex]??"");let message="";
+    if(!details.directEditable)message=details.protectionReason||details.guidance||"This field is read-only.";
+    else if(details.kind==="categorical"&&!categoryOptions(csv,column).includes(value))message="Choose an existing category value.";
+    else if(details.kind==="numeric")message=numericValueError(details,value);
+    if(message)errors.push({rowIndex,columnIndex,column,row:rowIdentity(csv,row,rowIndex),value,message});
+  }));
+  (csv.validationGroups||[]).forEach((group)=>{const indexes=(group.members||[]).map((member)=>csv.columns.indexOf(member));if(indexes.some((index)=>index<0))return;rows.forEach((row,rowIndex)=>{if(!indexes.some((index)=>String(row[index]??"")!==String(priorRows?.[rowIndex]?.[index]??"")))return;const values=indexes.map((index)=>String(row[index]??"").trim()),blank=values.map((value)=>!value||value.toUpperCase()==="NA");if(group.optional&&blank.every(Boolean))return;let message="";if(blank.some(Boolean))message="Linked shares must all contain values, or an optional group must be entirely blank.";else{const total=values.reduce((sum,value)=>sum+Number(value),0),target=Number(group.target??1),tolerance=Number(group.tolerance??0.000001);if(group.rule==="sum_equals"&&Math.abs(total-target)>tolerance)message=`Linked shares total ${total.toFixed(6)}; total must equal ${target}.`;if(group.rule==="sum_at_most"&&total-target>tolerance)message=`Linked shares total ${total.toFixed(6)}; total must be at most ${target}.`;}if(message)indexes.forEach((columnIndex)=>errors.push({rowIndex,columnIndex,column:csv.columns[columnIndex],row:rowIdentity(csv,row,rowIndex),value:String(row[columnIndex]??""),message}));});});
+  return errors;
+}
 function locationColumns(csv) { const preferred = ["Geo", "County", "Bzone", "Azone", "Marea"]; const values = preferred.filter((name) => csv.columns.includes(name)); return values.length ? values : csv.columns.filter(protectedColumn).filter((name) => name !== "Year").slice(0, 4); }
 function selectedValues(select) { return [...select.selectedOptions].map((option) => option.value); }
 
-function renderEditorControls() {
-  if (!state.csv) return;
-  const locations = locationColumns(state.csv), priorField = $("editorLocationField").value;
-  $("editorLocationField").innerHTML = locations.map((name) => `<option>${escapeHtml(name)}</option>`).join("");
-  if (locations.includes(priorField)) $("editorLocationField").value = priorField;
-  $("editorColumns").innerHTML = numericColumns(state.csv).map((name) => `<option>${escapeHtml(name)}</option>`).join("");
-  const yearIndex = state.csv.columns.indexOf("Year");
-  const years = yearIndex >= 0 ? [...new Set(state.csv.rows.map((row) => row[yearIndex]).filter(Boolean))].sort() : [""];
-  $("editorYear").innerHTML = years.map((year) => `<option ${year === "2045" ? "selected" : ""}>${escapeHtml(year)}</option>`).join("");
-  renderEditorLocations(); updateEditorHistoryButtons();
-}
-function renderEditorLocations() {
-  if (!state.csv) return;
-  const fieldIndex = state.csv.columns.indexOf($("editorLocationField").value), selected = new Set(selectedValues($("editorLocations"))), query = $("editorLocationSearch").value.toLowerCase();
-  const values = fieldIndex >= 0 ? [...new Set(state.csv.rows.map((row) => row[fieldIndex]).filter(Boolean))].sort((a,b) => a.localeCompare(b, undefined, {numeric:true})).filter((value) => !query || value.toLowerCase().includes(query)) : [];
-  $("editorLocations").innerHTML = values.map((value) => `<option value="${escapeHtml(value)}" ${selected.has(value) ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
-}
-function rowMatchesEditor(row) { const values = selectedValues($("editorLocations")); if (!values.length) return true; const index = state.csv.columns.indexOf($("editorLocationField").value); return values.includes(row[index]); }
-
-function renderCsv() {
-  const csv = state.csv; if (!csv) return;
-  $("csvTableWrap").innerHTML = `<table><thead><tr>${csv.columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${csv.rows.map((row, rowIndex) => `<tr ${rowMatchesEditor(row) ? "" : "hidden"}>${csv.columns.map((column, columnIndex) => { const editable = !protectedColumn(column); const changed = editable && String(row[columnIndex] ?? "") !== String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? ""); return `<td contenteditable="${editable}" class="${editable ? "" : "readonly-cell"} ${changed ? "changed-cell" : ""}" data-row="${rowIndex}" data-column="${columnIndex}">${escapeHtml(row[columnIndex] ?? "")}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
-  $("csvTableWrap").querySelectorAll('td[contenteditable="true"]').forEach((cell) => cell.addEventListener("input", () => { state.csv.rows[Number(cell.dataset.row)][Number(cell.dataset.column)] = cell.textContent; cell.classList.add("changed-cell"); }));
-}
 function editorSnapshot() { return state.csv.rows.map((row) => [...row]); }
 function updateEditorHistoryButtons() { $("undoEditorChange").disabled = !state.editorUndo.length; $("redoEditorChange").disabled = !state.editorRedo.length; }
 function calculateValue(current, operation, value) { if (operation === "set") return value; if (operation === "add") return current + value; if (operation === "subtract") return current - value; if (operation === "multiply") return current * value; if (operation === "percent") return current * (1 + value / 100); return current * (1 - value / 100); }
-function applyEditorChange() {
-  const columns = selectedValues($("editorColumns")), value = Number($("editorValue").value); if (!columns.length || !Number.isFinite(value)) return notify("Choose one or more columns and enter a numeric value.", "error");
-  if ($("editorLocationField").value !== "all" && !state.editorSelectedLocations.size) return notify("Choose at least one location or use Select all locations.", "error");
-  state.editorUndo.push(editorSnapshot()); state.editorRedo = [];
-  const yearIndex = state.csv.columns.indexOf("Year"), targetYear = $("editorYear").value, operation = $("editorOperation").value; let changed = 0;
-  state.csv.rows.forEach((row) => { if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return; columns.forEach((column) => { const index = state.csv.columns.indexOf(column), current = Number(row[index]); if (!Number.isFinite(current)) return; let next = calculateValue(current, operation, value); if (column.toLowerCase().includes("prop")) next = Math.min(1, next); row[index] = calculatedValue(next, "singleFile", state.csv, column); changed++; }); });
-  const rounded = integerColumns(state.csv, columns);
-  renderCsv(); updateEditorHistoryButtons(); notify(`Preview changed ${changed} values.${rounded.length ? ` Whole-number count fields were rounded: ${rounded.join(", ")}.` : ""} Save the overlay when ready.`, "success");
-}
-function undoEditor() { const rows = state.editorUndo.pop(); if (!rows) return; state.editorRedo.push(editorSnapshot()); state.csv.rows = rows; renderCsv(); updateEditorHistoryButtons(); }
-function redoEditor() { const rows = state.editorRedo.pop(); if (!rows) return; state.editorUndo.push(editorSnapshot()); state.csv.rows = rows; renderCsv(); updateEditorHistoryButtons(); }
 
 // Create workflow V2. Existing manifest field names remain internal for compatibility.
 function editorRowsEqual(left, right) { return JSON.stringify(left || []) === JSON.stringify(right || []); }
@@ -2784,10 +2794,13 @@ function setEditorDirty(dirty = true) {
   state.editorDirty = Boolean(dirty);
   $("editorDirtyState").textContent = state.editorDirty ? "Unsaved changes" : "Saved";
   $("editorDirtyState").classList.toggle("dirty", state.editorDirty);
-  $("saveOverlay").disabled = !state.csv || !state.editorDirty;
+  $("saveOverlay").disabled = !state.csv || !state.editorDirty || state.editorValidationErrors.length>0;
   syncMenuContext();
 }
 function recomputeEditorDirty() {
+  state.editorValidationErrors=state.csv?clientValidationErrors(state.csv,state.csv.rows,state.editorOriginalRows):[];
+  const status=$("editorValidationStatus");
+  if(status){status.hidden=!state.editorValidationErrors.length;status.textContent=state.editorValidationErrors.length?`${state.editorValidationErrors[0].column} · ${state.editorValidationErrors[0].row}: ${state.editorValidationErrors[0].message} Correct or revert the highlighted value before saving.`:"";}
   setEditorDirty(Boolean(state.csv) && !editorRowsEqual(state.csv.rows, state.editorOriginalRows));
 }
 function noteStatusElement(kind) { return $(kind === "scenario" ? "scenarioNoteStatus" : "fileNoteStatus"); }
@@ -3180,7 +3193,7 @@ async function loadHypercubeAxisFile(axis, filename) {
     const current = state.hypercubeAxes.find((item) => item.id === axis.id);
     if (!current || current.filename !== filename) return;
     if(record?.status!=="ready")return;
-    current.column = numericColumns(record.csv)[0] || "";
+    current.column = hypercubeAxisColumns(record.csv)[0] || "";
     setHypercubeDirty();invalidateHypercubePreview();
     renderHypercubeAxes(); renderHypercubeSharedFilters();
   } catch (error) { notify(error.message, "error"); }
@@ -3194,10 +3207,10 @@ function renderHypercubeAxes() {
   const files = (hypercubeLibrary()?.files || []).filter((item) => item.toLowerCase().endsWith(".csv"));
   $("hypercubeAxes").classList.toggle("empty-state", !state.hypercubeAxes.length);
   $("hypercubeAxes").innerHTML = state.hypercubeAxes.length ? state.hypercubeAxes.map((axis) => {
-    const load=hypercubeFileState(axis),record = hypercubeFileRecord(axis), columns = record ? numericColumns(record.csv) : [],loading=load?.status==="loading",failed=load?.status==="error";
+    const load=hypercubeFileState(axis),record = hypercubeFileRecord(axis), columns = record ? hypercubeAxisColumns(record.csv) : [],loading=load?.status==="loading",failed=load?.status==="error";
     return `<article class="hypercube-axis-row" data-hypercube-axis="${escapeHtml(axis.id)}">
       <label>Input file<select data-hypercube-axis-field="filename"><option value="">Choose file</option>${files.map((name)=>`<option value="${escapeHtml(name)}" ${axis.filename===name?"selected":""}>${escapeHtml(name)}</option>`).join("")}</select></label>
-      <label>Numeric column<select data-hypercube-axis-field="column" ${record?"":"disabled"}><option value="">${loading?"Loading file…":failed?"File could not load":record?"Choose column":"Choose file first"}</option>${columns.map((name)=>`<option value="${escapeHtml(name)}" ${axis.column===name?"selected":""}>${escapeHtml(name)}</option>`).join("")}</select>${failed?`<small class="field-error">${escapeHtml(load.error)}</small><button type="button" class="text-button" data-retry-hypercube-file="${escapeHtml(axis.filename)}">Retry loading file</button>`:""}</label>
+      <label>Numeric column<select data-hypercube-axis-field="column" ${record?"":"disabled"}><option value="">${loading?"Loading file…":failed?"File could not load":record?"Choose column":"Choose file first"}</option>${columns.map((name)=>`<option value="${escapeHtml(name)}" ${axis.column===name?"selected":""}>${escapeHtml(name)}</option>`).join("")}</select><small class="muted">Coordinates, protected fields, and linked shares are excluded. Share compositions must be edited together.</small>${failed?`<small class="field-error">${escapeHtml(load.error)}</small><button type="button" class="text-button" data-retry-hypercube-file="${escapeHtml(axis.filename)}">Retry loading file</button>`:""}</label>
       <label>Operation<select data-hypercube-axis-field="operation">${hypercubeOperationOptions(axis.operation)}</select></label>
       <label>Start<input data-hypercube-axis-field="start" type="number" step="any" value="${escapeHtml(axis.start)}"></label>
       <label>End<input data-hypercube-axis-field="end" type="number" step="any" value="${escapeHtml(axis.end)}"></label>
@@ -3425,7 +3438,7 @@ async function generateHypercube() {
   catch(error){notify(error.message,"error");setBusy($("generateHypercube"),false)}
 }
 function clearEditorFile() {
-  state.editorFileName = ""; state.csv = null; state.editorGeography = null; state.editorBaselineRows = []; state.editorOriginalRows = []; state.editorUndo = []; state.editorRedo = []; state.editorManualEdit = false; setEditorDirty(false);
+  state.editorFileName = ""; state.csv = null; state.editorGeography = null; state.editorBaselineRows = []; state.editorOriginalRows = []; state.editorUndo = []; state.editorRedo = []; state.editorManualEdit = false; state.editorValidationErrors=[]; setEditorDirty(false);
   $("editorNotes").value = ""; primeNoteAutosave("file", "");
   $("editorFile").value = "";
   $("editorLocationField").innerHTML = `<option value="">Choose an input file</option>`;
@@ -3434,6 +3447,7 @@ function clearEditorFile() {
   $("editorLocations").innerHTML = `<p class="muted">Choose an input file.</p>`;
   $("editorColumns").innerHTML = `<p class="muted">Choose an input file.</p>`;
   $("editorSavedScopeSummary").hidden = true; $("editorSavedScopeSummary").textContent = "";
+  $("editorShareGroup").hidden=true;$("editorShareGroup").innerHTML="";$("editorValidationStatus").hidden=true;$("editorValidationStatus").textContent="";
   ["editorLocationField","editorLocationSearch","editorYear","editorOperation","editorValue","editorSelectAllLocations","editorSelectAllColumns","clearEditorColumns","applyEditorChange","clearEditorSelections","resetEditorFile","undoEditorChange","redoEditorChange"].forEach((id) => { $(id).disabled = true; });
   $("csvTableWrap").innerHTML = `<p class="empty-state">Choose an input file to preview rows.</p>`;
 }
@@ -3525,7 +3539,7 @@ async function loadEditorFile(requestedFilename = "") {
   setBusy($("saveOverlay"), true, "Loading…");
   try {
     const [csvPayload, baselinePayload, geography] = await Promise.all([request(editorFileUrl(filename)), request(baselineEditorFileUrl(filename)), request(`/api/geography-options?projectId=${encodeURIComponent(state.selectedProject.id)}&filename=${encodeURIComponent(filename)}`)]);
-    state.editorFileName = filename; state.csv = csvPayload; state.editorGeography = geography; state.editorSelectedLocations.clear(); state.editorManualEdit = false;
+    state.editorFileName = filename; state.csv = csvPayload; state.editorGeography = geography; state.editorSelectedLocations.clear(); state.editorManualEdit = false;state.editorValidationErrors=[];
     state.editorBaselineRows = baselinePayload.rows.map((row) => [...row]);
     state.editorOriginalRows = csvPayload.rows.map((row) => [...row]); state.editorUndo = []; state.editorRedo = [];
     const overlayRecord=activeEditorVariation()?.overlays?.find((item)=>item.fileName===filename);
@@ -3533,7 +3547,7 @@ async function loadEditorFile(requestedFilename = "") {
     $("editorNotes").value = activeEditorVariation()?.notes?.[filename] || ""; primeNoteAutosave("file", $("editorNotes").value);
     const draft = loadEditorDraft("file", filename) || savedFileDraft(state.editorSavedOperations) || {};
     renderEditorControls(draft); renderCsv(); renderScenarioTree(); renderEditorPage(); setEditorDirty(false); persistFileDraft();
-  } catch (error) { notify(error.message, "error"); } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty; }
+  } catch (error) { notify(error.message, "error"); } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty||state.editorValidationErrors.length>0; }
 }
 function selectedGeographyLevel(payload, select) { return !select.value || select.value === MIXED_EDITOR_VALUE ? null : payload?.levels?.find((level) => level.id === select.value) || null; }
 function renderEditorControls(draft = {}) {
@@ -3546,18 +3560,20 @@ function renderEditorControls(draft = {}) {
   setSelectDraftValue($("editorLocationField"), preferred, "Mixed saved scopes");
   state.editorSelectedLocations = new Set((draft.locations || []).map(String));
   state.editorMixedScopes = structuredClone(draft.mixedScopes || []);
-  const columns = numericColumns(state.csv);
-  const selectedColumns = new Set((draft.columns || []).filter((name) => columns.includes(name)));
-  $("editorColumns").innerHTML = columns.map((name) => `<label class="check-option"><input type="checkbox" data-editor-column="${escapeHtml(name)}" ${selectedColumns.has(name)?"checked":""}><span>${escapeHtml(name)}</span></label>`).join("") || `<p class="muted">No editable numeric columns.</p>`;
-  document.querySelectorAll("[data-editor-column]").forEach((box) => box.addEventListener("change", () => { syncEditorColumnSelectAll(); persistFileDraft(); }));
-  syncEditorColumnSelectAll();
+  const columns = bulkEditableColumns(state.csv);
+  const requestedColumns = (draft.columns || []).filter((name) => columns.includes(name));
+  const requestedCategory = requestedColumns.find((name) => columnKind(state.csv,name) === "categorical"),requestedGroup=requestedColumns.map((name)=>columnGroup(state.csv,name)).find(Boolean);
+  const selectedColumns = new Set(requestedGroup?requestedGroup.members:requestedCategory ? [requestedCategory] : requestedColumns.filter((name)=>columnKind(state.csv,name)==="numeric"&&!columnGroup(state.csv,name)));
+  $("editorColumns").innerHTML = columns.map((name) => { const kind=columnKind(state.csv,name),details=columnDetails(state.csv,name),group=details.group,label=group?"Linked share":kind === "categorical" ? "Category":details.integer?"Whole-number count":details.maximum===1?"Proportion":"Number"; return `<label class="check-option" title="${escapeHtml(details.guidance||"")}"><input type="checkbox" data-editor-column="${escapeHtml(name)}" data-column-kind="${kind}" data-group-id="${escapeHtml(group?.id||"")}" ${selectedColumns.has(name)?"checked":""}><span>${escapeHtml(name)} <small class="muted">${escapeHtml(label)}</small></span></label>`; }).join("") || `<p class="muted">No columns support filtered changes. Protected and free-text fields are read-only.</p>`;
+  document.querySelectorAll("[data-editor-column]").forEach((box) => box.addEventListener("change", () => { enforceEditorColumnMode(box); syncEditorEditMode(); persistFileDraft(); }));
   const yearIndex = state.csv.columns.indexOf("Year"), years = yearIndex >= 0 ? [...new Set(state.csv.rows.map((row) => row[yearIndex]).filter(Boolean))].sort() : [""];
-  $("editorYear").innerHTML = years.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
+  $("editorYear").innerHTML = yearIndex<0?`<option value="">All rows — no year field</option>`:years.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
   $("editorYear").value = years.includes(String(draft.year || "")) ? String(draft.year) : years.includes("2045") ? "2045" : years[0] || "";
   setSelectDraftValue($("editorOperation"), Object.prototype.hasOwnProperty.call(draft,"operation") ? draft.operation : "", "Mixed saved changes");
   $("editorValue").value = draft.mixedValue ? "" : String(draft.value ?? "");
   $("editorValue").placeholder = draft.mixedValue ? "Mixed" : "";
   $("editorLocationSearch").value = draft.locationSearch || "";
+  syncEditorEditMode(String(draft.value ?? ""));
   updateFileDraftGuidance({...draft,mixedScopes:state.editorMixedScopes});
   renderEditorLocations(); updateEditorHistoryButtons();
 }
@@ -3584,22 +3600,55 @@ function rowMatchesEditor(row) {
   return geoIndex >= 0 && allowed.has(String(row[geoIndex]));
 }
 function selectedEditorColumns() { return [...document.querySelectorAll("[data-editor-column]:checked")].map((box) => box.dataset.editorColumn); }
+function selectedEditorKind() { const column=selectedEditorColumns()[0]; return column ? (columnGroup(state.csv,column)?"group":columnKind(state.csv,column)) : ""; }
+function editorControlValue() { return selectedEditorKind() === "categorical" ? $("editorCategoryValue").value : $("editorValue").value; }
+function enforceEditorColumnMode(changed) {
+  if (!changed.checked) return;
+  const kind=changed.dataset.columnKind,groupId=changed.dataset.groupId||"";
+  document.querySelectorAll("[data-editor-column]").forEach((box) => {
+    if(groupId)box.checked=box.dataset.groupId===groupId;
+    else if (kind === "categorical" ? box !== changed : box.dataset.columnKind === "categorical"||Boolean(box.dataset.groupId)) box.checked=false;
+  });
+}
+function selectedEditorGroup(){const column=selectedEditorColumns()[0];return column?columnGroup(state.csv,column):null;}
+function scopedEditorRow(){const yearIndex=state.csv.columns.indexOf("Year"),targetYear=$("editorYear").value;return state.csv.rows.find((row)=>(yearIndex<0||row[yearIndex]===targetYear)&&rowMatchesEditor(row))||state.csv.rows[0]||[];}
+function renderEditorShareGroup(){const group=selectedEditorGroup(),container=$("editorShareGroup");container.hidden=!group;if(!group){container.innerHTML="";return;}const row=scopedEditorRow(),fields=group.members.map((member)=>{const index=state.csv.columns.indexOf(member),value=row[index]??"",details=columnDetails(state.csv,member);return `<label>${escapeHtml(member)}<input type="number" step="any" data-editor-group-member="${escapeHtml(member)}" value="${escapeHtml(value)}" aria-describedby="editorGroupSummary"><small class="muted">${escapeHtml(details.guidance||"Proportion · valid range 0–1")}</small></label>`;}).join("");container.innerHTML=`<strong>Linked share composition</strong><p class="muted">Enter the complete vector. It will be applied to every matched row; other shares are not redistributed.</p><div class="share-group-fields">${fields}</div><p id="editorGroupSummary" class="share-group-summary" role="status"></p>`;container.querySelectorAll("input").forEach((input)=>input.addEventListener("input",()=>updateShareGroupSummary(container,group)));updateShareGroupSummary(container,group);}
+function shareGroupValues(container,prefix){return Object.fromEntries([...container.querySelectorAll(`[data-${prefix}-group-member]`)].map((input)=>[input.dataset[`${prefix}GroupMember`],input.value]));}
+function updateShareGroupSummary(container,group){const mapping=shareGroupValues(container,container.id.startsWith("batch")?"batch":"editor"),values=Object.values(mapping),numbers=values.map(Number),blank=values.map((value)=>!String(value).trim()),total=numbers.reduce((sum,value)=>sum+(Number.isFinite(value)?value:0),0),target=Number(group.target??1),tolerance=Number(group.tolerance??.000001),csv=group.csv||state.csv,rangeValid=Object.entries(mapping).every(([member,value])=>!String(value).trim()||!numericValueError(columnDetails(csv,member),value)),optionalBlank=Boolean(group.optional&&blank.every(Boolean)),valid=optionalBlank||!blank.some(Boolean)&&numbers.every(Number.isFinite)&&rangeValid&&(group.rule==="sum_at_most"?total<=target+tolerance:Math.abs(total-target)<=tolerance),remainder=group.remainderLabel?` · ${group.remainderLabel}: ${Math.max(0,target-total).toFixed(6)}`:"",summary=container.querySelector(".share-group-summary");summary.textContent=optionalBlank?"Optional group is blank · valid":`Total: ${total.toFixed(6)}${remainder} · ${valid?"valid":"not valid"}`;summary.classList.toggle("invalid",!valid);return valid;}
+function syncEditorEditMode(preferredValue = null) {
+  const kind=selectedEditorKind(), categorical=kind === "categorical",group=kind==="group", column=selectedEditorColumns()[0];
+  $("editorValue").hidden=categorical||group; $("editorCategoryValue").hidden=!categorical;$("editorShareGroup").hidden=!group;
+  $("editorOperation").disabled=categorical||group;
+  if(group)$("editorOperation").value="set";
+  if(categorical){
+    $("editorOperation").value="set";
+    const options=categoryOptions(state.csv,column), prior=preferredValue === null ? $("editorCategoryValue").value : preferredValue;
+    $("editorCategoryValue").innerHTML=options.map((value)=>`<option value="${escapeHtml(value)}">${escapeHtml(categoricalLabel(value))}</option>`).join("");
+    $("editorCategoryValue").value=options.includes(prior)?prior:options[0]??"";
+  }
+  renderEditorShareGroup();
+  syncEditorColumnSelectAll(); updateFileDraftGuidance();
+}
 function syncEditorColumnSelectAll() {
-  const boxes = [...document.querySelectorAll("[data-editor-column]")], selected = boxes.filter((box) => box.checked).length, control = $("editorSelectAllColumns");
+  const boxes = [...document.querySelectorAll('[data-editor-column][data-column-kind="numeric"][data-group-id=""]')], selected = boxes.filter((box) => box.checked).length, control = $("editorSelectAllColumns");
   control.disabled = !boxes.length; control.checked = boxes.length > 0 && selected === boxes.length; control.indeterminate = selected > 0 && selected < boxes.length;
 }
 function renderCsv() {
   const csv = state.csv; if (!csv) return;
-  $("csvTableWrap").innerHTML = `<table><thead><tr>${csv.columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${csv.rows.map((row, rowIndex) => `<tr ${rowMatchesEditor(row) ? "" : "hidden"}>${csv.columns.map((column, columnIndex) => { const editable = !protectedColumn(column), unsaved = editable && String(row[columnIndex] ?? "") !== String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? ""), saved = editable && String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? "") !== String(state.editorBaselineRows[rowIndex]?.[columnIndex] ?? ""), changeClass = unsaved ? "changed-cell" : saved ? "saved-change-cell" : "", changeTitle = unsaved ? "Unsaved direct edit" : saved ? "Saved scenario change from baseline" : ""; return `<td contenteditable="${editable}" class="${editable ? "" : "readonly-cell"} ${changeClass}" ${changeTitle ? `title="${changeTitle}"` : ""} data-row="${rowIndex}" data-column="${columnIndex}">${escapeHtml(roundedValue(row[columnIndex], column))}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
+  const invalid=new Map(state.editorValidationErrors.map((error)=>[`${error.rowIndex}:${error.columnIndex}`,error]));
+  $("csvTableWrap").innerHTML = `<table><thead><tr>${csv.columns.map((item) => `<th>${escapeHtml(item)}</th>`).join("")}</tr></thead><tbody>${csv.rows.map((row, rowIndex) => `<tr ${rowMatchesEditor(row) ? "" : "hidden"}>${csv.columns.map((column, columnIndex) => { const details=columnDetails(csv,column),editable=Boolean(details.directEditable),categorical=editable&&details.kind==="categorical", unsaved = editable && String(row[columnIndex] ?? "") !== String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? ""), saved = editable && String(state.editorOriginalRows[rowIndex]?.[columnIndex] ?? "") !== String(state.editorBaselineRows[rowIndex]?.[columnIndex] ?? ""),error=invalid.get(`${rowIndex}:${columnIndex}`),changeClass = error?"invalid-cell":unsaved ? "changed-cell" : saved ? "saved-change-cell" : "", changeTitle = error?error.message:unsaved ? "Unsaved direct edit" : saved ? "Saved scenario change from baseline" : details.protectionReason||details.guidance||"", value=String(row[columnIndex]??""); if(categorical)return `<td class="${changeClass}" ${changeTitle?`title="${escapeHtml(changeTitle)}"`:""}><select class="categorical-cell" data-category-row="${rowIndex}" data-category-column="${columnIndex}" aria-label="${escapeHtml(column)} row ${rowIndex+1}">${categoryOptions(csv,column).map((option)=>`<option value="${escapeHtml(option)}" ${option===value?"selected":""}>${escapeHtml(categoricalLabel(option))}</option>`).join("")}</select></td>`; return `<td contenteditable="${editable}" class="${editable ? "" : "readonly-cell"} ${changeClass}" title="${escapeHtml(changeTitle)}" data-row="${rowIndex}" data-column="${columnIndex}">${escapeHtml(roundedValue(row[columnIndex], column,csv))}</td>`; }).join("")}</tr>`).join("")}</tbody></table>`;
   $("csvTableWrap").querySelectorAll('td[contenteditable="true"]').forEach((cell) => {
     const row = Number(cell.dataset.row), columnIndex = Number(cell.dataset.column), column = state.csv.columns[columnIndex];
     cell.addEventListener("focus", () => { cell.textContent = state.csv.rows[row][columnIndex] ?? ""; });
-    cell.addEventListener("input", () => { state.csv.rows[row][columnIndex] = cell.textContent; state.editorManualEdit = true; recomputeEditorDirty(); });
-    cell.addEventListener("blur", () => { cell.textContent = roundedValue(state.csv.rows[row][columnIndex], column); });
+    cell.addEventListener("input", () => { state.csv.rows[row][columnIndex] = cell.textContent; state.editorManualEdit = true; recomputeEditorDirty();const error=state.editorValidationErrors.find((item)=>item.rowIndex===row&&item.columnIndex===columnIndex);cell.classList.toggle("invalid-cell",Boolean(error));cell.title=error?.message||"Unsaved direct edit"; });
+    cell.addEventListener("blur", () => { cell.textContent = roundedValue(state.csv.rows[row][columnIndex], column,csv);renderCsv(); });
   });
+  $("csvTableWrap").querySelectorAll("[data-category-row]").forEach((select)=>select.addEventListener("change",()=>{state.editorUndo.push(editorSnapshot());state.editorRedo=[];state.csv.rows[Number(select.dataset.categoryRow)][Number(select.dataset.categoryColumn)]=select.value;state.editorManualEdit=true;recomputeEditorDirty();renderCsv();updateEditorHistoryButtons();}));
 }
 async function applyEditorChange() {
-  const columns = selectedEditorColumns(), operation = $("editorOperation").value, valueText = $("editorValue").value.trim(), value = Number(valueText); if (!columns.length || !operation || !valueText || !Number.isFinite(value) || operation === MIXED_EDITOR_VALUE) return notify("Choose one or more columns, a specific operation, and a numeric value.", "error");
+  const columns = selectedEditorColumns(), valueType=selectedEditorKind(), categorical=valueType==="categorical",groupMode=valueType==="group",group=selectedEditorGroup(),groupValues=groupMode?shareGroupValues($("editorShareGroup"),"editor"):null, operation = categorical||groupMode ? "set" : $("editorOperation").value, valueText = editorControlValue(), value = categorical ? valueText : Number(valueText);
+  if(groupMode&&(!group||!updateShareGroupSummary($("editorShareGroup"),group)))return notify("Enter a complete valid linked-share vector before applying it.","error");
+  if (!columns.length || !operation || (!groupMode&&(categorical ? columns.length!==1 || !categoryOptions(state.csv,columns[0]).includes(valueText) : !valueText.trim() || !Number.isFinite(value))) || operation === MIXED_EDITOR_VALUE) return notify(categorical ? "Choose one categorical column and one of its existing values." : groupMode?"Choose one complete linked-share group.":"Choose one or more numeric columns, a specific operation, and a numeric value.", "error");
   if (state.editorManualEdit || state.editorDirty) return notify("Save or revert direct table edits before applying a calculated change.", "error");
   if (!$("editorLocationField").value || $("editorLocationField").value === MIXED_EDITOR_VALUE) return notify("Choose one location type before applying another change.", "error");
   if ($("editorLocationField").value !== "all" && !state.editorSelectedLocations.size) return notify("Choose at least one location or use Select all locations.", "error");
@@ -3613,7 +3662,7 @@ async function applyEditorChange() {
       if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return;
       columns.forEach((column) => {
         const index = state.csv.columns.indexOf(column);
-        if (Number.isFinite(Number(row[index])) && rowsDifferAt(state.csv.rows, state.editorBaselineRows, rowIndex, index)) overlap++;
+        if ((categorical || groupMode || Number.isFinite(Number(row[index]))) && rowsDifferAt(state.csv.rows, state.editorBaselineRows, rowIndex, index)) overlap++;
       });
     });
     const basis = await chooseOverlappingOperation(overlap);
@@ -3621,20 +3670,23 @@ async function applyEditorChange() {
     setBusy(button, false); setBusy(button, true, "Applying and saving…");
     const beforeRows=editorSnapshot(),nextRows=beforeRows.map((row)=>[...row]);
     let changed = 0;
-    nextRows.forEach((row,rowIndex) => { if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return; columns.forEach((column) => { const index = state.csv.columns.indexOf(column), sourceRow=basis==="baseline"?state.editorBaselineRows[rowIndex]:row,current=Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; let next=calculateValue(current,operation,value); if(column.toLowerCase().includes("prop"))next=Math.min(1,next); row[index]=calculatedValue(next,"singleFile",state.csv,column); changed++; }); });
-    const nextOperation={operationId:newOperationId("single-file"),source:"single_file",basis,columns:[...columns],operation,value,year:targetYear,allLocations:$("editorLocationField").value==="all",geographyType:$("editorLocationField").value,geographyLabel:$("editorLocationField").value==="all"?"all locations":`${state.editorSelectedLocations.size} selected locations`,locations:[...state.editorSelectedLocations],rounding:operationRounding(state.csv,columns,"singleFile")};
+    nextRows.forEach((row,rowIndex) => { if (!rowMatchesEditor(row) || (yearIndex >= 0 && row[yearIndex] !== targetYear)) return; columns.forEach((column) => { const index = state.csv.columns.indexOf(column), sourceRow=basis==="baseline"?state.editorBaselineRows[rowIndex]:row; if(groupMode){const raw=String(groupValues[column]??"").trim(),formatted=group.optional&&!raw?"":calculatedValue(Number(raw),"singleFile",state.csv,column);if(String(row[index])!==formatted){row[index]=formatted;changed++;}return;}if(categorical){if(String(row[index]??"")!==valueText){row[index]=valueText;changed++;}return;} const current=Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; const next=calculateValue(current,operation,value),formatted=calculatedValue(next,"singleFile",state.csv,column);if(String(row[index])!==formatted){row[index]=formatted;changed++;} }); });
+    const validationErrors=clientValidationErrors(state.csv,nextRows,beforeRows);if(validationErrors.length){const error=validationErrors[0];return notify(`${state.csv.filename} · ${error.column} · ${error.row}: ${error.message} Attempted value: ${error.value||"blank"}.`,"error");}
+    const nextOperation={operationId:newOperationId("single-file"),source:"single_file",basis,columns:[...columns],operation,value:groupMode?groupValues:value,valueType:groupMode?"share_group":categorical?"categorical":"numeric",groupId:group?.id||"",groupValues:groupValues||undefined,year:targetYear,allYears:yearIndex<0,allLocations:$("editorLocationField").value==="all",geographyType:$("editorLocationField").value,geographyLabel:$("editorLocationField").value==="all"?"all locations":`${state.editorSelectedLocations.size} selected locations`,locations:[...state.editorSelectedLocations],...(categorical||groupMode?{}:{rounding:operationRounding(state.csv,columns,"singleFile")})};
     const operations=operationsWithBaselineOverride(structuredClone(state.editorPendingOperations),nextOperation);
     await post("/api/overlays",{projectId:state.selectedProject.id,variationId:state.editorVariationId,filename:state.csv.filename,columns:state.csv.columns,rows:nextRows,editOperations:operations});
-    state.editorUndo.push(beforeRows);state.editorRedo=[];state.csv.rows=nextRows;state.editorOriginalRows=nextRows.map((row)=>[...row]);state.editorSavedOperations=structuredClone(operations);state.editorPendingOperations=structuredClone(operations);state.editorManualEdit=false;setEditorDirty(false);
+    state.editorUndo.push(beforeRows);state.editorRedo=[];state.csv.rows=nextRows;state.editorOriginalRows=nextRows.map((row)=>[...row]);state.editorSavedOperations=structuredClone(operations);state.editorPendingOperations=structuredClone(operations);state.editorManualEdit=false;state.editorValidationErrors=[];setEditorDirty(false);
     persistFileDraft();renderCsv();updateEditorHistoryButtons();notify(`Applied and saved changes to ${changed.toLocaleString()} values${basis==="baseline"?" from the untouched baseline":""}.`,"success");
     await refreshState({quiet:true});
   } catch(error) { notify(error.message,"error"); }
-  finally { setBusy(button, false); $("saveOverlay").disabled=!state.editorDirty; }
+  finally { setBusy(button, false); $("saveOverlay").disabled=!state.editorDirty||state.editorValidationErrors.length>0; }
 }
-function undoEditor() { const rows = state.editorUndo.pop(); if (!rows) return; state.editorRedo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
-function redoEditor() { const rows = state.editorRedo.pop(); if (!rows) return; state.editorUndo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true; renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); }
+function undoEditor() { const rows = state.editorUndo.pop(); if (!rows) return; state.editorRedo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true;recomputeEditorDirty(); renderCsv(); updateEditorHistoryButtons(); }
+function redoEditor() { const rows = state.editorRedo.pop(); if (!rows) return; state.editorUndo.push(editorSnapshot()); state.csv.rows = rows; state.editorManualEdit=true;recomputeEditorDirty(); renderCsv(); updateEditorHistoryButtons(); }
 async function saveFileChanges(showNotice = true) {
   if (!state.csv || !state.editorVariationId) return false;
+  recomputeEditorDirty();
+  if(state.editorValidationErrors.length){notify("Correct or revert the highlighted invalid value before saving.","error");return false;}
   const applyButton = $("applyEditorChange");
   setBusy($("saveOverlay"), true, "Saving…");
   setButtonAvailability(applyButton, false, "File save is in progress.");
@@ -3644,10 +3696,10 @@ async function saveFileChanges(showNotice = true) {
       ? [...state.editorPendingOperations, {operationId:newOperationId("manual"),source:"single_file",operation:"manual",columns:[]}]
       : state.editorPendingOperations;
     await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename:state.csv.filename, columns:state.csv.columns, rows:state.csv.rows,editOperations:operations});
-    state.editorOriginalRows = editorSnapshot(); state.editorSavedOperations=structuredClone(operations); state.editorPendingOperations=structuredClone(operations); state.editorManualEdit=false; setEditorDirty(false); persistFileDraft(); renderCsv();
+    state.editorOriginalRows = editorSnapshot(); state.editorSavedOperations=structuredClone(operations); state.editorPendingOperations=structuredClone(operations); state.editorManualEdit=false;state.editorValidationErrors=[]; setEditorDirty(false); persistFileDraft(); renderCsv();
     if (showNotice) notify("File changes saved to this scenario.", "success");
     await refreshState({quiet:true}); return true;
-  } catch (error) { notify(error.message, "error"); return false; } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty; setButtonAvailability(applyButton, true); }
+  } catch (error) { notify(error.message, "error"); return false; } finally { setBusy($("saveOverlay"), false); $("saveOverlay").disabled = !state.editorDirty||state.editorValidationErrors.length>0; setButtonAvailability(applyButton, true); }
 }
 
 function renderRunProjects() {
@@ -4351,6 +4403,7 @@ function resetBatchDraft(scenarioId = state.editorVariationId, clear = false) {
   $("batchLocationSearch").value = draft.locationSearch || "";
   $("batchValue").value = draft.mixedValue ? "" : String(draft.value ?? "");
   $("batchValue").placeholder = draft.mixedValue ? "Mixed" : "";
+  $("batchCategoryValue").dataset.draftValue = String(draft.value ?? "");
   $("batchFromBaseline").checked = Boolean(draft.fromBaseline);
   renderBatchBaselineChoice();
   setSelectDraftValue($("batchOperation"), draft.operation || "", "Mixed saved changes");
@@ -4367,8 +4420,41 @@ function resetBatchDraft(scenarioId = state.editorVariationId, clear = false) {
   if (clear) persistBatchDraft();
 }
 function syncBatchSelectAll() {
-  const boxes = [...document.querySelectorAll("[data-batch-column-file]")], checked = boxes.filter((box) => box.checked).length;
+  const boxes = [...document.querySelectorAll('[data-batch-column-file][data-column-kind="numeric"][data-group-id=""]')], checked = boxes.filter((box) => box.checked).length;
   $("batchSelectAllColumns").disabled = !boxes.length; $("batchSelectAllColumns").checked = boxes.length > 0 && checked === boxes.length; $("batchSelectAllColumns").indeterminate = checked > 0 && checked < boxes.length;
+}
+function selectedBatchEntries(){return [...state.batchSelectedColumns].flatMap(([filename,columns])=>[...columns].map((column)=>({filename,column,csv:state.batchFiles[filename]}))).filter((item)=>state.batchSelectedFiles.has(item.filename));}
+function selectedBatchKind(){const entry=selectedBatchEntries()[0];return entry?(columnGroup(entry.csv,entry.column)?"group":columnKind(entry.csv,entry.column)):"";}
+function batchControlValue(){return selectedBatchKind()==="categorical"?$("batchCategoryValue").value:$("batchValue").value;}
+function selectedBatchGroup(){const entries=selectedBatchEntries(),first=entries[0],group=first?columnGroup(first.csv,first.column):null;if(!group)return null;return entries.every((entry)=>entry.filename===first.filename&&columnGroup(entry.csv,entry.column)?.id===group.id)?{...group,filename:first.filename,csv:first.csv}:null;}
+function batchCategorySelection(){
+  const entries=selectedBatchEntries(); if(!entries.length||entries.some((entry)=>columnKind(entry.csv,entry.column)!=="categorical"))return null;
+  const column=entries[0].column,options=categoryOptions(entries[0].csv,column),signature=JSON.stringify([...options].sort());
+  return entries.every((entry)=>entry.column===column&&JSON.stringify([...categoryOptions(entry.csv,entry.column)].sort())===signature)?{column,options,entries}:null;
+}
+function rebuildBatchSelectionFromBoxes(){const grouped=new Map();document.querySelectorAll("[data-batch-column-file]:checked").forEach((box)=>{const selected=grouped.get(box.dataset.batchColumnFile)||new Set();selected.add(box.dataset.batchColumn);grouped.set(box.dataset.batchColumnFile,selected);});state.batchSelectedColumns=grouped;}
+function enforceBatchColumnMode(changed){
+  if(!changed.checked)return;
+  const categorical=changed.dataset.columnKind==="categorical",groupId=changed.dataset.groupId||"",filename=changed.dataset.batchColumnFile;
+  document.querySelectorAll("[data-batch-column-file]").forEach((box)=>{
+    if(groupId)box.checked=box.dataset.batchColumnFile===filename&&box.dataset.groupId===groupId;
+    else if(categorical){if(box!==changed&&(box.dataset.columnKind!=="categorical"||box.dataset.batchColumn!==changed.dataset.batchColumn||box.dataset.optionSignature!==changed.dataset.optionSignature))box.checked=false;}
+    else if(box.dataset.columnKind==="categorical"||box.dataset.groupId)box.checked=false;
+  });
+}
+function renderBatchShareGroup(){const group=selectedBatchGroup(),container=$("batchShareGroup");container.hidden=!group;if(!group){container.innerHTML="";return;}const yearIndex=group.csv.columns.indexOf("Year"),targetYear=$("batchYear").value,row=group.csv.rows.find((item)=>yearIndex<0||item[yearIndex]===targetYear)||group.csv.rows[0]||[];container.innerHTML=`<strong>Linked share composition · ${escapeHtml(group.filename)}</strong><p class="muted">Batch Change applies this complete vector atomically to every matched row in this file.</p><div class="share-group-fields">${group.members.map((member)=>`<label>${escapeHtml(member)}<input type="number" step="any" data-batch-group-member="${escapeHtml(member)}" value="${escapeHtml(row[group.csv.columns.indexOf(member)]??"")}"></label>`).join("")}</div><p class="share-group-summary" role="status"></p>`;container.querySelectorAll("input").forEach((input)=>input.addEventListener("input",()=>updateShareGroupSummary(container,group)));updateShareGroupSummary(container,group);}
+function syncBatchEditMode(preferredValue=null){
+  const kind=selectedBatchKind(),categorical=kind==="categorical",group=kind==="group",selection=batchCategorySelection();
+  $("batchValue").hidden=categorical||group;$("batchCategoryValue").hidden=!categorical;$("batchShareGroup").hidden=!group;$("batchOperation").disabled=categorical||group;
+  if(group)$("batchOperation").value="set";
+  if(categorical){
+    $("batchOperation").value="set";const options=selection?.options||[],prior=preferredValue===null?$("batchCategoryValue").value:preferredValue;
+    $("batchCategoryValue").innerHTML=options.map((value)=>`<option value="${escapeHtml(value)}">${escapeHtml(categoricalLabel(value))}</option>`).join("");
+    $("batchCategoryValue").value=options.includes(prior)?prior:options[0]??"";
+  }
+  renderBatchShareGroup();
+  syncBatchSelectAll();renderBatchCompatibility();
+  updateBatchDraftGuidance();
 }
 function batchCommonLevels() {
   const levels = new Map([["all", {id:"all",label:"All locations",values:[]}]]);
@@ -4406,10 +4492,11 @@ function syncBatchLocationSelectAll(items = []) {
   box.disabled = $("batchLocationType").value === "all" || !items.length; box.checked = items.length > 0 && count === items.length; box.indeterminate = count > 0 && count < items.length;
 }
 function renderBatchCompatibility() {
-  const type = $("batchLocationType").value; if (!type || type === MIXED_EDITOR_VALUE) { $("batchCompatibility").textContent = "Choose one location type before applying another change."; return; } if (type === "all") { $("batchCompatibility").textContent = "All selected files are eligible."; return; }
+  const category=batchCategorySelection(),categoryNote=category?` Category ${category.column} uses ${category.options.length} existing choice${category.options.length===1?"":"s"}; only files with the same choices can be included.`:"";
+  const type = $("batchLocationType").value; if (!type || type === MIXED_EDITOR_VALUE) { $("batchCompatibility").textContent = `Choose one location type before applying another change.${categoryNote}`; return; } if (type === "all") { $("batchCompatibility").textContent = `All selected files are eligible.${categoryNote}`; return; }
   const selectedFiles = [...state.batchSelectedFiles];
   const skipped = selectedFiles.filter((filename) => !state.batchGeographies[filename]?.levels?.some((level) => level.id === type && level.compatible));
-  $("batchCompatibility").textContent = skipped.length ? `${skipped.length} selected file${skipped.length === 1 ? " is" : "s are"} not compatible with this location type and will be skipped: ${skipped.join(", ")}` : "All selected files support this location type.";
+  $("batchCompatibility").textContent = (skipped.length ? `${skipped.length} selected file${skipped.length === 1 ? " is" : "s are"} not compatible with this location type and will be skipped: ${skipped.join(", ")}` : "All selected files support this location type.")+categoryNote;
 }
 async function renderBatchColumns() {
   const requestId = ++state.batchColumnsRequestId, scenarioId = state.editorVariationId, sessionOwner = state.batchSessionOwner;
@@ -4426,17 +4513,21 @@ async function renderBatchColumns() {
     if (requestId !== state.batchColumnsRequestId || sessionOwner !== state.batchSessionOwner || scenarioId !== state.editorVariationId || !batchSessionMatches(scenarioId) || state.editorMode !== "scenario" || fileSignature !== currentFileSignature) return;
     payloads.forEach(([filename, csvPayload, baselinePayload, geography]) => { state.batchFiles[filename] = csvPayload; state.batchBaselineFiles[filename] = baselinePayload; state.batchGeographies[filename] = geography; });
     Object.keys(state.batchFiles).filter((name) => !files.includes(name)).forEach((name) => { delete state.batchFiles[name]; delete state.batchBaselineFiles[name]; delete state.batchGeographies[name]; });
-    const years = new Set(); payloads.forEach(([,csvPayload]) => { const index = csvPayload.columns.indexOf("Year"); if (index >= 0) csvPayload.rows.forEach((row) => years.add(row[index])); });
+    const years = new Set(),yearModes=new Set(); payloads.forEach(([,csvPayload]) => { const index = csvPayload.columns.indexOf("Year");yearModes.add(index>=0?"dated":"timeless"); if (index >= 0) csvPayload.rows.forEach((row) => years.add(row[index])); });
     const sortedYears = [...years].sort();
-    $("batchYear").innerHTML = sortedYears.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
+    $("batchYear").dataset.yearMode=yearModes.size>1?"mixed":[...yearModes][0]||"";
+    $("batchYear").innerHTML = yearModes.has("timeless")&&!yearModes.has("dated")?`<option value="">All rows — no year field</option>`:sortedYears.map((year) => `<option>${escapeHtml(year)}</option>`).join("");
     $("batchYear").value = sortedYears.includes(priorYear) ? priorYear : sortedYears.includes("2045") ? "2045" : sortedYears[0] || "";
     delete $("batchYear").dataset.draftYear;
-    $("batchColumnChecklist").innerHTML = payloads.map(([filename,csvPayload]) => `<section class="batch-column-group"><header><strong>${escapeHtml(filename)}</strong><button class="text-button" type="button" data-select-file-columns="${escapeHtml(filename)}">Select all</button></header>${numericColumns(csvPayload).map((column) => `<label class="check-option"><input type="checkbox" data-batch-column-file="${escapeHtml(filename)}" data-batch-column="${escapeHtml(column)}" ${state.batchSelectedColumns.get(filename)?.has(column)?"checked":""}><span>${escapeHtml(column)}</span></label>`).join("") || `<span class="muted">No editable numeric columns.</span>`}</section>`).join("");
+    $("batchColumnChecklist").innerHTML = payloads.map(([filename,csvPayload]) => `<section class="batch-column-group"><header><strong>${escapeHtml(filename)}</strong><button class="text-button" type="button" data-select-file-columns="${escapeHtml(filename)}">Select numeric</button></header>${bulkEditableColumns(csvPayload).map((column) => {const details=columnDetails(csvPayload,column),kind=details.kind,group=details.group,signature=kind==="categorical"?JSON.stringify([...categoryOptions(csvPayload,column)].sort()):"",label=group?"Linked share":kind==="categorical"?"Category":details.integer?"Whole-number count":details.maximum===1?"Proportion":"Number";return `<label class="check-option" title="${escapeHtml(details.guidance||"")}"><input type="checkbox" data-batch-column-file="${escapeHtml(filename)}" data-batch-column="${escapeHtml(column)}" data-column-kind="${kind}" data-group-id="${escapeHtml(group?.id||"")}" data-option-signature="${escapeHtml(signature)}" ${state.batchSelectedColumns.get(filename)?.has(column)?"checked":""}><span>${escapeHtml(column)} <small class="muted">${escapeHtml(label)}</small></span></label>`;}).join("") || `<span class="muted">No columns support filtered changes.</span>`}</section>`).join("");
     document.querySelectorAll("[data-batch-column-file]").forEach((box) => {
       box.checked = state.batchSelectedColumns.get(box.dataset.batchColumnFile)?.has(box.dataset.batchColumn) || false;
-      box.addEventListener("change",()=>{const selected=state.batchSelectedColumns.get(box.dataset.batchColumnFile)||new Set();if(box.checked)selected.add(box.dataset.batchColumn);else selected.delete(box.dataset.batchColumn);state.batchSelectedColumns.set(box.dataset.batchColumnFile,selected);syncBatchSelectAll();persistBatchDraft()});
+      box.addEventListener("change",()=>{enforceBatchColumnMode(box);rebuildBatchSelectionFromBoxes();syncBatchEditMode();persistBatchDraft()});
     });
-    document.querySelectorAll("[data-select-file-columns]").forEach((button) => button.addEventListener("click", () => { const boxes = [...document.querySelectorAll(`[data-batch-column-file="${CSS.escape(button.dataset.selectFileColumns)}"]`)], select = boxes.some((box) => !box.checked),selected=new Set(); boxes.forEach((box) => { box.checked = select;if(select)selected.add(box.dataset.batchColumn); });state.batchSelectedColumns.set(button.dataset.selectFileColumns,selected); button.textContent = select ? "Clear" : "Select all"; syncBatchSelectAll(); persistBatchDraft(); }));
+    const restoredCategory=[...document.querySelectorAll('[data-batch-column-file][data-column-kind="categorical"]:checked')][0];
+    if(restoredCategory){enforceBatchColumnMode(restoredCategory);rebuildBatchSelectionFromBoxes();}
+    document.querySelectorAll("[data-select-file-columns]").forEach((button) => button.addEventListener("click", () => { document.querySelectorAll('[data-batch-column-file][data-column-kind="categorical"],[data-batch-column-file][data-group-id]:not([data-group-id=""])').forEach((box)=>{box.checked=false;});const boxes = [...document.querySelectorAll(`[data-batch-column-file="${CSS.escape(button.dataset.selectFileColumns)}"][data-column-kind="numeric"][data-group-id=""]`)], select = boxes.some((box) => !box.checked);boxes.forEach((box)=>{box.checked=select;});button.textContent=select?"Clear numeric":"Select numeric";rebuildBatchSelectionFromBoxes();syncBatchEditMode();persistBatchDraft(); }));
+    const preferred=$("batchCategoryValue").dataset.draftValue??null;syncBatchEditMode(preferred);delete $("batchCategoryValue").dataset.draftValue;
     updateBatchDraftGuidance();
     renderBatchLocationTypes(); syncBatchSelectAll();
   } catch (error) { if(requestId===state.batchColumnsRequestId&&sessionOwner===state.batchSessionOwner&&batchSessionMatches(scenarioId))$("batchColumnChecklist").innerHTML = `<p class="muted">${escapeHtml(error.message)}</p>`; }
@@ -4449,8 +4540,11 @@ function rowMatchesBatch(row, csvPayload, geography, type, selected) {
   return geoIndex >= 0 && allowed.has(String(row[geoIndex]));
 }
 async function applyBatchChanges() {
-  const grouped=Object.fromEntries([...state.batchSelectedColumns].filter(([filename,columns])=>state.batchSelectedFiles.has(filename)&&columns.size).map(([filename,columns])=>[filename,[...columns]])), valueText = $("batchValue").value.trim(), value = Number(valueText), operation = $("batchOperation").value;
-  if (!Object.keys(grouped).length || !valueText || !Number.isFinite(value) || !operation || operation === MIXED_EDITOR_VALUE || !$("batchYear").value) return notify("Choose files, columns, a year, a specific operation, and a numeric value.", "error");
+  const grouped=Object.fromEntries([...state.batchSelectedColumns].filter(([filename,columns])=>state.batchSelectedFiles.has(filename)&&columns.size).map(([filename,columns])=>[filename,[...columns]])), valueType=selectedBatchKind(),categorical=valueType==="categorical",groupMode=valueType==="group",group=selectedBatchGroup(),groupValues=groupMode?shareGroupValues($("batchShareGroup"),"batch"):null,categorySelection=batchCategorySelection(),valueText=batchControlValue(),value=categorical?valueText:Number(valueText),operation=categorical||groupMode?"set":$("batchOperation").value;
+  const selectedYearModes=new Set(Object.keys(grouped).map((filename)=>state.batchFiles[filename]?.columns.includes("Year")?"dated":"timeless"));
+  if(selectedYearModes.size>1)return notify("Choose either dated files or timeless files in one Batch Change, not both.","error");
+  if(groupMode&&(!group||!updateShareGroupSummary($("batchShareGroup"),group)))return notify("Enter one complete valid linked-share group from one file.","error");
+  if (!Object.keys(grouped).length || (!groupMode&&(categorical ? !categorySelection || !categorySelection.options.includes(valueText) : !valueText.trim() || !Number.isFinite(value))) || !operation || operation === MIXED_EDITOR_VALUE) return notify(categorical ? "Choose the same categorical field with matching choices and select one of its existing values." : groupMode?"Choose one complete linked-share group.":"Choose files, numeric columns, a specific operation, and a numeric value.", "error");
   const type = $("batchLocationType").value, locations = [...state.batchSelectedLocations];
   if (!type || type === MIXED_EDITOR_VALUE) return notify("Choose one location type before applying another change.", "error");
   if (type !== "all" && !locations.length) return notify("Choose at least one location or use Select all locations.", "error");
@@ -4469,29 +4563,34 @@ async function applyBatchChanges() {
         if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return;
         columns.forEach((column) => {
           const index = csvPayload.columns.indexOf(column);
-          if (Number.isFinite(Number(row[index])) && rowsDifferAt(csvPayload.rows, baselinePayload.rows, rowIndex, index)) overlap++;
+          if ((categorical || groupMode || Number.isFinite(Number(row[index]))) && rowsDifferAt(csvPayload.rows, baselinePayload.rows, rowIndex, index)) overlap++;
         });
       });
     }
     const basis = requestedFromBaseline ? "baseline" : await chooseOverlappingOperation(overlap);
     if (basis === "cancel") return;
     setBusy(button, false); setBusy(button, true, "Applying…");
-    let changed = 0, saved = 0, skipped = [], rounded = new Set();
+    let changed = 0, skipped = [], rounded = new Set();const items=[],nextRowsByFile={};
     const batchId = globalThis.crypto?.randomUUID?.() || `batch-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const operationId = newOperationId("batch");
     for (const [filename, columns] of Object.entries(grouped)) {
       const csvPayload = state.batchFiles[filename], baselinePayload = state.batchBaselineFiles[filename], geography = state.batchGeographies[filename];
       if (type !== "all" && !geography?.levels?.some((level) => level.id === type && level.compatible)) { skipped.push(filename); continue; }
-      const yearIndex = csvPayload.columns.indexOf("Year");
-      integerColumns(csvPayload, columns).forEach((column) => rounded.add(column));
-      csvPayload.rows.forEach((row,rowIndex) => { if (yearIndex >= 0 && row[yearIndex] !== $("batchYear").value) return; if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return; columns.forEach((column) => { const index = csvPayload.columns.indexOf(column), sourceRow = basis === "baseline" ? baselinePayload?.rows?.[rowIndex] : row, current = Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; let next = calculateValue(current, operation, value); if (column.toLowerCase().includes("prop")) next = Math.min(1, next); row[index] = calculatedValue(next, "batch", csvPayload, column); changed++; }); });
-      const nextOperation={operationId,source:"batch",batchId,basis,columns:[...columns],operation,value,year:$("batchYear").value,allLocations:type==="all",geographyType:type,geographyLabel:type==="all"?"all locations":`${locations.length} selected locations`,locations:[...locations],rounding:operationRounding(csvPayload,columns,"batch")};
+      const yearIndex = csvPayload.columns.indexOf("Year"),nextRows=csvPayload.rows.map((row)=>[...row]);
+      if(!categorical&&!groupMode)integerColumns(csvPayload, columns).forEach((column) => rounded.add(column));
+      nextRows.forEach((row,rowIndex) => { if (yearIndex >= 0 && row[yearIndex] !== $("batchYear").value) return; if (!rowMatchesBatch(row, csvPayload, geography, type, locations)) return; columns.forEach((column) => { const index = csvPayload.columns.indexOf(column), sourceRow = basis === "baseline" ? baselinePayload?.rows?.[rowIndex] : row;if(groupMode){const raw=String(groupValues[column]??"").trim(),formatted=group.optional&&!raw?"":calculatedValue(Number(raw),"batch",csvPayload,column);if(String(row[index])!==formatted){row[index]=formatted;changed++;}return;}if(categorical){if(String(row[index]??"")!==valueText){row[index]=valueText;changed++;}return;} const current = Number(sourceRow?.[index]); if (!Number.isFinite(current)) return; const next = calculateValue(current, operation, value),formatted=calculatedValue(next, "batch", csvPayload, column);if(String(row[index])!==formatted){row[index]=formatted;changed++;} }); });
+      const validationErrors=clientValidationErrors(csvPayload,nextRows,csvPayload.rows);if(validationErrors.length){const error=validationErrors[0];throw new Error(`${filename} · ${error.column} · ${error.row}: ${error.message} Attempted value: ${error.value||"blank"}.`);}
+      const nextOperation={operationId,source:"batch",batchId,basis,columns:[...columns],operation,value:groupMode?groupValues:value,valueType:groupMode?"share_group":categorical?"categorical":"numeric",groupId:group?.id||"",groupValues:groupValues||undefined,year:$("batchYear").value,allYears:yearIndex<0,allLocations:type==="all",geographyType:type,geographyLabel:type==="all"?"all locations":`${locations.length} selected locations`,locations:[...locations],...(categorical||groupMode?{}:{rounding:operationRounding(csvPayload,columns,"batch")})};
       const priorOperations=(activeEditorVariation()?.overlays||[]).find((item)=>item.fileName===filename)?.editOperations||[];
-      await post("/api/overlays", {projectId:state.selectedProject.id, variationId:state.editorVariationId, filename, columns:csvPayload.columns, rows:csvPayload.rows,editOperations:operationsWithBaselineOverride(priorOperations,nextOperation)}); saved++;
+      items.push({filename,columns:csvPayload.columns,rows:nextRows,editOperations:operationsWithBaselineOverride(priorOperations,nextOperation)});nextRowsByFile[filename]=nextRows;
     }
+    if(!items.length)return notify("No compatible files were selected.","error");
+    setBusy(button,false);setBusy(button,true,"Validating and saving…");
+    await post("/api/overlays/batch",{projectId:state.selectedProject.id,variationId:state.editorVariationId,items});
+    Object.entries(nextRowsByFile).forEach(([filename,rows])=>{state.batchFiles[filename].rows=rows;});
     $("batchFromBaseline").checked=false;
     renderBatchBaselineChoice();
-    notify(`Saved ${saved} file changes and changed ${changed} values${basis === "baseline" ? " from the untouched baseline" : ""}${skipped.length ? `; skipped ${skipped.length} incompatible files` : ""}.${rounded.size ? ` Whole-number count fields were rounded: ${[...rounded].join(", ")}.` : ""}`, "success"); persistBatchDraft(); await refreshState({quiet:true});
+    notify(`Saved ${items.length} file changes atomically and changed ${changed} values${basis === "baseline" ? " from the untouched baseline" : ""}${skipped.length ? `; skipped ${skipped.length} incompatible files` : ""}.${rounded.size ? ` Whole-number count fields were rounded: ${[...rounded].join(", ")}.` : ""}`, "success"); persistBatchDraft(); await refreshState({quiet:true});
   } catch (error) { notify(error.message, "error"); } finally { setBusy(button, false); }
 }
 
@@ -4509,20 +4608,21 @@ $("editorSelectAllLocations").addEventListener("change", (event) => {
 });
 $("applyEditorChange").addEventListener("click", applyEditorChange);
 $("clearEditorSelections").addEventListener("click", () => { renderEditorControls({year:$("editorYear").value}); persistFileDraft(); notify("Single-file selections cleared. Saved scenario changes were not removed.", "success"); });
-$("resetEditorFile").addEventListener("click", () => { if (!state.csv) return; state.editorUndo.push(editorSnapshot()); state.editorRedo = []; state.csv.rows = state.editorOriginalRows.map((row) => [...row]);state.editorPendingOperations=structuredClone(state.editorSavedOperations); renderCsv(); updateEditorHistoryButtons(); recomputeEditorDirty(); });
+$("resetEditorFile").addEventListener("click", () => { if (!state.csv) return; state.editorUndo.push(editorSnapshot()); state.editorRedo = []; state.csv.rows = state.editorOriginalRows.map((row) => [...row]);state.editorPendingOperations=structuredClone(state.editorSavedOperations); recomputeEditorDirty();renderCsv(); updateEditorHistoryButtons(); });
 $("undoEditorChange").addEventListener("click", undoEditor);
 $("redoEditorChange").addEventListener("click", redoEditor);
 $("editorNotes").addEventListener("input", (event) => scheduleNoteAutosave("file", event.currentTarget.value));
 $("editorNotes").addEventListener("blur", () => saveNoteNow("file"));
-$("editorSelectAllColumns").addEventListener("change", (event) => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = event.target.checked; }); syncEditorColumnSelectAll(); persistFileDraft(); });
-$("clearEditorColumns").addEventListener("click", () => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = false; }); syncEditorColumnSelectAll(); persistFileDraft(); });
+$("editorSelectAllColumns").addEventListener("change", (event) => { document.querySelectorAll('[data-editor-column][data-column-kind="numeric"][data-group-id=""]').forEach((box) => { box.checked = event.target.checked; }); document.querySelectorAll('[data-editor-column][data-column-kind="categorical"],[data-editor-column][data-group-id]:not([data-group-id=""])').forEach((box)=>{box.checked=false;});syncEditorEditMode(); persistFileDraft(); });
+$("clearEditorColumns").addEventListener("click", () => { document.querySelectorAll("[data-editor-column]").forEach((box) => { box.checked = false; }); syncEditorEditMode(); persistFileDraft(); });
 $("editorOperation").addEventListener("change", () => { updateFileDraftGuidance(); persistFileDraft(); });
-$("editorYear").addEventListener("change", persistFileDraft);
+$("editorYear").addEventListener("change",()=>{renderEditorShareGroup();persistFileDraft();});
 $("editorValue").addEventListener("input", () => { $("editorValue").placeholder = ""; updateFileDraftGuidance(); persistFileDraft(); });
+$("editorCategoryValue").addEventListener("change",()=>{updateFileDraftGuidance();persistFileDraft();});
 $("scenarioNote").addEventListener("input", (event) => scheduleNoteAutosave("scenario", event.currentTarget.value));
 $("scenarioNote").addEventListener("blur", () => saveNoteNow("scenario"));
 $("applyBatchChanges").addEventListener("click", applyBatchChanges);
-$("batchSelectAllColumns").addEventListener("change", (event) => { const grouped=new Map();document.querySelectorAll("[data-batch-column-file]").forEach((box) => { box.checked = event.target.checked;const selected=grouped.get(box.dataset.batchColumnFile)||new Set();if(event.target.checked)selected.add(box.dataset.batchColumn);grouped.set(box.dataset.batchColumnFile,selected); });state.batchSelectedColumns=grouped;syncBatchSelectAll();persistBatchDraft(); });
+$("batchSelectAllColumns").addEventListener("change", (event) => { document.querySelectorAll('[data-batch-column-file][data-column-kind="numeric"][data-group-id=""]').forEach((box)=>{box.checked=event.target.checked;});document.querySelectorAll('[data-batch-column-file][data-column-kind="categorical"],[data-batch-column-file][data-group-id]:not([data-group-id=""])').forEach((box)=>{box.checked=false;});rebuildBatchSelectionFromBoxes();syncBatchEditMode();persistBatchDraft(); });
 $("batchLocationType").addEventListener("change", () => { state.batchSelectedLocations = new Set(); state.batchMixedScopes = []; state.batchDraftScopeUnavailable = false; state.batchDraftGeographyType = $("batchLocationType").value; renderBatchLocations(); updateBatchDraftGuidance(); persistBatchDraft(); });
 $("batchLocationSearch").addEventListener("input", () => { renderBatchLocations(); persistBatchDraft(); });
 $("batchSelectAllLocations").addEventListener("change", (event) => {
@@ -4530,8 +4630,9 @@ $("batchSelectAllLocations").addEventListener("change", (event) => {
   state.batchSelectedLocations = event.target.checked ? values : new Set(); renderBatchLocations(); persistBatchDraft();
 });
 $("batchOperation").addEventListener("change", () => { updateBatchDraftGuidance(); persistBatchDraft(); });
-$("batchYear").addEventListener("change", persistBatchDraft);
+$("batchYear").addEventListener("change",()=>{renderBatchShareGroup();persistBatchDraft();});
 $("batchValue").addEventListener("input", () => { $("batchValue").placeholder = ""; updateBatchDraftGuidance(); persistBatchDraft(); });
+$("batchCategoryValue").addEventListener("change",()=>{updateBatchDraftGuidance();persistBatchDraft();});
 function renderBatchBaselineChoice(){
   const fromBaseline=$("batchFromBaseline").checked;
   const text=fromBaseline
@@ -6024,6 +6125,14 @@ async function openUpdateUrl(url){
   if(!/^https:\/\/github\.com\//.test(String(url||"")))return notify("Workbench blocked an untrusted update link.","error");
   try{await window.__TAURI_INTERNALS__.invoke("open_external_url",{url})}catch(error){notify(`Could not open the release page: ${error}`,"error")}
 }
+async function openWorkbenchWebsite(){
+  try{
+    if(!window.__TAURI_INTERNALS__?.invoke)throw new Error("Desktop integration is unavailable");
+    await window.__TAURI_INTERNALS__.invoke("open_external_url",{url:WORKBENCH_WEBSITE_URL});
+  }catch(_error){
+    notify(`Could not open the Workbench website. Copy this address into your browser: ${WORKBENCH_WEBSITE_URL}`,"error");
+  }
+}
 async function checkUpdatesNow(){
   const button=$("checkUpdatesNow");setBusy(button,true,"Checking…");
   try{
@@ -6074,6 +6183,7 @@ $("automaticUpdateChecks").addEventListener("change",updateCheckControls);
 $("checkUpdatesNow").addEventListener("click",checkUpdatesNow);
 $("updateStatusList").addEventListener("click",event=>{const link=event.target.closest("[data-update-url]");if(link)return openUpdateUrl(link.dataset.updateUrl);const install=event.target.closest("[data-install-runtime-update]");if(install)return installRuntimeUpdate(install);const restore=event.target.closest("[data-restore-runtime]");if(restore)return restorePreviousRuntime(restore)});
 $('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);
+$('openWorkbenchWebsite').addEventListener('click',openWorkbenchWebsite);
 $('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),preview=event.target.closest('[data-preview-document]');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(preview)openDocumentationInPreview(preview.dataset.previewDocument).catch(error=>notify(error.message||String(error),'error'))});
 $('documentationReaderClose').addEventListener('click',closeDocumentationReader);
 $('documentationReaderZoomOut').addEventListener('click',()=>setDocumentationZoom(documentationZoom-.15));
@@ -6920,6 +7030,7 @@ async function handleMenuAction(action) {
     return openDocumentationReader("user-guide").catch((error) => notify(String(error), "error"));
   }
   if (action === "whats-new") return openDocumentationReader("whats-new").catch((error) => notify(String(error), "error"));
+  if (action === "workbench-website") return openWorkbenchWebsite();
   if (action === "keyboard-shortcuts") return $("shortcutDialog").showModal();
   if (action === "runtime-setup-guide") return $("runtimeGuideDialog").showModal();
   if (action === "view-explore") return guardUnsaved(() => switchPage("explorePage"));

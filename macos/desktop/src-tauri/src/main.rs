@@ -9,6 +9,8 @@ use std::process::{Child, Command};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
+
+const WORKBENCH_WEBSITE_URL: &str = "https://sites.google.com/view/ve-workbench/home";
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
@@ -636,6 +638,13 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                 app,
                 "whats-new",
                 "What's New in Version 2.0",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "workbench-website",
+                "VisionEval Workbench Website",
                 true,
                 None::<&str>,
             )?,
@@ -1970,8 +1979,8 @@ fn reveal_workspace_location(app: AppHandle, location: String) -> Result<(), Str
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://github.com/") || url.chars().any(char::is_whitespace) {
-        return Err("Workbench blocked an untrusted update link".into());
+    if !trusted_external_url(&url) {
+        return Err("Workbench blocked an untrusted external link".into());
     }
     #[cfg(target_os = "windows")]
     let mut command = {
@@ -1993,6 +2002,11 @@ fn open_external_url(url: String) -> Result<(), String> {
     };
     command.spawn().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn trusted_external_url(url: &str) -> bool {
+    !url.chars().any(char::is_whitespace)
+        && (url == WORKBENCH_WEBSITE_URL || url.starts_with("https://github.com/"))
 }
 
 #[tauri::command]
@@ -2587,7 +2601,7 @@ fn main() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let action = match id {
-                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "view-hypercube" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "whats-new" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
+                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "view-hypercube" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "whats-new" | "workbench-website" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
                 _ => None,
             };
             if let (Some(action), Some(window)) = (action, app.get_webview_window("main")) {
@@ -2696,6 +2710,28 @@ mod tests {
             display_workspace_path(&recommended_workspace_root()),
             "~/VisionEval Workbench Workspace"
         );
+    }
+    #[test]
+    fn external_links_allow_only_trusted_release_and_workbench_urls() {
+        assert!(trusted_external_url(WORKBENCH_WEBSITE_URL));
+        assert!(trusted_external_url(
+            "https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0"
+        ));
+        assert!(!trusted_external_url(
+            "http://sites.google.com/view/ve-workbench/home"
+        ));
+        assert!(!trusted_external_url(
+            "https://sites.google.com/view/ve-workbench/home/extra"
+        ));
+        assert!(!trusted_external_url(
+            "https://sites.google.com/view/another-workbench/home"
+        ));
+        assert!(!trusted_external_url(
+            "https://sites.google.com.evil.example/view/ve-workbench/home"
+        ));
+        assert!(!trusted_external_url(
+            "https://sites.google.com/view/ve-workbench/home bad"
+        ));
     }
     #[test]
     fn documentation_resolves_only_allowlisted_installed_pdfs() {

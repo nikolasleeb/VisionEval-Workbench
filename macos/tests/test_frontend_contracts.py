@@ -9,6 +9,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendContractTests(unittest.TestCase):
+    def test_workbench_website_is_available_from_help_and_documentation(self):
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        host = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        url = "https://sites.google.com/view/ve-workbench/home"
+        self.assertIn('id="openWorkbenchWebsite"', markup)
+        self.assertIn("Learn more online", markup)
+        self.assertIn("tutorials, walkthroughs, downloads, and additional guidance", markup)
+        self.assertIn(url, markup)
+        self.assertIn(f'const WORKBENCH_WEBSITE_URL = "{url}"', source)
+        self.assertIn('if (action === "workbench-website")', source)
+        self.assertIn('"workbench-website",', host)
+        self.assertIn('"VisionEval Workbench Website",', host)
+        self.assertIn(f'const WORKBENCH_WEBSITE_URL: &str = "{url}"', host)
+        self.assertNotIn('target="_blank"', markup)
+
     def test_hypercube_discovery_and_case_exports_are_manual_and_accessible(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
@@ -535,6 +551,33 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('const priorYear = $("batchYear").value || $("batchYear").dataset.draftYear || "";', source)
         self.assertIn('<option value="">Choose operation</option>', markup)
 
+    def test_editor_supports_existing_categorical_values(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('id="editorCategoryValue"', markup)
+        self.assertIn('id="batchCategoryValue"', markup)
+        self.assertIn("function bulkEditableColumns", source)
+        self.assertIn("function syncEditorEditMode", source)
+        self.assertIn("function syncBatchEditMode", source)
+        self.assertIn('groupMode?"share_group":categorical?"categorical":"numeric"', source)
+        self.assertIn('class="categorical-cell"', source)
+        self.assertIn(".editor-table .categorical-cell", styles)
+
+    def test_editor_exposes_validation_groups_atomic_batch_and_invalid_feedback(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
+        styles = (ROOT / "public" / "styles.css").read_text(encoding="utf-8")
+        self.assertIn('id="editorShareGroup"', markup)
+        self.assertIn('id="batchShareGroup"', markup)
+        self.assertIn('id="editorValidationStatus"', markup)
+        self.assertIn('function clientValidationErrors', source)
+        self.assertIn('post("/api/overlays/batch"', source)
+        self.assertIn('All rows — no year field', source)
+        self.assertIn('function hypercubeAxisColumns', source)
+        self.assertIn('.editor-table td.invalid-cell', styles)
+        self.assertNotIn('next=Math.min(1,next)', source)
+
     def test_editor_guards_overlapping_operations_and_exposes_provenance_tooltips(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
@@ -960,7 +1003,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("VisionEval inputs are type-sensitive", markup)
         self.assertIn("These safeguards cannot be overridden", markup)
         self.assertIn("numericPrecision", source)
-        self.assertIn('calculatedValue(next, "singleFile", state.csv, column)', source)
+        self.assertIn('calculatedValue(next,"singleFile",state.csv,column)', source)
         self.assertIn("Verify runtime", markup)
         self.assertNotIn("Verify / Repair", markup)
         self.assertNotIn("after publication", markup)

@@ -223,7 +223,7 @@ class HypercubeTests(unittest.TestCase):
         self.assertEqual(project["variations"], [])
         self.assertNotIn("hypercubes", project)
 
-    def test_generation_rounds_integer_fields_and_caps_proportions(self):
+    def test_generation_rejects_invalid_proportions_instead_of_capping(self):
         payload = {
             "projectId": self.project["id"], "name": "Types", "year": "2045",
             "geographyType": "all", "locations": [],
@@ -232,11 +232,10 @@ class HypercubeTests(unittest.TestCase):
                 {"filename": "azone_hh_pop_by_age.csv", "column": "PropTest", "operation": "add", "start": "2", "end": "2", "interval": "2"},
             ],
         }
-        result = self.service.generate(payload, threading.Event(), lambda _completed, _total: None)
+        with self.assertRaisesRegex(WorkspaceError, "maximum is 1"):
+            self.service.generate(payload, threading.Event(), lambda _completed, _total: None)
         _, project = self.workspace.project(self.project["id"])
-        variation = next(item for item in project["variations"] if item["id"] == result["scenarioIds"][0])
-        path, _ = self.workspace.input_file("Plan", "azone_hh_pop_by_age.csv", project["id"], variation["id"])
-        self.assertIn("Test County,2045,3,1", path.read_text(encoding="utf-8"))
+        self.assertEqual(project["variations"], [])
 
     def test_concurrent_project_change_prevents_partial_commit(self):
         changed = False

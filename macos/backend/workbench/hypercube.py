@@ -4,6 +4,7 @@ import copy
 import csv
 import itertools
 import math
+import re
 import shutil
 import tempfile
 import threading
@@ -11,7 +12,7 @@ from decimal import Decimal, InvalidOperation, ROUND_FLOOR, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Callable
 
-from .explore import ExploreService
+from .explore import ExploreService, InputValidationError
 from .workspace import Workspace, WorkspaceError, make_id, now_iso, read_json, write_json
 
 
@@ -25,7 +26,8 @@ class HypercubeCancelled(Exception):
 
 def protected_column(name: str) -> bool:
     value = str(name).lower()
-    return value in PROTECTED_COLUMNS or value.endswith("id") or value.endswith("_id") or value.endswith("code")
+    compact = re.sub(r"[^a-z0-9]+", "", value)
+    return value in PROTECTED_COLUMNS or value.endswith("_id") or compact in {"hhid", "vehid", "wkrid"} or compact.endswith("code")
 
 
 def decimal_text(value: Decimal) -> str:
@@ -209,11 +211,19 @@ class HypercubeService:
             with path.open("r", encoding="utf-8-sig", newline="") as handle:
                 reader = csv.DictReader(handle)
                 columns = list(reader.fieldnames or [])
+                source_rows = [list(row.values()) for row in reader]
             column = str(raw.get("column", ""))
             if column not in columns:
                 raise WorkspaceError(f"{column or 'Selected column'} was not found in {filename}")
-            if protected_column(column):
-                raise WorkspaceError(f"{column} is an identifier and cannot be varied")
+            metadata = self.explore.input_column_metadata(filename, columns, source_rows)
+            details = metadata.get(column, {})
+            if protected_column(column) or details.get("kind") != "numeric":
+                raise WorkspaceError(f"{column} is not a numeric scenario input")
+            if not details.get("bulkEditable"):
+                reason = details.get("reason") or details.get("protectionReason") or "This field supports direct correction only."
+                raise WorkspaceError(f"{filename} / {column} cannot be used as a Hypercube axis. {reason}")
+            if details.get("group"):
+                raise WorkspaceError(f"{filename} / {column} is part of linked shares and cannot be varied alone. Edit the complete share composition together.")
             key = (filename.lower(), column.lower())
             if key in seen:
                 raise WorkspaceError(f"{filename} / {column} is selected more than once")
@@ -235,6 +245,7 @@ class HypercubeService:
                 "interval": decimal_text(interval),
                 "values": values,
                 "columnType": self.explore.input_column_types(filename, columns).get(column, "number"),
+                "columnMetadata": details,
             })
         case_count = math.prod(len(axis["values"]) for axis in axes)
         if case_count > 400:
@@ -296,16 +307,15 @@ class HypercubeService:
             return current * (Decimal(1) + value / Decimal(100))
         return current * (Decimal(1) - value / Decimal(100))
 
-    def _format_value(self, value: Decimal, column: str, column_type: str) -> str:
-        if column.lower().find("prop") >= 0:
-            value = min(Decimal(1), value)
+    def _format_value(self, value: Decimal, column: str, column_type: str, metadata: dict[str, Any] | None = None) -> str:
         if column_type == "integer":
             return decimal_text((value + Decimal("0.5")).to_integral_value(rounding=ROUND_FLOOR))
         settings = self.workspace.settings().get("numericPrecision", {})
         precision = settings.get("batch")
         if not isinstance(precision, int):
             precision = settings.get("default", 2)
-        quantizer = Decimal(1).scaleb(-int(precision))
+        precision = max(int(precision), int((metadata or {}).get("precision") or 0))
+        quantizer = Decimal(1).scaleb(-precision)
         return decimal_text(value.quantize(quantizer, rounding=ROUND_HALF_UP))
 
     def _prepared(self, normalized: dict[str, Any]) -> dict[str, Any]:
@@ -336,6 +346,25 @@ class HypercubeService:
                     raise WorkspaceError(f"{filename} / {axis['column']} has no numeric cells in the selected scope")
                 axis["matchedCells"] = count
                 affected_cells += count
+                original_lists = [[row.get(column, "") for column in record["columns"]] for row in record["rows"]]
+                metadata = self.explore.input_column_metadata(filename, record["columns"], original_lists)
+                for axis_value in axis["values"]:
+                    candidate = [dict(row) for row in record["rows"]]
+                    for row_index in matched:
+                        current = self._finite_decimal(candidate[row_index].get(axis["column"], ""))
+                        if current is None:
+                            continue
+                        next_value = self._calculate(current, axis["operation"], axis_value)
+                        candidate[row_index][axis["column"]] = self._format_value(
+                            next_value, axis["column"], axis["columnType"], axis.get("columnMetadata")
+                        )
+                    candidate_lists = [[row.get(column, "") for column in record["columns"]] for row in candidate]
+                    try:
+                        self.explore.validate_input_rows(filename, record["columns"], candidate_lists, original_lists, metadata)
+                    except InputValidationError as error:
+                        raise WorkspaceError(
+                            f"Hypercube value {decimal_text(axis_value)} is invalid for {filename} / {axis['column']}. {error}"
+                        ) from error
             geography = self.workspace.geography_options(normalized["projectId"], filename)
             scope_details.append({
                 "filename": filename,
@@ -440,7 +469,14 @@ class HypercubeService:
                             if current is None:
                                 continue
                             next_value = self._calculate(current, axis["operation"], hypercube_value)
-                            rows[row_index][axis["column"]] = self._format_value(next_value, axis["column"], axis["columnType"])
+                            rows[row_index][axis["column"]] = self._format_value(next_value, axis["column"], axis["columnType"], axis.get("columnMetadata"))
+                    row_lists = [[row.get(column, "") for column in record["columns"]] for row in rows]
+                    original_lists = [[row.get(column, "") for column in record["columns"]] for row in record["rows"]]
+                    metadata = self.explore.input_column_metadata(filename, record["columns"], original_lists, row_lists)
+                    try:
+                        self.explore.validate_input_rows(filename, record["columns"], row_lists, original_lists, metadata)
+                    except InputValidationError as error:
+                        raise WorkspaceError(str(error)) from error
                     overlay = staged_project / "overlays" / variation_id / filename
                     overlay.parent.mkdir(parents=True, exist_ok=True)
                     with overlay.open("w", encoding="utf-8", newline="") as handle:

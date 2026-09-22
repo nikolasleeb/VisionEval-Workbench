@@ -4,6 +4,10 @@
 
 Build and verify the Windows x64 edition of VisionEval Workbench 2.0 from the frozen macOS 2.0 release source. Windows must execute VisionEval through the native runtime already installed on the Windows computer. Do not add Docker as a dependency, install or patch VisionEval automatically, publish a release, or claim the unsigned installer is signed.
 
+## Required post-checkpoint addendum
+
+Before implementation, also read `WINDOWS-V2-INPUT-VALIDATION-HANDOFF.md`. It defines the subsequently tested categorical editing, numeric constraints, linked-share editor, atomic Batch Change, and Hypercube validation behavior required for final Windows 2.0 parity. The SSD handoff includes a `macos-input-validation-reference` folder with the tested source files. Use it as a behavioral reference without replacing Windows-native code.
+
 ## Immutable source checkpoint
 
 - Repository: `https://github.com/nikolasleeb/VisionEval-Workbench.git`

@@ -20,7 +20,7 @@ from .copy_operations import CopyOperationManager
 from .dependencies import DependencyService
 from .documentation import DocumentationService
 from .diagnostics import DiagnosticsService
-from .explore import ExploreService
+from .explore import ExploreService, InputValidationError
 from .excel_exports import ComparisonExportManager
 from .input_explanations import InputExplanationPackageService
 from .model_packages import ModelPackageService
@@ -448,7 +448,11 @@ def handler_class(application: WorkbenchApplication):
                     with path.open("r", encoding="utf-8-sig", newline="") as handle:
                         rows = list(csv.reader(handle))
                     columns = rows[0] if rows else []
-                    send_json(self, {"filename": filename, "columns": columns, "columnTypes": application.explore.input_column_types(filename, columns), "rows": rows[1:], "overlay": overlay})
+                    source_path, _ = application.workspace.input_file(library_id, filename)
+                    with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        source_rows = list(csv.reader(handle))
+                    metadata = application.explore.input_column_metadata(filename, columns, source_rows[1:], rows[1:])
+                    send_json(self, {"filename": filename, "columns": columns, "columnTypes": application.explore.input_column_types(filename, columns), "columnMetadata": metadata, "validationGroups": application.explore.validation_groups(filename), "rows": rows[1:], "overlay": overlay})
                 elif parsed.path == "/api/explore/files":
                     package_id = first(query, "explanationPackageId")
                     package_path = application.input_explanations.catalog_path(package_id) if package_id else None
@@ -860,15 +864,56 @@ def handler_class(application: WorkbenchApplication):
                 elif parsed.path == "/api/projects/results/unlink":
                     send_json(self, application.workspace.unlink_result(payload.get("projectId", ""), payload.get("datastoreId", "")))
                 elif parsed.path == "/api/overlays":
-                    application.explore.validate_input_rows(
-                        payload.get("filename", ""), payload.get("columns") or [], payload.get("rows") or []
+                    source_path, _ = application.workspace.input_file(
+                        application.workspace.project(payload.get("projectId", ""))[1]["inputLibrary"]["id"],
+                        payload.get("filename", ""),
                     )
+                    with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        source_rows = list(csv.reader(handle))
+                    current_path, _ = application.workspace.input_file(
+                        application.workspace.project(payload.get("projectId", ""))[1]["inputLibrary"]["id"],
+                        payload.get("filename", ""), payload.get("projectId", ""), payload.get("variationId", ""),
+                    )
+                    with current_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        current_rows = list(csv.reader(handle))
+                    metadata = application.explore.input_column_metadata(
+                        payload.get("filename", ""), payload.get("columns") or [], source_rows[1:], current_rows[1:]
+                    )
+                    application.explore.validate_input_rows(
+                        payload.get("filename", ""), payload.get("columns") or [], payload.get("rows") or [], current_rows[1:], metadata
+                    )
+                    application.explore.validate_categorical_operations(metadata, payload.get("editOperations"))
                     content = self._csv_content(payload)
                     send_json(self, application.workspace.save_overlay(
                         payload.get("projectId", ""), payload.get("variationId", ""),
                         payload.get("filename", ""), content,
                         payload.get("editOperations") if "editOperations" in payload else None,
                     ), 201)
+                elif parsed.path == "/api/overlays/batch":
+                    project_id = str(payload.get("projectId", ""))
+                    variation_id = str(payload.get("variationId", ""))
+                    _, project = application.workspace.project(project_id)
+                    library_id = str(project["inputLibrary"]["id"])
+                    prepared: list[dict] = []
+                    for item in payload.get("items") or []:
+                        filename = str(item.get("filename", ""))
+                        columns = item.get("columns") or []
+                        rows = item.get("rows") or []
+                        source_path, _ = application.workspace.input_file(library_id, filename)
+                        current_path, _ = application.workspace.input_file(library_id, filename, project_id, variation_id)
+                        with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            source_rows = list(csv.reader(handle))
+                        with current_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            current_rows = list(csv.reader(handle))
+                        metadata = application.explore.input_column_metadata(filename, columns, source_rows[1:], current_rows[1:])
+                        application.explore.validate_input_rows(filename, columns, rows, current_rows[1:], metadata)
+                        application.explore.validate_categorical_operations(metadata, item.get("editOperations"))
+                        prepared.append({
+                            "filename": filename,
+                            "content": self._csv_content(item),
+                            "editOperations": item.get("editOperations") if "editOperations" in item else None,
+                        })
+                    send_json(self, application.workspace.save_overlays_atomic(project_id, variation_id, prepared), 201)
                 elif parsed.path == "/api/overlays/delete":
                     send_json(self, application.workspace.delete_overlay(payload.get("projectId", ""), payload.get("variationId", ""), payload.get("filename", "")))
                 elif parsed.path == "/api/runtime/pull":
@@ -938,6 +983,9 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.comparison_scans.cancel(payload.get("id", "")))
                 else:
                     send_json(self, {"error": "Unknown endpoint"}, 404)
+            except InputValidationError as exc:
+                application.diagnostics.record_app_error({"source": "backend", "message": str(exc), "path": parsed.path})
+                send_json(self, {"error": str(exc), "code": "input_validation", "validationErrors": exc.errors}, 400)
             except (WorkspaceError, ValueError, OSError, csv.Error, json.JSONDecodeError) as exc:
                 application.diagnostics.record_app_error({"source": "backend", "message": str(exc), "path": parsed.path})
                 send_json(self, {"error": str(exc)}, 400)

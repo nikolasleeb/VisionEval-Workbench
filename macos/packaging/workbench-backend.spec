@@ -16,6 +16,7 @@ datas = [
     (str(root / "backend" / "comparison_cache_extract.R"), "."),
     (str(root / "backend" / "hypercube_summary.R"), "."),
     (str(root / "backend" / "explore_catalog.json"), "."),
+    (str(root / "backend" / "input_validation_rules.json"), "."),
     (str(root / "backend" / "unit_conflicts.json"), "."),
     (str(root / "backend" / "dependency_catalog.json"), "."),
     (str(root / "backend" / "asset_catalog.json"), "."),
