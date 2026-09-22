@@ -104,6 +104,29 @@ The final RC7/setup/layout changes do not alter the model execution engine. Afte
 those changes, the complete 379-test regression suite and installed
 startup/runtime/storage/shutdown smoke were rerun against the final candidate.
 
+## Popup safe-area follow-up
+
+- Large Settings, Hypercube, onboarding, export, shortcuts, runtime-guide,
+  geography, and map dialogs now share a fixed 24 CSS-pixel viewport inset and
+  explicit viewport centering. The former Hypercube-specific 112px/72px sizing
+  formulas and short-display inset reduction were removed.
+- Settings remains resizable, with fixed header/footer rows and internally
+  scrollable content. Hypercube remains non-resizable, with fixed header/action
+  rows and only its warning content scrolling.
+- Responsive geometry checks at 1920x1080, 1536x864, 1280x720, and 960x540 CSS
+  viewports (100%, 125%, 150%, and 200% display-scale equivalents) confirmed at
+  least 24px clearance on all edges. At 960x540 the Hypercube dialog measured
+  exactly 24px on every side, retained its visible action footer, and scrolled
+  internally. The Settings contract measured 912x492 with fixed 24px insets and
+  `resize: both`, leaving its bottom-right resize grip inside the usable area.
+- JavaScript syntax checks, 74 frontend contract tests (2 expected skips), the
+  complete 379-test Python suite (18 expected skips), 15 Rust tests,
+  `cargo fmt --check`, and `git diff --check` passed.
+- The rebuilt unsigned installer completed a current-user installation and
+  launched successfully. The installed backend retained the SSD workspace at
+  `D:\VDOT\VE Workbench\Workspaces`, the native adapter, R 4.5.3, VisionEval
+  RC7, and independent `VE_RUNTIME`/`VE_HOME` paths.
+
 ## Expected warnings
 
 Windows R still emits `C.UTF-8` locale warnings. The official RC7 Windows library
