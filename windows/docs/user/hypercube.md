@@ -1,6 +1,6 @@
 # Hypercube Workflow
 
-Open primary tab **5 Hypercube** or press **Ctrl+5**. Workbench presents the resource disclosure once per application launch because a small-looking parameter grid can create many complete model runs. Hypercubes are intended for a dedicated computer; avoid a large matrix on a computer needed for other work.
+Open primary tab **5 Hypercube** or press **Ctrl+5**. Hypercubes are safe to run on a laptop, but Windows runs one VisionEval case at a time, so larger matrices can take many hours and use substantial memory and workspace storage. On computers with less than 16 GB of RAM, use small matrices and close other memory-intensive applications. This is guidance, not a blocker. Version 2 limits Hypercubes to two parameter axes and 400 cases to keep experiments bounded.
 
 ## Build
 
@@ -8,7 +8,7 @@ Create or select a Hypercube project, then configure one or two numeric paramete
 
 Setup changes save automatically without creating cases. **Saving…**, **Saved**, and **Not saved—Retry** report the draft state. Preview uses the latest saved revision and shows every generated value, exact case count, shared row scope, estimated serialized runtime, and retained disk. Only **Generate Scenarios** creates or replaces cases.
 
-The project name is the matrix name. Shared year selects dated input rows; it does not change model years. **All matching rows** applies each combination to every compatible row without adding a location dimension. A specific geography requires at least one location.
+The project name is the matrix name. Shared year selects dated input rows; it does not change model years. **All matching rows** applies each combination to every compatible row without adding a location dimension. A specific geography requires at least one location. Before a run, Workbench shows detected RAM, workspace free space, case count, serialized execution waves, estimated elapsed time, and retained storage when available. If retained data plus a safety reserve is larger than free workspace space, Workbench asks for confirmation; RAM alone never blocks creation or execution.
 
 ## Review
 
@@ -16,7 +16,9 @@ Review shows the immutable generated definition, axes and values, case count, ye
 
 ## Run
 
-Choose the project rather than dozens of individual scenarios. **Run Missing** queues only a missing baseline and missing cases. **Retry Failed** queues only failed work. Successful work is not routinely rerun. The batch card reports totals, progress, elapsed time, estimated remaining time, waves, and concurrency. Completed elapsed time is frozen at the latest terminal job instead of continuing to advance. **Stop This Hypercube** removes its waiting jobs and stops its owned active containers without disturbing unrelated batches. Normal Run history shows one compact Hypercube card; detailed case logs remain here. A completion notification is sent for the project rather than for every case.
+Choose the project rather than dozens of individual scenarios. **Run Missing** queues only a missing baseline and missing cases. **Retry Failed** queues only failed work. Successful work is not routinely rerun. The batch card reports totals, progress, elapsed time, estimated remaining time, waves, and the single active native slot. Completed elapsed time is frozen at the latest terminal job instead of continuing to advance. **Stop This Hypercube** removes its waiting jobs and stops its owned active R process tree without disturbing unrelated batches. Normal Run history shows one compact Hypercube card; detailed case logs remain here. A completion notification is sent for the project rather than for every case.
+
+A 9 × 9 matrix creates 81 cases, 81 serialized execution waves, and takes about 15 hours under the current planning assumption. A future verified container or cloud execution engine could support parallel cases, but parallel execution is not available in Windows 2.0 and is not promised for a particular release.
 
 New Hypercube runs retain the authoritative Datastore and skip the optional full CSV export tree.
 

@@ -33,6 +33,33 @@ LEGACY_ASSET_DISPLAY_NAMES = {
 }
 
 
+def physical_memory_bytes() -> int:
+    """Return installed physical memory without adding a packaging dependency."""
+    if os.name == "nt":
+        try:
+            import ctypes
+
+            class MemoryStatus(ctypes.Structure):
+                _fields_ = [
+                    ("length", ctypes.c_ulong), ("memory_load", ctypes.c_ulong),
+                    ("total_physical", ctypes.c_ulonglong), ("available_physical", ctypes.c_ulonglong),
+                    ("total_page_file", ctypes.c_ulonglong), ("available_page_file", ctypes.c_ulonglong),
+                    ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                    ("available_extended_virtual", ctypes.c_ulonglong),
+                ]
+
+            status = MemoryStatus()
+            status.length = ctypes.sizeof(status)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+                return int(status.total_physical)
+        except (AttributeError, OSError, ValueError):
+            return 0
+    try:
+        return int(os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES"))
+    except (AttributeError, OSError, ValueError):
+        return 0
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -461,8 +488,17 @@ class Workspace:
             "Projects": size(self.projects), "models": size(self.models),
             "runs": size(self.runs), "exchange": size(self.exchange),
         }
+        disk = shutil.disk_usage(self.root)
+        memory = physical_memory_bytes()
         return {
             "workspaceBytes": sum(categories.values()),
+            "workspacePath": str(self.root),
+            "workspaceFreeBytes": disk.free,
+            "workspaceTotalBytes": disk.total,
+            "workspaceSafetyReserveBytes": max(10 * 1024 ** 3, int(disk.total * 0.20)),
+            "physicalMemoryBytes": memory,
+            "limitedMemoryAdvisory": bool(memory and memory < 16 * 1024 ** 3),
+            "limitedMemoryThresholdBytes": 16 * 1024 ** 3,
             "categories": categories,
             "runs": model_runs,
             "retainFullExports": self.settings()["retainFullExports"],

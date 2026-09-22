@@ -13,7 +13,7 @@ if (native && !dir.exists(library_path)) {
 .libPaths(c(library_path, .libPaths()))
 library(VEStart)
 startVisionEval(ve.home = home, ve.runtime = runtime, overwrite = FALSE)
-# RC6 normalizes model paths internally. Docker resolves its /workspace path from
+# VisionEval normalizes model paths internally. Docker resolves its /workspace path from
 # the filesystem root; native Windows uses paths relative to VE_RUNTIME so drive
 # letters are never rewritten as relative directory names.
 if (native) setwd(runtime) else setwd("/")
@@ -92,18 +92,11 @@ if (command == "verify-model") {
 
 if (command == "verify-upstream-release") {
   package_path <- find.package("VETravelDemandMM")
-  namespace <- asNamespace("VETravelDemandMM")
-  release <- readLines(release_file, warn = FALSE)
-  do_predictions <- get("DoPredictions", namespace)
-  function_text <- paste(deparse(body(do_predictions)), collapse = "\n")
+  description <- packageDescription("VETravelDemandMM")
   stopifnot(
-    "merge_preds" %in% names(formals(do_predictions)),
-    grepl("p_order", function_text, fixed = TRUE),
-    grepl("Dataset_df[[id_name]]", function_text, fixed = TRUE),
-    any(release == "tag=VE-40-RC6"),
-    any(release == "commit=f7ef3389b5626daeba6c86eeda9d172a0f8cccc2")
+    identical(description[["VECommit"]], "7852dc58fad460ff279f5eebf4dd55fe191470ad")
   )
-  cat("Active package:", package_path, "\nUpstream source: VisionEval/VisionEval-4 VE-40-RC6\nPinned upstream household-ordering implementation: present\n")
+  cat("Active package:", package_path, "\nUpstream source: VisionEval/VisionEval-4 VE-40-RC7\nPinned commit: 7852dc58fad460ff279f5eebf4dd55fe191470ad\n")
   quit(save = "no", status = 0L)
 }
 

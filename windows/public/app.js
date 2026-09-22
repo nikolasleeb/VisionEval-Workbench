@@ -228,6 +228,8 @@ const state = {
   upgradeNoticeShown: false,
   runtimeSetupPhase: "idle",
   runtimeSetupMessage: "",
+  runtimeInstallOperationId: "",
+  runtimeInstallProgress: null,
   jobStateSnapshot: null,
   hypercubeNotificationSnapshot: null,
   runSelectionProjectId: "",
@@ -569,8 +571,10 @@ async function waitForRuntimeInstallation(operationId) {
       throw error;
     }
     state.runtimeSetupMessage = operation.message || "Downloading and verifying the pinned runtime…";
+    state.runtimeInstallProgress = operation;
     renderRuntimeSetupControls();
     if (operation.state === "succeeded") return operation.result;
+    if (operation.state === "cancelled") throw new Error(operation.message || "Runtime installation was cancelled.");
     if (operation.state === "failed") throw new Error(operation.message || "Runtime installation failed");
   }
   throw new Error("Runtime installation did not finish within 20 minutes.");
@@ -2366,12 +2370,12 @@ async function startDockerAndVerify(button) {
         state.runtimeSetupPhase = "idle";
         state.runtimeSetupMessage = "";
         renderRuntime();
-        notify("Official VisionEval VE-40-RC6 runtime verified.", "success");
+        notify("Official VisionEval VE-40-RC7 runtime verified.", "success");
       } else {
         state.runtimeSetupPhase = "failed";
-        state.runtimeSetupMessage = "Docker is ready, but the pinned VE-40-RC6 image still needs to be installed.";
+        state.runtimeSetupMessage = "Docker is ready, but the pinned VE-40-RC7 image still needs to be installed.";
         renderRuntimeSetupControls();
-        notify("Docker is ready, but the pinned VE-40-RC6 image still needs to be installed.", "error");
+        notify("Docker is ready, but the pinned VE-40-RC7 image still needs to be installed.", "error");
       }
       return;
     }
@@ -2388,9 +2392,10 @@ async function startDockerAndVerify(button) {
 }
 
 async function installAndSaveRuntime(button, statusElement = null) {
-  if (!window.__TAURI_INTERNALS__?.invoke) return notify("Runtime installation is available in the macOS desktop application.", "error");
+  if (!window.__TAURI_INTERNALS__?.invoke) return notify("Runtime installation is available in the VisionEval Workbench desktop application.", "error");
   const runtime = state.data?.runtime || {};
-  if (!runtime.installed) {
+  const native=runtime.adapter==="native";
+  if (!native&&!runtime.installed) {
     const message = "Docker Desktop is required before Workbench can install the VisionEval runtime.";
     state.runtimeSetupPhase = "failed";
     state.runtimeSetupMessage = message;
@@ -2399,10 +2404,11 @@ async function installAndSaveRuntime(button, statusElement = null) {
   }
   setBusy(button, true, "Installing…");
   state.runtimeSetupPhase = "installing";
-  state.runtimeSetupMessage = runtime.running ? "Preparing the pinned runtime download…" : "Starting Docker Desktop…";
+  state.runtimeSetupMessage = native?"Preparing the certified R 4.5.3 and VisionEval RC7 installation…":runtime.running ? "Preparing the pinned runtime download…" : "Starting Docker Desktop…";
+  state.runtimeInstallProgress=null;
   renderRuntimeSetupControls();
   try {
-    if (!runtime.running) {
+    if (!native&&!runtime.running) {
       await window.__TAURI_INTERNALS__.invoke("start_docker_desktop");
       for (let attempt = 0; attempt < 48; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2500));
@@ -2413,18 +2419,25 @@ async function installAndSaveRuntime(button, statusElement = null) {
     }
     state.runtimeSetupMessage = "Downloading and verifying the pinned runtime… This can take several minutes the first time.";
     renderRuntimeSetupControls();
-    const operation = await post("/api/runtime/install/start", {});
+    const prefix=$("onboardingDialog")?.open?"onboarding":"settings";
+    const operation = await post("/api/runtime/install/start", native?{
+      veRuntime:$(`${prefix}VeRuntime`)?.value||"",
+      veHome:$(`${prefix}VeHome`)?.value||"",
+    }:{});
+    state.runtimeInstallOperationId=operation.id;
+    state.runtimeInstallProgress=operation;
     const result = await waitForRuntimeInstallation(operation.id);
     const prior = (state.desktop?.runtimeProfiles || []).find((item) => item.id === state.desktop?.activeRuntimeProfileId);
     await window.__TAURI_INTERNALS__.invoke("save_runtime_profile", {profile:{
-      id:prior?.adapter==="docker"?prior.id:"", name:"Apple Silicon Docker", adapter:"docker", platform:result.platform || "darwin", architecture:result.architecture || "arm64",
-      imageReference:result.image, imageDigest:result.digest, runtimeVersion:result.runtimeVersion || "Compatible VisionEval runtime", verified:true,
-      verifiedAt:result.verifiedAt || new Date().toISOString(), verificationMessage:"The pinned image digest, VisionEval provenance, doctor, and compatibility checks passed.", remoteStatus:result.source || "ghcr",
+      id:prior?.adapter===(native?"native":"docker")?prior.id:"", name:native?"Windows native RC7":"Apple Silicon Docker", adapter:native?"native":"docker", platform:result.platform || (native?"windows":"darwin"), architecture:result.architecture || (native?"x86_64":"arm64"),
+      imageReference:result.image, veRuntimePath:result.veRuntime||"",veHomePath:result.veHome||"",rscriptPath:result.rscript||"",imageDigest:result.digest, runtimeVersion:result.runtimeVersion || "Compatible VisionEval runtime", verified:true,
+      verifiedAt:result.verifiedAt || new Date().toISOString(), verificationMessage:native?"VisionEval RC7 provenance, R compatibility, and native capabilities passed.":"The pinned image digest, VisionEval provenance, doctor, and compatibility checks passed.", remoteStatus:result.source || (native?"managed-current-user":"ghcr"),
     }});
     state.desktop = await window.__TAURI_INTERNALS__.invoke("desktop_state");
     await refreshState({quiet:true});
     state.runtimeSetupPhase = "idle";
     state.runtimeSetupMessage = "";
+    state.runtimeInstallOperationId="";state.runtimeInstallProgress=null;
     renderRuntime();
     notify("VisionEval runtime installed, verified, and connected.", "success");
     nativeNotification("VisionEval runtime ready", "The pinned runtime was installed, verified, and connected.", {outcome:"runtime_ready", force:false});
@@ -2440,9 +2453,19 @@ async function installAndSaveRuntime(button, statusElement = null) {
     notify(message, "error");
     throw error;
   } finally {
+    if(state.runtimeSetupPhase!=="installing"){
+      state.runtimeInstallOperationId="";
+      state.runtimeInstallProgress=null;
+    }
     setBusy(button, false);
     renderRuntimeSetupControls();
   }
+}
+
+async function cancelRuntimeInstallation(){
+  if(!state.runtimeInstallOperationId)return;
+  try{await post("/api/runtime/install/cancel",{id:state.runtimeInstallOperationId});state.runtimeSetupMessage="Cancelling installation and cleaning temporary files…";renderRuntimeSetupControls()}
+  catch(error){notify(error.message||String(error),"error")}
 }
 
 async function verifyRuntimeFromSetup(button) {
@@ -3333,20 +3356,21 @@ async function hypercubeResourcePlan(project) {
   const durations=jobs.map(jobRuntimeMilliseconds).filter((value)=>Number.isFinite(value)&&value>0);
   const measuredSizes=jobs.map((job)=>runSizes.get(job.id)).filter(Boolean).map((item)=>Number(item.datastoreBytes)).filter((value)=>Number.isFinite(value)&&value>0);
   const measuredBytes=medianNumber(measuredSizes);
-  return {medianRuntimeMs:Number.isFinite(medianNumber(durations))?medianNumber(durations):11*60*1000,runtimeSamples:durations.length,perResultBytes:Number.isFinite(measuredBytes)?measuredBytes:318*1000*1000,storageSamples:measuredSizes.length,retainExports:false,storageSource:Number.isFinite(measuredBytes)?"measured":"planning"};
+  return {medianRuntimeMs:Number.isFinite(medianNumber(durations))?medianNumber(durations):11*60*1000,runtimeSamples:durations.length,perResultBytes:Number.isFinite(measuredBytes)?measuredBytes:318*1000*1000,storageSamples:measuredSizes.length,retainExports:false,storageSource:Number.isFinite(measuredBytes)?"measured":"planning",system:report};
 }
 function hypercubeResourceEstimateMarkup({caseCount,concurrency,project,plan,illustrative=false}) {
   const count=Math.max(1,Number(caseCount)||1),waves=count;
   const elapsed=illustrative?"about 15 hours":approximateDuration(waves*plan.medianRuntimeMs);
-  const disk=illustrative?"about 26 GB":`about ${humanBytes(plan.perResultBytes*count)}`;
+  const retainedBytes=plan.perResultBytes*count,disk=illustrative?"about 26 GB":`about ${humanBytes(retainedBytes)}`,memory=Number(plan.system?.physicalMemoryBytes||0),free=Number(plan.system?.workspaceFreeBytes||0),reserve=Number(plan.system?.workspaceSafetyReserveBytes||0);
   const runtimeSource=illustrative?"Planning figure based on roughly 11 minutes per regional run, executed one at a time.":plan.runtimeSamples?`Based on ${plan.runtimeSamples.toLocaleString()} comparable completed run${plan.runtimeSamples===1?"":"s"}.`:"Planning estimate based on roughly 11 minutes per regional run; actual native runtime varies by computer.";
   const storageSource=illustrative?"Planning figure based on roughly 318 MB per retained Datastore.":plan.storageSource==="measured"?`Based on ${plan.storageSamples.toLocaleString()} comparable retained result${plan.storageSamples===1?"":"s"}.`:"Planning estimate based on roughly 318 MB per retained Datastore.";
-  const warning=count>100?"Large Hypercubes can take a long time because Windows runs one case at a time.":"";
-  return `<div class="hypercube-resource-heading"><strong>${illustrative?"81-case Windows planning example":"Resource estimate"}</strong>${illustrative?"":`<span>${count.toLocaleString()} complete run${count===1?"":"s"}</span>`}</div><div class="hypercube-resource-grid"><div><small>Execution</small><strong>${waves.toLocaleString()} queued case${waves===1?"":"s"}</strong><span>${escapeHtml(elapsed)}</span></div><div><small>Native runtime</small><strong>One active slot</strong><span>Standard and Hypercube batches share the workspace FIFO queue</span></div><div><small>Retained disk</small><strong>${escapeHtml(disk)}</strong><span>Datastores only · no optional full CSV trees</span></div></div><p class="muted">${escapeHtml(runtimeSource)} ${escapeHtml(storageSource)}</p><p class="hypercube-parallel-guidance"><span>Windows executes one VisionEval case at a time to avoid shared-state collisions in the installed native runtime.</span></p>${warning?`<p class="hypercube-resource-warning">${escapeHtml(warning)}</p>`:""}`;
+  const warnings=[];if(count>100)warnings.push("Large Hypercubes can take a long time because Windows runs one case at a time.");if(memory&&memory<16*1024**3)warnings.push(`This computer has ${humanBytes(memory)} of RAM. Use a small matrix and close memory-intensive applications; Hypercube use is still allowed.`);if(free&&retainedBytes+reserve>free)warnings.push(`The workspace has ${humanBytes(free)} free, below the estimated retained results plus the ${humanBytes(reserve)} safety reserve. Free space or move the workspace before running.`);
+  return `<div class="hypercube-resource-heading"><strong>${illustrative?"81-case Windows planning example":"Resource estimate"}</strong>${illustrative?"":`<span>${count.toLocaleString()} complete run${count===1?"":"s"}</span>`}</div><div class="hypercube-resource-grid"><div><small>Execution</small><strong>${waves.toLocaleString()} serialized wave${waves===1?"":"s"}</strong><span>${escapeHtml(elapsed)}</span></div><div><small>Native runtime</small><strong>One active slot</strong><span>Standard and Hypercube batches share the workspace FIFO queue</span></div><div><small>Retained disk</small><strong>${escapeHtml(disk)}</strong><span>Datastores only · no optional full CSV trees</span></div>${memory?`<div><small>This computer</small><strong>${escapeHtml(humanBytes(memory))} RAM</strong><span>${memory<16*1024**3?'Limited-resource guidance applies':'Suitable for serialized Hypercubes'}</span></div>`:''}${free?`<div><small>Workspace free</small><strong>${escapeHtml(humanBytes(free))}</strong><span title="${escapeHtml(plan.system?.workspacePath||'')}">${escapeHtml(plan.system?.workspacePath||'Selected workspace')}</span></div>`:''}</div><p class="muted">${escapeHtml(runtimeSource)} ${escapeHtml(storageSource)}</p><p class="hypercube-parallel-guidance"><span>Windows 2.0 safely executes one case at a time. A future verified container or cloud runtime may support parallel cases.</span></p>${warnings.map((warning)=>`<p class="hypercube-resource-warning">${escapeHtml(warning)}</p>`).join('')}`;
 }
-function renderHypercubeSafetyEstimate() {
+async function renderHypercubeSafetyEstimate() {
   const target=$("hypercubeSafetyEstimate");if(!target)return;
-  const plan={medianRuntimeMs:11*60*1000,runtimeSamples:0,perResultBytes:318*1000*1000,storageSamples:0,storageSource:"planning"};
+  let system={};try{system=await loadHypercubeResourceReport()}catch(_error){}
+  const plan={medianRuntimeMs:11*60*1000,runtimeSamples:0,perResultBytes:318*1000*1000,storageSamples:0,storageSource:"planning",system};
   target.innerHTML=hypercubeResourceEstimateMarkup({caseCount:81,concurrency:4,project:null,plan,illustrative:true});bindHypercubeResourceLinks(target);
 }
 function bindHypercubeResourceLinks(container) {
@@ -5663,13 +5687,35 @@ function styleRuntimeAction(button, {hidden = false, enabled = true, label, prim
   setButtonAvailability(button, enabled, disabledReason);
 }
 
+function renderRuntimeInstallProgress() {
+  const operation=state.runtimeInstallProgress,active=state.runtimeSetupPhase==="installing";
+  for(const id of ["runtimeInstallProgress","settingsRuntimeInstallProgress"]){
+    const node=$(id);if(!node)continue;node.hidden=!active;if(!active)continue;
+    const progress=node.querySelector("progress"),label=node.querySelector("span"),percent=Number(operation?.percent);
+    progress.removeAttribute("value");
+    if(Number.isFinite(percent))progress.value=Math.max(0,Math.min(100,percent));
+    label.textContent=operation?.message||state.runtimeSetupMessage||"Preparing installation…";
+  }
+  for(const id of ["onboardingCancelRuntimeInstall","settingsCancelRuntimeInstall"]){
+    const button=$(id);if(button)button.hidden=!active;
+  }
+}
+
 function renderRuntimeSetupControls() {
   const {runtime, native, verified} = runtimeSetupSnapshot();
   const busy = state.runtimeSetupPhase === "installing" || state.runtimeSetupPhase === "verifying";
   if (native) {
-    const canVerify = Boolean(runtime.imagePresent && runtime.executable);
-    styleRuntimeAction($("onboardingVerify"), {enabled:canVerify, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose the runtime paths first."});
-    styleRuntimeAction($("settingsVerifyRuntime"), {enabled:canVerify, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose the runtime paths first."});
+    const pathValues=(prefix)=>Boolean($(`${prefix}VeRuntime`)?.value&&$(`${prefix}VeHome`)?.value&&$(`${prefix}Rscript`)?.value);
+    const message=state.runtimeSetupMessage||(verified?`VisionEval ${runtime.imageReleaseTag||"RC7"} is verified and ready.`:runtime.error||"Choose an existing runtime or install the certified R 4.5.3 and VisionEval RC7 pair.");
+    const tone=busy?"progress":verified?"success":state.runtimeSetupPhase==="failed"?"error":"";
+    setRuntimeSetupStatus($("onboardingRuntimeStatus"),message,tone);setRuntimeSetupStatus($("settingsRuntimeStatus"),message,tone);
+    const showInstall=(!runtime.imagePresent||runtime.provenanceMatches===false)&&!verified;
+    styleRuntimeAction($("onboardingInstallRuntime"), {hidden:!showInstall,enabled:!busy,label:state.runtimeSetupPhase==="installing"?"Installing R 4.5.3 + VisionEval RC7…":"Install R 4.5.3 + VisionEval RC7",primary:showInstall,disabledReason:"Runtime setup is in progress."});
+    styleRuntimeAction($("settingsInstallRuntime"), {hidden:!showInstall,enabled:!busy,label:state.runtimeSetupPhase==="installing"?"Installing R 4.5.3 + VisionEval RC7…":"Install R 4.5.3 + VisionEval RC7",primary:showInstall,disabledReason:"Runtime setup is in progress."});
+    styleRuntimeAction($("onboardingVerify"), {enabled:pathValues("onboarding")&&!busy, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose VE_RUNTIME, VE_HOME, and Rscript.exe first."});
+    styleRuntimeAction($("settingsVerifyRuntime"), {enabled:pathValues("settings")&&!busy, label:verified?"Verify again":"Verify runtime", disabledReason:"Choose VE_RUNTIME, VE_HOME, and Rscript.exe first."});
+    if($("onboardingSkip")){ $("onboardingSkip").hidden=verified;setButtonAvailability($("onboardingSkip"),!busy,"Runtime setup is in progress."); }
+    renderRuntimeInstallProgress();
     return;
   }
 
@@ -5707,21 +5753,23 @@ function renderRuntimeSetupControls() {
   if ($("onboardingRuntimeGuide")) setButtonAvailability($("onboardingRuntimeGuide"), !busy, busy ? "Runtime setup is in progress." : "");
   if ($("onboardingStartDocker")) $("onboardingStartDocker").hidden = verified || !runtime.installed || runtime.running;
   if ($("settingsStartDocker")) $("settingsStartDocker").hidden = verified || !runtime.installed || runtime.running;
+  renderRuntimeInstallProgress();
 }
 
 function maybeShowOnboarding() {
-  if (!window.__TAURI_INTERNALS__?.invoke || state.desktop?.upgradeNoticePending || state.onboardingShown || (state.desktop?.onboardingVersion || 0) >= 1) return;
+  const snapshot=runtimeSetupSnapshot();
+  if (!window.__TAURI_INTERNALS__?.invoke || state.desktop?.upgradeNoticePending || state.onboardingShown || (state.desktop?.onboardingVersion || 0) >= 2 || snapshot.verified) return;
   state.onboardingShown = true;
-  const {runtime,native,profile}=runtimeSetupSnapshot();
+  const {runtime,native,profile}=snapshot;
   if(native&&$("onboardingNativePaths")){
     $("onboardingNativePaths").hidden=false;
     $("onboardingVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
     $("onboardingVeHome").value=profile?.veHomePath||runtime.veHome||runtime.image||"";
     $("onboardingRscript").value=profile?.rscriptPath||runtime.executable||"";
   }
-  $("onboardingRuntimeHelp").textContent=native?"Choose the VE_RUNTIME folder used to launch VisionEval. Workbench will detect VE_HOME and its matching Rscript when possible.":"macOS uses the verified VisionEval Docker runtime.";
+  $("onboardingRuntimeHelp").textContent=native?"Choose existing VE_RUNTIME and VE_HOME folders independently, or install the certified current-user pair. The two folders must remain separate and non-nested.":"macOS uses the verified VisionEval Docker runtime.";
   $("onboardingRuntimeStatus").textContent=native?(runtime.error||((runtime.imagePresent&&runtime.executable)?"Runtime paths detected. Verify them to enable runs.":"Choose VE_RUNTIME first. You can review or override the detected VE_HOME and Rscript paths.")):runtime.error||(!runtime.installed?"Docker Desktop is not installed. You can skip and set it up later.":runtime.imagePresent?`Found ${runtime.image}. Verify it or select Install runtime to reinstall the pinned image.`:runtime.running?"Docker is ready. Select Install runtime to download, verify, and connect the pinned image.":"Docker Desktop is installed but stopped. Install runtime will start it and continue.");
-  if($("onboardingInstallRuntime"))setButtonAvailability($("onboardingInstallRuntime"),Boolean(runtime.installed),"Install Docker Desktop before installing the VisionEval runtime.");
+  if($("onboardingInstallRuntime"))setButtonAvailability($("onboardingInstallRuntime"),native||Boolean(runtime.installed),native?"":"Install Docker Desktop before installing the VisionEval runtime.");
   if($("onboardingStartDocker"))$("onboardingStartDocker").hidden=native||!runtime.installed||runtime.running;
   const canVerify=native?Boolean($("onboardingVeRuntime")?.value&&$("onboardingVeHome")?.value&&$("onboardingRscript")?.value):Boolean(runtime.running&&runtime.imagePresent);
   setButtonAvailability($("onboardingVerify"),canVerify,native?"Choose the VE_RUNTIME, VE_HOME, and Rscript paths first.":!runtime.running?"Start Docker Desktop, then return to verify the runtime.":"Select Install runtime first, then verify it again if needed.");
@@ -5777,6 +5825,7 @@ function renderSettingsWorkspaces() {
 
 $("onboardingVerify").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).catch(()=>{}));
 if($("onboardingInstallRuntime"))$("onboardingInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget,$("onboardingRuntimeStatus")).catch(()=>{}));
+if($("onboardingCancelRuntimeInstall"))$("onboardingCancelRuntimeInstall").addEventListener("click",cancelRuntimeInstallation);
 if($("onboardingStartDocker"))$("onboardingStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
 $("onboardingRuntimeGuide").addEventListener("click",()=>$("runtimeGuideDialog").showModal());
 $("upgradeReviewAssets").addEventListener("click",()=>finishUpgradeNotice("assets"));
@@ -5804,22 +5853,26 @@ function renderAggregateComparison(payload) {
   $("comparisonStats").hidden = false;
   $("comparisonStats").innerHTML = `<div class="notice guidance-notice"><strong>Aggregate synthetic-population comparison</strong><p>Records are summarized independently because IDs are run-local and are not assumed to identify the same entity.</p></div><div class="aggregate-comparison">${summaryMarkup}</div>`;
 }
-async function discoverNativePaths(prefix){
-  const veRuntime=$(`${prefix}VeRuntime`).value;
-  const detected=await post("/api/runtime/discover",{veRuntime});
+async function discoverNativePaths(prefix, detectAll=false){
+  const veRuntime=detectAll?"":$(`${prefix}VeRuntime`).value;
+  const detected=await post("/api/runtime/discover",{veRuntime,veHome:detectAll?"":$(`${prefix}VeHome`).value,rscript:detectAll?"":$(`${prefix}Rscript`).value});
   if(detected.veRuntime)$(`${prefix}VeRuntime`).value=detected.veRuntime;
   if(detected.veHome)$(`${prefix}VeHome`).value=detected.veHome;
   if(detected.rscript)$(`${prefix}Rscript`).value=detected.rscript;
   updateNativeVerifyAvailability();
-  notify(detected.veHome&&detected.rscript?"VE_HOME and Rscript were detected. Review them, then verify.":"VE_RUNTIME selected. Review the advanced paths before verification.",detected.veHome&&detected.rscript?"success":"");
+  const warnings=(detected.warnings||[]).join(" ");
+  notify(detected.veRuntime&&detected.veHome&&detected.rscript?"Existing VE_RUNTIME, VE_HOME, and Rscript.exe were detected. Review them, then verify.":warnings||"No complete native installation was detected. Choose existing paths or use the managed installer.",detected.veRuntime&&detected.veHome&&detected.rscript?"success":"");
 }
 async function chooseNativePath(inputId, command, discoverPrefix=""){try{const path=await window.__TAURI_INTERNALS__.invoke(command);if(path){$(inputId).value=path;if(discoverPrefix)await discoverNativePaths(discoverPrefix);else updateNativeVerifyAvailability()}}catch(error){notify(String(error),"error")}}
 if($("onboardingChooseVeRuntime"))$("onboardingChooseVeRuntime").addEventListener("click",()=>chooseNativePath("onboardingVeRuntime","choose_folder","onboarding"));
 if($("onboardingChooseVeHome"))$("onboardingChooseVeHome").addEventListener("click",()=>chooseNativePath("onboardingVeHome","choose_folder"));
 if($("onboardingChooseRscript"))$("onboardingChooseRscript").addEventListener("click",()=>chooseNativePath("onboardingRscript","choose_rscript"));
+if($("onboardingDetectRuntime"))$("onboardingDetectRuntime").addEventListener("click",()=>discoverNativePaths("onboarding",true).catch(error=>notify(error.message||String(error),"error")));
 if($("settingsChooseVeRuntime"))$("settingsChooseVeRuntime").addEventListener("click",()=>chooseNativePath("settingsVeRuntime","choose_folder","settings"));
 if($("settingsChooseVeHome"))$("settingsChooseVeHome").addEventListener("click",()=>chooseNativePath("settingsVeHome","choose_folder"));
 if($("settingsChooseRscript"))$("settingsChooseRscript").addEventListener("click",()=>chooseNativePath("settingsRscript","choose_rscript"));
+if($("settingsDetectRuntime"))$("settingsDetectRuntime").addEventListener("click",()=>discoverNativePaths("settings",true).catch(error=>notify(error.message||String(error),"error")));
+if($("settingsCancelRuntimeInstall"))$("settingsCancelRuntimeInstall").addEventListener("click",cancelRuntimeInstallation);
 $("onboardingSkip").addEventListener("click",()=>{state.runtimeSetupPhase="idle";state.runtimeSetupMessage="Runtime setup skipped. Run remains unavailable; all other tabs continue to work.";renderRuntimeSetupControls();notify("Runtime setup skipped for now.")});
 $("finishOnboarding").addEventListener("click",async()=>{try{await window.__TAURI_INTERNALS__.invoke("complete_onboarding");state.desktop=await window.__TAURI_INTERNALS__.invoke("desktop_state");$("onboardingDialog").close();notify("Workspace setup complete.","success");renderAll()}catch(error){notify(String(error),"error")}});
 
@@ -5882,6 +5935,7 @@ async function openSettings(page="settingsWorkspace") {
   $("maxConcurrentRuns").disabled=native;
   $("autoStartDocker").closest("label").hidden=native;
   $("memoryLimit").closest("label").hidden=native;
+  if($("dockerSettingsHelp"))$("dockerSettingsHelp").hidden=native;
   if(native&&$("settingsNativePaths")){
     $("settingsNativePaths").hidden=false;
     $("settingsVeRuntime").value=profile?.veRuntimePath||runtime.veRuntime||"";
@@ -5892,7 +5946,7 @@ async function openSettings(page="settingsWorkspace") {
   const ready=runtimeSetupSnapshot().verified,statusLabel=ready?'Ready':runtime.installed?'Needs attention':'Not configured',statusClass=ready?'success':runtime.installed?'warning':'neutral',image=profile?.imageReference||runtime.image||'—',shortImage=image.length>54?`${image.slice(0,31)}…${image.slice(-18)}`:image,shortDigest=digest.length>36?`${digest.slice(0,19)}…${digest.slice(-12)}`:digest;
   $("settingsRuntimeSummary").className='settings-runtime-overview';
   $("settingsRuntimeSummary").innerHTML=`<section class="runtime-readiness ${statusClass}"><div><small>Runtime status</small><h4>${escapeHtml(statusLabel)}</h4><p>${escapeHtml(ready?'VisionEval is verified and ready for model runs.':runtime.error||'Complete runtime setup and verification before running models.')}</p></div><div class="runtime-primary-facts"><span><small>VisionEval</small><strong>${escapeHtml(native?(profile?.runtimeVersion||'Not verified'):(runtime.imageReleaseTag||'Not verified'))}</strong></span><span><small>Adapter</small><strong>${escapeHtml(native?'Native':profile?.adapter||runtime.adapter||'—')}</strong></span><span><small>Architecture</small><strong>${escapeHtml(profile?.architecture||runtime.hostArchitecture||'—')}</strong></span><span><small>Verified</small><strong>${escapeHtml(profile?.verifiedAt||'Never')}</strong></span></div></section><details class="settings-disclosure"><summary>Image identity</summary><dl class="runtime-detail-list"><dt>Image</dt><dd><code title="${escapeHtml(image)}">${escapeHtml(shortImage)}</code></dd><dt>Digest</dt><dd><code title="${escapeHtml(digest)}">${escapeHtml(shortDigest)}</code> <button id="copyRuntimeDigest" type="button" class="secondary" ${digest==='Not verified'?'disabled':''}>Copy full digest</button></dd><dt>Release</dt><dd>${escapeHtml(runtime.imageReleaseTag||'—')} ${runtime.imageRevision?`· ${escapeHtml(runtime.imageRevision.slice(0,12))}`:''}</dd></dl></details><details class="settings-disclosure"><summary>Verification</summary><p>${escapeHtml(runtime.imageCompatibilityPatch?'Workbench compatibility verified.':'Compatibility has not been verified.')}</p></details><details class="settings-disclosure"><summary>Advanced details</summary><dl class="runtime-detail-list"><dt>Platform</dt><dd>${escapeHtml(profile?`${profile.platform} / ${profile.architecture}`:'—')}</dd>${native?`<dt>VE_RUNTIME</dt><dd>${escapeHtml(profile?.veRuntimePath||runtime.veRuntime||'—')}</dd><dt>VE_HOME</dt><dd>${escapeHtml(profile?.veHomePath||runtime.veHome||'—')}</dd><dt>Rscript</dt><dd>${escapeHtml(profile?.rscriptPath||runtime.executable||'—')}</dd>`:''}</dl></details>`;
-  if($("settingsInstallRuntime"))setButtonAvailability($("settingsInstallRuntime"),Boolean(runtime.installed),"Install Docker Desktop before installing the VisionEval runtime.");
+  if($("settingsInstallRuntime")&&!native)setButtonAvailability($("settingsInstallRuntime"),Boolean(runtime.installed),"Install Docker Desktop before installing the VisionEval runtime.");
   if($("settingsStartDocker"))$("settingsStartDocker").hidden=native||!runtime.installed||runtime.running;
   $("settingsVerifyRuntime").disabled=native?!($("settingsVeRuntime")?.value&&$("settingsVeHome")?.value&&$("settingsRscript")?.value):!runtime.running||!runtime.imagePresent;
   if($("copyRuntimeDigest")) $("copyRuntimeDigest").addEventListener("click",async()=>{try{await navigator.clipboard.writeText(digest);notify("Runtime digest copied.","success")}catch(error){notify("The digest could not be copied.","error")}});
@@ -7232,7 +7286,12 @@ function openHypercubeRunProject(projectId){
 }
 function renderHypercubeRun(){const id=fillHypercubeWorkflowSelect($('hypercubeRunProject'),true),project=hypercubeWorkflowProjects().find((item)=>item.id===id),target=$('hypercubeRunCounts'),stopButton=$('stopHypercubeRuns');if(!project){target.innerHTML='';setButtonAvailability(stopButton,false,'Choose a Hypercube project first.');renderRunHistoryActions();return;}const plan=hypercubeRunPlan(project),counts=plan.counts,eta=hypercubeEtaEstimate(project,plan);target.innerHTML=['successful','missing','failed','waiting','running'].map((key)=>metric(key[0].toUpperCase()+key.slice(1),counts[key]||0)).join('');$('runMissingHypercube').disabled=!(counts.missing);$('retryFailedHypercube').disabled=!(counts.failed);const total=plan.entries.length,done=counts.successful||0,stoppable=(counts.waiting||0)+(counts.preparing||0)+(counts.running||0)+(counts.exporting||0),active=stoppable+(counts.stopping||0),stopping=state.hypercubeStopPendingProject===project.id;stopButton.textContent=stopping?'Stopping Hypercube…':'Stop This Hypercube';setButtonAvailability(stopButton,Boolean(stoppable)&&!stopping,stopping||(!stoppable&&(counts.stopping||0))?'This Hypercube is already stopping.':'This Hypercube has no active or waiting runs.');const concurrency=1,waves=total,runtime=WorkbenchHypercubeSummary.elapsedRuntime({jobs:plan.jobs}),elapsed=runtime.started?formatDuration(runtime.elapsedMs):'Not started';$('hypercubeBatchCard').className='panel';$('hypercubeBatchCard').innerHTML=`<div class="section-title"><div><h3>${escapeHtml(project.name)}</h3><p>${done} of ${total} complete${active?` · ${active} active or queued`:''}</p></div><span class="pill">${Math.round(done/Math.max(1,total)*100)}%</span></div><div class="metric-grid">${metric('Queued cases',waves)}${metric('Elapsed',elapsed)}${metric('Native slots',concurrency)}${metric('Estimated remaining',eta.remainingMs?approximateDuration(eta.remainingMs):eta.shortLabel)} ${metric('Status',active?'Processing':done===total?'Complete':'Ready')}</div><p class="hypercube-eta-source" role="status" aria-live="polite">${escapeHtml(eta.queuedBehind?`${eta.detail}. This Hypercube is queued behind another active batch.`:eta.detail)}</p><p class="hypercube-parallel-guidance"><span>Windows runs one VisionEval case at a time through the installed native runtime. Results retain Datastores only; Hypercube runs do not generate the optional full CSV tree.</span></p><progress max="${total}" value="${done}"></progress>`;$('hypercubeRunCases').innerHTML=plan.entries.map((item)=>`<button type="button" class="hypercube-case-row" data-hypercube-run-job="${escapeHtml(item.jobId)}" ${item.jobId?'':'disabled'}><span>${escapeHtml(item.name)}</span><span class="pill">${escapeHtml(item.status)}</span></button>`).join('');const history=plan.jobs;$('hypercubeRunHistory').className='run-history-scroll'+(history.length?'':' empty-state');$('hypercubeRunHistory').innerHTML=history.length?history.map((job)=>`<button class="job-card" type="button" data-hypercube-history-job="${escapeHtml(job.id)}"><strong>${escapeHtml(jobDisplayName(job))}</strong><span>${escapeHtml(job.state)} · ${escapeHtml(jobRuntime(job))}</span></button>`).join(''):'No Hypercube jobs.';document.querySelectorAll('[data-hypercube-run-job],[data-hypercube-history-job]').forEach((button)=>button.addEventListener('click',()=>showHypercubeJobLog(button.dataset.hypercubeRunJob||button.dataset.hypercubeHistoryJob)));renderRunHistoryActions();}
 async function showHypercubeJobLog(jobId){if(!jobId)return;const job=(state.data?.jobs||[]).find((item)=>item.id===jobId);$('hypercubeRunLogTitle').textContent=job?`${jobDisplayName(job)} · ${job.state}`:'Run log';$('hypercubeRunLog').textContent='Loading log…';try{const chunk=await request(`/api/run-log?id=${encodeURIComponent(jobId)}&offset=0`);$('hypercubeRunLog').textContent=chunk.text||'No log output was recorded.';}catch(error){$('hypercubeRunLog').textContent=error.message;}}
-async function startHypercubePlannedRun(kind){const project=hypercubeWorkflowProjects().find((item)=>item.id===$('hypercubeRunProject').value);if(!project)return;const mode=state.data?.runtime?.adapter==='native'?'queued':'parallel';try{await post('/api/hypercube-run/start',{projectId:project.id,selection:kind,mode});notify(`${kind==='failed'?'Failed':'Missing'} Hypercube work was queued behind any active batch.`,'success');await refreshState({quiet:true});renderHypercubeRun();}catch(error){notify(error.message,'error');}}
+async function confirmHypercubeDiskPlan(project,kind){
+  const runPlan=hypercubeRunPlan(project),count=kind==='failed'?(runPlan.counts.failed||0):(runPlan.counts.missing||0);if(!count)return true;
+  try{const plan=await hypercubeResourcePlan(project),free=Number(plan.system?.workspaceFreeBytes||0),reserve=Number(plan.system?.workspaceSafetyReserveBytes||0),needed=plan.perResultBytes*count;if(free&&needed+reserve>free)return confirmWorkbench(`This ${count}-case run may retain about ${humanBytes(needed)}. The workspace has ${humanBytes(free)} free, which is below that estimate plus the ${humanBytes(reserve)} safety reserve.\n\nYou can continue, but the workspace may run out of space.`,{title:'Limited workspace space',confirmLabel:'Run Anyway',cancelLabel:'Go Back'});}catch(_error){}
+  return true;
+}
+async function startHypercubePlannedRun(kind){const project=hypercubeWorkflowProjects().find((item)=>item.id===$('hypercubeRunProject').value);if(!project||!await confirmHypercubeDiskPlan(project,kind))return;const mode='queued';try{await post('/api/hypercube-run/start',{projectId:project.id,selection:kind,mode});notify(`${kind==='failed'?'Failed':'Missing'} Hypercube work was queued behind any active batch.`,'success');await refreshState({quiet:true});renderHypercubeRun();}catch(error){notify(error.message,'error');}}
 async function stopSelectedHypercube(){const project=hypercubeWorkflowProjects().find((item)=>item.id===$('hypercubeRunProject').value);if(!project)return;const jobs=(state.data?.jobs||[]).filter((job)=>job.projectId===project.id),active=jobs.filter((job)=>activeJobStates.has(job.state)&&job.state!=='stopping').length,waiting=jobs.filter((job)=>job.state==='waiting').length;if(!active&&!waiting)return notify('This Hypercube has no active or waiting runs.','error');if(!await confirmWorkbench(`Stop ${project.name}?\n\nThis will stop ${active} active ${active===1?'run':'runs'} and remove ${waiting} waiting ${waiting===1?'run':'runs'} for this Hypercube. Other queued batches and completed results are preserved.`,{title:'Stop this Hypercube?',confirmLabel:'Stop Hypercube',cancelLabel:'Keep Running'}))return;state.hypercubeStopPendingProject=project.id;renderHypercubeRun();try{const result=await post('/api/hypercube-run/stop',{projectId:project.id}),message=`Stopped ${result.stopped||0} active ${(result.stopped||0)===1?'run':'runs'} and removed ${result.removed||0} queued ${(result.removed||0)===1?'run':'runs'}.`;for(let attempt=0;attempt<80;attempt+=1){await refreshState({quiet:true});renderHypercubeRun();const unresolved=(state.data?.jobs||[]).some((job)=>job.projectId===project.id&&(job.state==='waiting'||activeJobStates.has(job.state)));if(!unresolved)break;await new Promise((resolve)=>setTimeout(resolve,250));}const remains=(state.data?.jobs||[]).filter((job)=>job.projectId===project.id&&(job.state==='waiting'||activeJobStates.has(job.state))).length;notify(remains?`${message} ${remains} ${remains===1?'run is':'runs are'} still finishing cleanup.`:result.failures?.length?`${message} ${result.failures.length} action failed.`:message,remains||result.failures?.length?'error':'success');}catch(error){notify(error.message,'error')}finally{state.hypercubeStopPendingProject='';renderHypercubeRun();}}
 function openHypercubeArea(subpage='hypercubeBuildPage'){
   state.activeHypercubeSubpage=subpage;

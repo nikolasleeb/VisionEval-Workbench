@@ -177,8 +177,14 @@ def build_guide(output: Path):
 
 def build_whats_new(output: Path):
     s = styles()
+    s["title"] = ParagraphStyle("WhatsNewTitle", parent=s["title"], fontSize=23, leading=27, spaceAfter=10)
+    s["subtitle"] = ParagraphStyle("WhatsNewSubtitle", parent=s["subtitle"], fontSize=10.5, leading=13, spaceAfter=12)
+    s["h1"] = ParagraphStyle("WhatsNewH1", parent=s["h1"], fontSize=15, leading=18, spaceBefore=7, spaceAfter=4)
+    s["h2"] = ParagraphStyle("WhatsNewH2", parent=s["h2"], fontSize=12.5, leading=15, spaceBefore=6, spaceAfter=3)
+    s["body"] = ParagraphStyle("WhatsNewBody", parent=s["body"], fontSize=8.7, leading=11.2, spaceAfter=4)
+    s["bullet"] = ParagraphStyle("WhatsNewBullet", parent=s["bullet"], fontSize=8.5, leading=10.8)
     story = [
-        Spacer(1, 0.4 * inch),
+        Spacer(1, 0.16 * inch),
         Paragraph("What's New in VisionEval Workbench 2.0", s["title"]),
         Paragraph("Windows x64 - native runtime edition", s["subtitle"]),
     ]

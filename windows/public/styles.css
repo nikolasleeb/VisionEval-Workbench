@@ -468,6 +468,9 @@ td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px var(--blue); back
 .runtime-setup-status.error { color:var(--red); background:color-mix(in srgb, var(--red) 9%, var(--surface)); border-color:color-mix(in srgb, var(--red) 45%, var(--line)); }
 .runtime-setup-status.progress { color:var(--text); background:var(--surface-2); }
 .runtime-setup-status-icon { flex:0 0 auto; font-size:18px; line-height:1; }
+.runtime-install-progress { display:grid; grid-template-columns:minmax(120px,1fr) minmax(180px,2fr); gap:10px; align-items:center; margin-top:12px; }
+.runtime-install-progress progress { width:100%; }
+.runtime-install-progress span { color:var(--muted); font-size:12px; }
 .run-runtime-card { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .runtime-help { color: var(--muted); font-size: 13px; margin: -10px 4px 20px; }
 .runtime-fact { min-width: 0; border-right: 1px solid var(--line); padding-right: 14px; }
@@ -748,8 +751,8 @@ td[contenteditable="true"]:focus { box-shadow: inset 0 0 0 2px var(--blue); back
 
 dialog { color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; width: min(530px, calc(100vw - 40px)); max-height: calc(var(--workbench-viewport-height) - (2 * var(--workbench-dialog-gutter))); overflow-y: auto; box-shadow: 0 24px 100px #000a; }
 dialog::backdrop { background: #05070abf; backdrop-filter: blur(3px); }
-.hypercube-safety-dialog { width: calc(100vw - 48px); max-width: none; height: calc(var(--workbench-viewport-height) - 48px); max-height: none; padding: 0; }
-.hypercube-safety-form { min-height: 100%; display: grid; grid-template-rows: auto 1fr auto; }
+.hypercube-safety-dialog { width: calc(100vw - 64px); max-width: none; height: min(820px, calc(var(--workbench-viewport-height) - 112px)); max-height: calc(var(--workbench-viewport-height) - 112px); padding: 0; overflow:hidden; }
+.hypercube-safety-form { height: 100%; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr) auto; }
 .hypercube-safety-header, .hypercube-safety-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 24px; border-bottom: 1px solid var(--line); }
 .hypercube-safety-header p { margin: 0; }
 .hypercube-safety-content { display: grid; place-items: center; padding: 32px; overflow: auto; }
@@ -761,11 +764,12 @@ dialog::backdrop { background: #05070abf; backdrop-filter: blur(3px); }
 .hypercube-safety-card .hypercube-safety-estimate p { font-size:12px; line-height:1.45; }
 .hypercube-safety-actions { justify-content: flex-end; border-top: 1px solid var(--line); border-bottom: 0; }
 @media (max-width: 640px) {
-  .hypercube-safety-dialog { width: calc(100vw - 20px); height: calc(var(--workbench-viewport-height) - 20px); }
+  .hypercube-safety-dialog { width: calc(100vw - 24px); height: calc(var(--workbench-viewport-height) - 72px); max-height:calc(var(--workbench-viewport-height) - 72px); }
   .hypercube-safety-header, .hypercube-safety-actions { padding: 14px; }
   .hypercube-safety-content { padding: 16px; }
   .hypercube-safety-card { grid-template-columns: 1fr; padding: 20px; }
   .hypercube-safety-actions { align-items: stretch; flex-direction: column-reverse; }
+  .runtime-install-progress { grid-template-columns:1fr; }
 }
 .mode-option { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
 .mode-option small { display: block; color: var(--muted); margin-top: 4px; }

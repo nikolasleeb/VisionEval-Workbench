@@ -48,9 +48,10 @@ class RuntimeInstallOperationManager:
         self.runtime = runtime
         self.lock = threading.RLock()
         self.operations: dict[str, dict] = {}
+        self.cancel_events: dict[str, threading.Event] = {}
         self.active_id = ""
 
-    def start(self, profile: dict | None = None) -> dict:
+    def start(self, profile: dict | None = None, install_options: dict | None = None) -> dict:
         with self.lock:
             active = self.operations.get(self.active_id, {})
             if active.get("state") in {"waiting", "running"}:
@@ -67,11 +68,18 @@ class RuntimeInstallOperationManager:
                 "result": None,
             }
             self.operations[operation_id] = operation
+            self.cancel_events[operation_id] = threading.Event()
             self.active_id = operation_id
-        threading.Thread(target=self._run, args=(operation_id, profile), daemon=True).start()
+        threading.Thread(target=self._run, args=(operation_id, profile, install_options), daemon=True).start()
         return self.status(operation_id)
 
-    def _run(self, operation_id: str, profile: dict | None) -> None:
+    def _progress(self, operation_id: str, phase: str, message: str, **details) -> None:
+        with self.lock:
+            operation = self.operations.get(operation_id)
+            if operation:
+                operation.update({"phase": phase, "message": message, **details})
+
+    def _run(self, operation_id: str, profile: dict | None, install_options: dict | None) -> None:
         with self.lock:
             operation = self.operations[operation_id]
             operation.update({
@@ -81,10 +89,13 @@ class RuntimeInstallOperationManager:
                 "message": "Downloading and verifying the pinned runtime… This can take several minutes the first time.",
             })
         try:
-            result = (
-                self.runtime.install_or_update_runtime(profile)
-                if profile is not None
-                else self.runtime.install_or_update_runtime()
+            result = self.runtime.install_or_update_runtime(
+                profile,
+                options=install_options,
+                progress=lambda phase, message, **details: self._progress(
+                    operation_id, phase, message, **details
+                ),
+                cancel_event=self.cancel_events[operation_id],
             )
             with self.lock:
                 operation.update({
@@ -95,10 +106,11 @@ class RuntimeInstallOperationManager:
                     "result": result,
                 })
         except Exception as exc:
+            cancelled = self.cancel_events.get(operation_id, threading.Event()).is_set()
             with self.lock:
                 operation.update({
-                    "state": "failed",
-                    "phase": "failed",
+                    "state": "cancelled" if cancelled else "failed",
+                    "phase": "cancelled" if cancelled else "failed",
                     "finishedAt": now_iso(),
                     "message": str(exc),
                 })
@@ -108,6 +120,17 @@ class RuntimeInstallOperationManager:
             operation = self.operations.get(operation_id)
             if not operation:
                 raise WorkspaceError("Unknown runtime installation operation")
+            return dict(operation)
+
+    def cancel(self, operation_id: str) -> dict:
+        with self.lock:
+            operation = self.operations.get(operation_id)
+            if not operation:
+                raise WorkspaceError("Unknown runtime installation operation")
+            if operation.get("state") not in {"waiting", "running"}:
+                return dict(operation)
+            self.cancel_events[operation_id].set()
+            operation.update({"phase": "cancelling", "message": "Cancelling runtime installation and cleaning temporary files…"})
             return dict(operation)
 
 
@@ -271,8 +294,11 @@ class WorkbenchApplication:
                     manager.cancel(item["id"])
                 except Exception as exc:
                     failures.append({"id": item["id"], "kind": kind, "message": str(exc)})
-        installs = self._manager_active(self.runtime_installations, "runtime_installation")
-        failures.extend({"id": item["id"], "kind": "runtime_installation", "message": "Runtime installation cannot be interrupted safely; wait for it to finish."} for item in installs)
+        for item in self._manager_active(self.runtime_installations, "runtime_installation"):
+            try:
+                self.runtime_installations.cancel(item["id"])
+            except Exception as exc:
+                failures.append({"id": item["id"], "kind": "runtime_installation", "message": str(exc)})
         return {"ok": not failures, "failures": failures}
 
     def state(self) -> dict:
@@ -875,14 +901,21 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.runtime.pull_image())
                 elif parsed.path == "/api/runtime/install":
                     profile = application.update_checks.runtime_candidate() if payload.get("source") == "update" else None
-                    send_json(self, application.runtime.install_or_update_runtime(profile))
+                    send_json(self, application.runtime.install_or_update_runtime(
+                        profile, options=payload if application.runtime.adapter == "native" else None
+                    ))
                 elif parsed.path == "/api/runtime/install/start":
                     profile = application.update_checks.runtime_candidate() if payload.get("source") == "update" else None
-                    send_json(self, application.runtime_installations.start(profile), 202)
+                    options = payload if application.runtime.adapter == "native" else None
+                    send_json(self, application.runtime_installations.start(profile, options), 202)
+                elif parsed.path == "/api/runtime/install/cancel":
+                    send_json(self, application.runtime_installations.cancel(payload.get("id", "")))
                 elif parsed.path == "/api/runtime/restore-previous":
                     send_json(self, application.runtime.restore_previous_runtime())
                 elif parsed.path == "/api/runtime/discover":
-                    send_json(self, application.runtime.discover_native(payload.get("veRuntime", "")))
+                    send_json(self, application.runtime.discover_native(
+                        payload.get("veRuntime", ""), payload.get("veHome", ""), payload.get("rscript", "")
+                    ))
                 elif parsed.path == "/api/runtime/verify":
                     if application.runtime.adapter == "native":
                         application.runtime.configure_native(payload.get("veRuntime", ""), payload.get("veHome", ""), payload.get("rscript", ""))

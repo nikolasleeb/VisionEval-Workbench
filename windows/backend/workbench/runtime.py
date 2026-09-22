@@ -8,10 +8,12 @@ import platform
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 import urllib.error
 import urllib.request
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -89,6 +91,72 @@ RELEASE_CHECK_TTL_SECONDS = 24 * 60 * 60
 TERMINAL_STATES = {"succeeded", "failed", "cancelled", "cleanup_failed"}
 ACTIVE_STATES = {"preparing", "running", "exporting", "stopping"}
 MAX_GLOBAL_RUNS = 1
+CERTIFIED_R_VERSION = "4.5.3"
+CERTIFIED_R_SERIES = "4.5"
+CERTIFIED_R_INSTALLER_NAME = f"R-{CERTIFIED_R_VERSION}-win.exe"
+CERTIFIED_R_INSTALLER_URL = f"https://cran.r-project.org/bin/windows/base/old/{CERTIFIED_R_VERSION}/{CERTIFIED_R_INSTALLER_NAME}"
+CERTIFIED_R_INSTALLER_SHA256 = "768ae31bb0b6056def5b1a9789a7dc49306bd037d69b0a99cdd90183aa0c1a31"
+CERTIFIED_VE_ARCHIVE_NAME = "VE-Installer_WinLibrary-R4.5_2026-09-07.zip"
+CERTIFIED_VE_ARCHIVE_URL = f"https://github.com/VisionEval/VisionEval-4/releases/download/{RC7_RELEASE_TAG}/{CERTIFIED_VE_ARCHIVE_NAME}"
+CERTIFIED_VE_ARCHIVE_SHA256 = "01a3f58ee5eb0ab40113cc8835ca99ab1d060b89ff9b442b41c35ce93708155d"
+
+
+class RuntimeInstallCancelled(WorkspaceError):
+    """Raised when the user cancels a managed runtime installation."""
+
+
+def _canonical_path(value: str | Path) -> Path:
+    return Path(value).expanduser().resolve(strict=False)
+
+
+def validate_native_path_separation(runtime: str | Path, home: str | Path) -> tuple[Path, Path]:
+    """Return canonical native paths after proving neither contains the other."""
+    runtime_path, home_path = _canonical_path(runtime), _canonical_path(home)
+    if os.path.normcase(str(runtime_path)) == os.path.normcase(str(home_path)):
+        raise WorkspaceError("VE_RUNTIME and VE_HOME must be different folders.")
+    try:
+        common = Path(os.path.commonpath([str(runtime_path), str(home_path)]))
+    except ValueError:
+        common = None
+    if common is not None and os.path.normcase(str(common)) in {
+        os.path.normcase(str(runtime_path)), os.path.normcase(str(home_path))
+    }:
+        raise WorkspaceError("VE_RUNTIME and VE_HOME must be separate folders; neither can be inside the other.")
+    return runtime_path, home_path
+
+
+def read_description(path: Path) -> dict[str, str]:
+    """Read the fields needed from an R package DESCRIPTION file."""
+    values: dict[str, str] = {}
+    current = ""
+    if not path.is_file():
+        return values
+    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        if raw[:1].isspace() and current:
+            values[current] = f"{values[current]} {raw.strip()}".strip()
+            continue
+        if ":" not in raw:
+            current = ""
+            continue
+        current, value = raw.split(":", 1)
+        current = current.strip()
+        values[current] = value.strip()
+    return values
+
+
+def native_runtime_provenance(home: str | Path | None) -> dict[str, str]:
+    """Identify an installed native release from package commit metadata."""
+    if not home:
+        return {"releaseTag": "", "revision": "", "packageVersion": ""}
+    candidates = sorted(Path(home).glob("ve-lib/*/VEStart/DESCRIPTION"), reverse=True)
+    fields = read_description(candidates[0]) if candidates else {}
+    revision = str(fields.get("VECommit") or fields.get("RemoteSha") or "").strip().lower()
+    release = RC7_RELEASE_TAG if revision == RC7_RELEASE_COMMIT else ""
+    return {
+        "releaseTag": release,
+        "revision": revision,
+        "packageVersion": str(fields.get("Version") or ""),
+    }
 
 
 class RunFailure(WorkspaceError):
@@ -238,7 +306,24 @@ def find_native_home(configured: str = "") -> Path | None:
     return None
 
 
-def discover_native_installation(runtime: str = "", home: str = "", rscript: str = "") -> dict[str, str]:
+def discover_native_installation(runtime: str = "", home: str = "", rscript: str = "") -> dict[str, Any]:
+    warnings: list[str] = []
+    if runtime:
+        candidate = Path(runtime).expanduser()
+        markers = (
+            (candidate / ".Renviron").is_file(),
+            (candidate / ".Rprofile").is_file(),
+            (candidate / "r.version").is_file(),
+            (candidate / "VisionEval.Rproj").is_file(),
+            (candidate / "WORKBENCH-RELEASE").is_file(),
+            any(candidate.glob("launch_R*.bat")) if candidate.is_dir() else False,
+        )
+        if not candidate.is_dir() or not any(markers):
+            warnings.append(f"Ignored invalid VE_RUNTIME candidate: {runtime}")
+    if home and not (Path(home).expanduser() / "ve-lib").is_dir():
+        warnings.append(f"Ignored invalid VE_HOME candidate: {home}")
+    if rscript and not Path(rscript).expanduser().is_file():
+        warnings.append(f"Ignored invalid Rscript.exe candidate: {rscript}")
     runtime_path = find_native_runtime(runtime)
     environment = read_renviron(runtime_path) if runtime_path else {}
     home_path = find_native_home(home or environment.get("VE_HOME", ""))
@@ -251,10 +336,17 @@ def discover_native_installation(runtime: str = "", home: str = "", rscript: str
                 version_hint = match.group(1)
                 break
     resolved_rscript = find_rscript_executable(rscript, version_hint, runtime_path or "")
+    if runtime_path and home_path:
+        try:
+            validate_native_path_separation(runtime_path, home_path)
+        except WorkspaceError as exc:
+            warnings.append(str(exc))
+            home_path = None
     return {
         "veRuntime": str(runtime_path or ""),
         "veHome": str(home_path or ""),
         "rscript": str(resolved_rscript or ""),
+        "warnings": warnings,
     }
 
 
@@ -439,10 +531,10 @@ class RuntimeManager:
             process.kill()
             process.wait(timeout=timeout)
 
-    def discover_native(self, runtime: str = "") -> dict[str, str]:
+    def discover_native(self, runtime: str = "", home: str = "", rscript: str = "") -> dict[str, Any]:
         if self.adapter != "native":
             raise WorkspaceError("Native VisionEval discovery is available only on Windows")
-        return discover_native_installation(runtime)
+        return discover_native_installation(runtime, home, rscript)
 
     def configure_native(self, runtime: str, home: str, rscript: str) -> None:
         if self.adapter != "native":
@@ -453,6 +545,7 @@ class RuntimeManager:
         resolved_home = find_native_home(home)
         if not resolved_home or resolved_home != Path(home).expanduser().resolve():
             raise WorkspaceError("Choose a VE_HOME folder containing ve-lib")
+        resolved_runtime, resolved_home = validate_native_path_separation(resolved_runtime, resolved_home)
         resolved_rscript = find_rscript_executable(rscript)
         if not resolved_rscript or Path(resolved_rscript).resolve() != Path(rscript).expanduser().resolve():
             raise WorkspaceError("Choose a valid Rscript.exe")
@@ -1125,14 +1218,15 @@ class RuntimeManager:
             error = "VE_HOME was not found. Choose the folder containing ve-lib."
         elif not self.cli_path.is_file():
             error = "The Workbench VisionEval command script is missing."
+        provenance = native_runtime_provenance(home)
         return {
             "installed": bool(rscript), "running": present, "executable": rscript or "",
             "hostArchitecture": platform.machine(), "supported": platform.system() == "Windows",
             "image": str(home or ""), "imagePresent": present, "adapter": "native",
             "veRuntime": str(runtime or ""), "veHome": str(home or ""),
             "imageDigest": "", "digestMatches": True,
-            "imageReleaseTag": "", "imageRevision": "",
-            "imageCompatibilityPatch": "", "provenanceMatches": True,
+            "imageReleaseTag": provenance["releaseTag"], "imageRevision": provenance["revision"],
+            "imageCompatibilityPatch": "", "provenanceMatches": provenance["releaseTag"] == RC7_RELEASE_TAG,
             "releaseCheck": self.release_status(), "dockerMemoryBytes": 0, "memoryLimitGb": self.memory_limit_gb,
             "remoteStatus": "local", "profileEnabled": self.runtime_enabled, "error": error,
         }
@@ -1150,10 +1244,252 @@ class RuntimeManager:
             raise WorkspaceError((result.stderr or result.stdout).strip() or "Docker image pull failed")
         return {"ok": True, "image": self.image, "digest": self.image_digest(), "output": result.stdout.strip()}
 
-    def install_or_update_runtime(self, profile: dict[str, Any] | None = None) -> dict[str, Any]:
+    @staticmethod
+    def _install_progress(callback: Callable[..., None] | None, phase: str, message: str, **details: Any) -> None:
+        if callback:
+            callback(phase, message, **details)
+
+    @staticmethod
+    def _check_install_cancelled(cancel_event: threading.Event | None) -> None:
+        if cancel_event and cancel_event.is_set():
+            raise RuntimeInstallCancelled("Runtime installation was cancelled.")
+
+    def _download_verified(
+        self,
+        url: str,
+        destination: Path,
+        expected_sha256: str,
+        *,
+        phase: str,
+        progress: Callable[..., None] | None,
+        cancel_event: threading.Event | None,
+    ) -> None:
+        if not url.lower().startswith("https://"):
+            raise WorkspaceError("Managed runtime downloads require a pinned HTTPS URL.")
+        request = urllib.request.Request(url, headers={"User-Agent": "VisionEval-Workbench/2.0.0"})
+        digest = hashlib.sha256()
+        received = 0
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response, destination.open("wb") as handle:
+                total = int(response.headers.get("Content-Length") or 0)
+                while True:
+                    self._check_install_cancelled(cancel_event)
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    handle.write(chunk)
+                    digest.update(chunk)
+                    received += len(chunk)
+                    self._install_progress(
+                        progress,
+                        phase,
+                        f"Downloading {destination.name}",
+                        bytesReceived=received,
+                        bytesTotal=total,
+                        percent=round(received * 100 / total, 1) if total else None,
+                    )
+        except (OSError, urllib.error.URLError) as exc:
+            raise WorkspaceError(f"Could not download {destination.name}: {exc}") from exc
+        if digest.hexdigest().lower() != expected_sha256.lower():
+            raise WorkspaceError(f"The checksum for {destination.name} does not match the certified manifest.")
+
+    @staticmethod
+    def _compatible_rscript() -> str | None:
+        roots = [
+            Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local"))) / "Programs" / "R",
+            Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "R",
+        ]
+        candidates = [os.environ.get("RSCRIPT", ""), shutil.which("Rscript") or ""]
+        for root in roots:
+            candidates.extend(str(path) for path in sorted(root.glob("R-4.5*/bin/Rscript.exe"), reverse=True))
+            candidates.extend(str(path) for path in sorted(root.glob("R-4.5*/bin/x64/Rscript.exe"), reverse=True))
+        for value in candidates:
+            if value and Path(value).is_file() and re.search(r"R-4\.5(?:\.|[/\\])", str(Path(value))):
+                return str(Path(value).resolve())
+        return None
+
+    @staticmethod
+    def _safe_extract_runtime(archive: Path, destination: Path, cancel_event: threading.Event | None) -> Path:
+        destination.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(archive) as bundle:
+            root = destination.resolve()
+            for member in bundle.infolist():
+                RuntimeManager._check_install_cancelled(cancel_event)
+                if (member.external_attr >> 16) & 0o170000 == 0o120000:
+                    raise WorkspaceError("The VisionEval archive contains an unsupported symbolic link.")
+                target = (destination / member.filename).resolve()
+                try:
+                    target.relative_to(root)
+                except ValueError as exc:
+                    raise WorkspaceError("The VisionEval archive contains an unsafe path.") from exc
+                bundle.extract(member, destination)
+        descriptions = sorted(destination.rglob("VEStart/DESCRIPTION"))
+        if not descriptions:
+            raise WorkspaceError("The VisionEval archive does not contain the VEStart package.")
+        return descriptions[0].parent.parent
+
+    @staticmethod
+    def _write_native_runtime_files(runtime: Path, home: Path, rscript: Path) -> None:
+        runtime.mkdir(parents=True, exist_ok=True)
+        (runtime / "models").mkdir(exist_ok=True)
+        runtime_text, home_text = runtime.as_posix(), home.as_posix()
+        environment = f'VE_HOME="{home_text}"\nVE_RUNTIME="{runtime_text}"\n'
+        (runtime / ".Renviron").write_text(environment, encoding="utf-8")
+        home.mkdir(parents=True, exist_ok=True)
+        (home / ".Renviron").write_text(environment, encoding="utf-8")
+        (runtime / "r.version").write_text(f"R version {CERTIFIED_R_VERSION}\n", encoding="utf-8")
+        profile = (
+            've.home <- Sys.getenv("VE_HOME")\n'
+            've.runtime <- Sys.getenv("VE_RUNTIME")\n'
+            f'.libPaths(c(file.path(ve.home, "ve-lib", "{CERTIFIED_R_SERIES}"), .libPaths()))\n'
+            'suppressPackageStartupMessages(library(VEStart))\n'
+            'startVisionEval(ve.home=ve.home, ve.runtime=ve.runtime, overwrite=FALSE)\n'
+        )
+        (runtime / ".Rprofile").write_text(profile, encoding="utf-8")
+        (runtime / "VisionEval.Rproj").write_text("Version: 1.0\nRestoreWorkspace: No\nSaveWorkspace: No\n", encoding="utf-8")
+        r_home = rscript.parent.parent if rscript.parent.name.lower() == "bin" else rscript.parent.parent.parent
+        launcher = (
+            "@echo off\r\n"
+            f"set R_HOME_BASE={r_home.as_posix()}\r\n"
+            "if \"%R_HOME%\" == \"\" set R_HOME=%R_HOME_BASE%\r\n"
+            "start \"\" \"%R_HOME%\\bin\\x64\\RGui.exe\" --no-save\r\n"
+        )
+        (runtime / f"launch_R{CERTIFIED_R_VERSION}.bat").write_text(launcher, encoding="utf-8")
+        release = (
+            "repository=https://github.com/VisionEval/VisionEval-4\n"
+            f"tag={RC7_RELEASE_TAG}\ncommit={RC7_RELEASE_COMMIT}\n"
+            f"r_version={CERTIFIED_R_VERSION}\ndistribution=official-visioneval-windows-library\n"
+            "compatibility_patch=none\n"
+        )
+        (home / "WORKBENCH-RELEASE").write_text(release, encoding="utf-8")
+
+    def _install_native_runtime(
+        self,
+        options: dict[str, Any] | None,
+        progress: Callable[..., None] | None,
+        cancel_event: threading.Event | None,
+    ) -> dict[str, Any]:
+        if platform.system() != "Windows":
+            raise WorkspaceError("The managed native installer is available only on Windows.")
+        with self.lock:
+            if self._unfinished_jobs_locked():
+                raise WorkspaceError("Finish or stop all active and waiting runs before changing the runtime.")
+        options = options or {}
+        local_app_data = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        runtime, home = validate_native_path_separation(
+            options.get("veRuntime") or local_app_data / "VisionEval" / "VE_Runtime",
+            options.get("veHome") or Path.home() / "VE_Home",
+        )
+        work_root = local_app_data / "VisionEval" / "Workbench" / "install"
+        work_root.mkdir(parents=True, exist_ok=True)
+        temporary = Path(tempfile.mkdtemp(prefix="runtime-", dir=work_root))
+        previous_library: Path | None = None
+        installed_library = False
+        target_library = home / "ve-lib" / CERTIFIED_R_SERIES
+        managed_files = [
+            runtime / ".Renviron", runtime / ".Rprofile", runtime / "r.version",
+            runtime / "VisionEval.Rproj", runtime / f"launch_R{CERTIFIED_R_VERSION}.bat",
+            home / ".Renviron", home / "WORKBENCH-RELEASE",
+        ]
+        file_backups = {path: path.read_bytes() if path.is_file() else None for path in managed_files}
+        try:
+            self._check_install_cancelled(cancel_event)
+            rscript_text = self._compatible_rscript()
+            reused_r = bool(rscript_text)
+            if not rscript_text:
+                installer = temporary / CERTIFIED_R_INSTALLER_NAME
+                self._download_verified(
+                    CERTIFIED_R_INSTALLER_URL,
+                    installer,
+                    CERTIFIED_R_INSTALLER_SHA256,
+                    phase="downloading-r",
+                    progress=progress,
+                    cancel_event=cancel_event,
+                )
+                r_root = local_app_data / "Programs" / "R" / f"R-{CERTIFIED_R_VERSION}"
+                self._install_progress(progress, "installing-r", f"Installing R {CERTIFIED_R_VERSION} for the current user.")
+                process = subprocess.Popen([
+                    str(installer), "/CURRENTUSER", "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", f"/DIR={r_root}"
+                ])
+                while process.poll() is None:
+                    if cancel_event and cancel_event.wait(0.25):
+                        self._terminate_native_tree(process, timeout=5)
+                        raise RuntimeInstallCancelled("Runtime installation was cancelled.")
+                if process.returncode:
+                    raise WorkspaceError(f"R {CERTIFIED_R_VERSION} installation failed with exit code {process.returncode}.")
+                rscript_text = find_rscript_executable(str(r_root / "bin" / "Rscript.exe"))
+                if not rscript_text:
+                    raise WorkspaceError(f"R {CERTIFIED_R_VERSION} installed, but Rscript.exe was not found.")
+            else:
+                self._install_progress(progress, "reusing-r", "Using the existing compatible R 4.5 installation.")
+
+            archive = temporary / CERTIFIED_VE_ARCHIVE_NAME
+            self._download_verified(
+                CERTIFIED_VE_ARCHIVE_URL,
+                archive,
+                CERTIFIED_VE_ARCHIVE_SHA256,
+                phase="downloading-visioneval",
+                progress=progress,
+                cancel_event=cancel_event,
+            )
+            self._install_progress(progress, "extracting-visioneval", f"Installing VisionEval {RC7_RELEASE_TAG}.")
+            package_root = self._safe_extract_runtime(archive, temporary / "extracted", cancel_event)
+            staged_library = home / "ve-lib" / f".{CERTIFIED_R_SERIES}.installing-{make_id('ve', 'rc7')}"
+            staged_library.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(package_root, staged_library)
+            self._check_install_cancelled(cancel_event)
+            if target_library.exists():
+                previous_library = target_library.with_name(f".{CERTIFIED_R_SERIES}.previous-{make_id('ve', 'backup')}")
+                target_library.replace(previous_library)
+            staged_library.replace(target_library)
+            installed_library = True
+            self._write_native_runtime_files(runtime, home, Path(rscript_text))
+            self.native_runtime, self.native_home, self.rscript = runtime, home, str(Path(rscript_text).resolve())
+            self.image = str(home)
+            self._install_progress(progress, "verifying", "Verifying the installed VisionEval runtime.")
+            result = self.verify_runtime()
+            if result.get("revision") != RC7_RELEASE_COMMIT:
+                raise WorkspaceError("The installed VisionEval packages do not match the certified RC7 commit.")
+            if previous_library and previous_library.exists():
+                shutil.rmtree(previous_library)
+            return {
+                **result,
+                "managed": True,
+                "source": CERTIFIED_VE_ARCHIVE_URL,
+                "rReused": reused_r,
+            }
+        except Exception:
+            if previous_library and previous_library.exists():
+                if target_library.exists():
+                    shutil.rmtree(target_library, ignore_errors=True)
+                previous_library.replace(target_library)
+            elif installed_library and target_library.exists():
+                shutil.rmtree(target_library, ignore_errors=True)
+            for path, content in file_backups.items():
+                if content is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(content)
+            raise
+        finally:
+            shutil.rmtree(temporary, ignore_errors=True)
+            try:
+                work_root.rmdir()
+            except OSError:
+                pass
+
+    def install_or_update_runtime(
+        self,
+        profile: dict[str, Any] | None = None,
+        *,
+        options: dict[str, Any] | None = None,
+        progress: Callable[..., None] | None = None,
+        cancel_event: threading.Event | None = None,
+    ) -> dict[str, Any]:
         """Atomically install and activate a manifest-approved runtime."""
         if self.adapter == "native":
-            raise WorkspaceError("Managed Docker runtime installation is available only on macOS.")
+            return self._install_native_runtime(options, progress, cancel_event)
         if platform.system() != "Darwin" or self.container_platform != "linux/arm64":
             raise WorkspaceError("The managed runtime installer supports Apple Silicon macOS only.")
         executable = find_docker_executable()
@@ -1363,6 +1699,12 @@ class RuntimeManager:
                         "rVersion": fields.get("R", "unknown"),
                         "packageVersions": packages,
                     }
+        provenance = native_runtime_provenance(self.native_home)
+        if provenance["revision"] != RC7_RELEASE_COMMIT:
+            found = provenance["revision"] or "no VECommit metadata"
+            raise WorkspaceError(
+                f"VisionEval provenance mismatch. Expected {RC7_RELEASE_TAG} at {RC7_RELEASE_COMMIT}; found {found}."
+            )
         with self.condition:
             self.runtime_enabled = True
             self.condition.notify_all()
@@ -1370,9 +1712,11 @@ class RuntimeManager:
             "ok": True, "adapter": "native", "platform": platform.system().lower(), "architecture": platform.machine(),
             "image": str(self.native_home), "veHome": str(self.native_home), "veRuntime": str(self.native_runtime),
             "rscript": self.rscript or find_rscript_executable(), "digest": "",
-            "runtimeVersion": f"VisionEval {runtime_info.get('visionEvalVersion', 'unknown')} / R {runtime_info.get('rVersion', 'unknown')}",
+            "runtimeVersion": f"VisionEval {RC7_RELEASE_TAG} / R {runtime_info.get('rVersion', 'unknown')}",
             **runtime_info,
-            "releaseTag": "", "revision": "", "compatibilityPatch": "", "verifiedAt": now_iso(), "checks": outputs,
+            "releaseTag": RC7_RELEASE_TAG, "revision": provenance["revision"],
+            "packageVersion": provenance["packageVersion"], "compatibilityPatch": "none",
+            "verifiedAt": now_iso(), "checks": outputs,
         }
 
     @staticmethod

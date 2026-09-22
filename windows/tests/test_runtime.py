@@ -1,13 +1,15 @@
 import json
+import io
 import subprocess
 import tempfile
 import threading
 import unittest
+import zipfile
 from pathlib import Path
 
 from unittest.mock import patch
 
-from backend.workbench.runtime import AMD64_LOCAL_IMAGE, ARM64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LEGACY_RUNTIME_PROFILE, LOCAL_IMAGE, PINNED_ARM64_RUNTIME_DIGEST, PINNED_ARM64_RUNTIME_REFERENCE, RuntimeManager, discover_native_installation, docker_platform, find_native_runtime, local_runtime_image, read_renviron
+from backend.workbench.runtime import AMD64_LOCAL_IMAGE, ARM64_LOCAL_IMAGE, COMPATIBILITY_PATCH, CURRENT_RELEASE_COMMIT, CURRENT_RELEASE_TAG, LEGACY_RUNTIME_PROFILE, LOCAL_IMAGE, PINNED_ARM64_RUNTIME_DIGEST, PINNED_ARM64_RUNTIME_REFERENCE, RC7_RELEASE_COMMIT, RC7_RELEASE_TAG, RuntimeInstallCancelled, RuntimeManager, discover_native_installation, docker_platform, find_native_runtime, local_runtime_image, native_runtime_provenance, read_renviron, validate_native_path_separation
 from backend.workbench.workspace import Workspace, WorkspaceError, write_json
 
 
@@ -112,14 +114,143 @@ class RuntimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             root = Path(directory)
             runtime_path = root / "VE_Runtime"; runtime_path.mkdir(); (runtime_path / ".Rprofile").touch()
-            home = root / "VE_Home"; (home / "ve-lib" / "4.4").mkdir(parents=True)
+            home = root / "VE_Home"; description = home / "ve-lib" / "4.4" / "VEStart" / "DESCRIPTION"
+            description.parent.mkdir(parents=True)
+            description.write_text(
+                f"Package: VEStart\nVersion: 4.0.0\nVECommit: {RC7_RELEASE_COMMIT}\n",
+                encoding="utf-8",
+            )
             rscript = root / "Rscript.exe"; rscript.touch()
             manager = RuntimeManager(Workspace(root / "workspace"), runner=NativeRunner())
             manager.configure_native(str(runtime_path), str(home), str(rscript))
             result = manager.verify_runtime()
-            self.assertEqual(result["runtimeVersion"], "VisionEval 4.0.0 / R 4.4.2")
+            self.assertEqual(result["runtimeVersion"], "VisionEval VE-40-RC7 / R 4.4.2")
             self.assertEqual(result["packageVersions"]["VEStart"], "4.0.0")
+            self.assertEqual(result["releaseTag"], RC7_RELEASE_TAG)
+            self.assertEqual(result["revision"], RC7_RELEASE_COMMIT)
             self.assertEqual(result["veRuntime"], str(runtime_path.resolve()))
+
+    def test_native_paths_must_be_distinct_and_non_nested(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "Runtime with spaces"
+            home = root / "VE Høme"
+            resolved_runtime, resolved_home = validate_native_path_separation(runtime, home)
+            self.assertEqual(resolved_runtime, runtime.resolve())
+            self.assertEqual(resolved_home, home.resolve())
+            with self.assertRaises(WorkspaceError):
+                validate_native_path_separation(runtime, runtime)
+            with self.assertRaises(WorkspaceError):
+                validate_native_path_separation(home / "runtime", home)
+            with self.assertRaises(WorkspaceError):
+                validate_native_path_separation(runtime, runtime / "home")
+
+    def test_native_provenance_uses_description_commit_not_package_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            home = Path(directory)
+            description = home / "ve-lib" / "4.5" / "VEStart" / "DESCRIPTION"
+            description.parent.mkdir(parents=True)
+            description.write_text(
+                f"Package: VEStart\nVersion: 4.0.0\nVECommit: {RC7_RELEASE_COMMIT}\n",
+                encoding="utf-8",
+            )
+            provenance = native_runtime_provenance(home)
+            self.assertEqual(provenance["packageVersion"], "4.0.0")
+            self.assertEqual(provenance["releaseTag"], "VE-40-RC7")
+
+    def test_discovery_ignores_invalid_explicit_candidates_with_warnings(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.dict("os.environ", {"VISIONEVAL_RUNTIME": "", "VE_RUNTIME": "", "VISIONEVAL_HOME": "", "VE_HOME": "", "RSCRIPT": ""}, clear=False):
+            missing = str(Path(directory) / "missing")
+            result = discover_native_installation(missing, missing, missing)
+            self.assertTrue(any("VE_RUNTIME" in item for item in result["warnings"]))
+            self.assertTrue(any("VE_HOME" in item for item in result["warnings"]))
+            self.assertTrue(any("Rscript.exe" in item for item in result["warnings"]))
+
+    def test_native_archive_extraction_rejects_path_traversal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / "bad.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("../outside.txt", "unsafe")
+                bundle.writestr("library/VEStart/DESCRIPTION", "Package: VEStart\n")
+            with self.assertRaises(WorkspaceError):
+                RuntimeManager._safe_extract_runtime(archive, root / "extract", None)
+            self.assertFalse((root / "outside.txt").exists())
+
+    def test_native_install_cancellation_fails_closed(self):
+        cancelled = threading.Event()
+        cancelled.set()
+        with self.assertRaises(RuntimeInstallCancelled):
+            RuntimeManager._check_install_cancelled(cancelled)
+
+    def test_native_download_rejects_checksum_mismatch(self):
+        class Response(io.BytesIO):
+            headers = {"Content-Length": "3"}
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            manager = RuntimeManager(Workspace(Path(directory) / "workspace"), runner=FakeRunner())
+            destination = Path(directory) / "payload.zip"
+            with patch("backend.workbench.runtime.urllib.request.urlopen", return_value=Response(b"bad")):
+                with self.assertRaises(WorkspaceError):
+                    manager._download_verified(
+                        "https://example.invalid/payload.zip", destination, "0" * 64,
+                        phase="download", progress=None, cancel_event=None,
+                    )
+
+    def test_native_managed_install_reuses_r_and_keeps_home_runtime_separate(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            root = Path(directory)
+            runtime, home = root / "Runtime path", root / "Home path"
+            rscript = root / "R-4.5.3" / "bin" / "Rscript.exe"
+            rscript.parent.mkdir(parents=True)
+            rscript.touch()
+            manager = RuntimeManager(Workspace(root / "workspace"), runner=FakeRunner())
+
+            def fake_download(url, destination, expected_sha256, **kwargs):
+                self.assertIn("VE-40-RC7", url)
+                with zipfile.ZipFile(destination, "w") as bundle:
+                    bundle.writestr(
+                        "WinLibrary/VEStart/DESCRIPTION",
+                        f"Package: VEStart\nVersion: 4.0.0\nVECommit: {RC7_RELEASE_COMMIT}\n",
+                    )
+
+            verification = {
+                "ok": True, "verified": True, "platform": "windows", "architecture": "AMD64",
+                "image": str(home), "veHome": str(home), "veRuntime": str(runtime),
+                "rscript": str(rscript), "revision": RC7_RELEASE_COMMIT,
+                "releaseTag": RC7_RELEASE_TAG, "runtimeVersion": "VisionEval VE-40-RC7 / R 4.5.3",
+                "verifiedAt": "2026-09-21T00:00:00Z", "digest": "",
+            }
+            with patch.object(manager, "_compatible_rscript", return_value=str(rscript)), patch.object(manager, "_download_verified", side_effect=fake_download), patch.object(manager, "verify_runtime", return_value=verification):
+                result = manager.install_or_update_runtime(options={"veRuntime": str(runtime), "veHome": str(home)})
+            self.assertTrue(result["rReused"])
+            self.assertTrue((home / "ve-lib" / "4.5" / "VEStart" / "DESCRIPTION").is_file())
+            self.assertTrue((runtime / ".Rprofile").is_file())
+            environment = read_renviron(runtime)
+            self.assertEqual(Path(environment["VE_HOME"]), home.resolve())
+            self.assertEqual(Path(environment["VE_RUNTIME"]), runtime.resolve())
+
+    def test_failed_native_verification_restores_previous_library(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            root = Path(directory)
+            runtime, home = root / "runtime", root / "home"
+            old = home / "ve-lib" / "4.5" / "old.txt"
+            old.parent.mkdir(parents=True)
+            old.write_text("keep", encoding="utf-8")
+            rscript = root / "R-4.5.3" / "bin" / "Rscript.exe"
+            rscript.parent.mkdir(parents=True)
+            rscript.touch()
+            manager = RuntimeManager(Workspace(root / "workspace"), runner=FakeRunner())
+
+            def fake_download(_url, destination, _expected_sha256, **_kwargs):
+                with zipfile.ZipFile(destination, "w") as bundle:
+                    bundle.writestr("WinLibrary/VEStart/DESCRIPTION", f"Package: VEStart\nVECommit: {RC7_RELEASE_COMMIT}\n")
+
+            with patch.object(manager, "_compatible_rscript", return_value=str(rscript)), patch.object(manager, "_download_verified", side_effect=fake_download), patch.object(manager, "verify_runtime", side_effect=WorkspaceError("verification failed")):
+                with self.assertRaises(WorkspaceError):
+                    manager.install_or_update_runtime(options={"veRuntime": str(runtime), "veHome": str(home)})
+            self.assertEqual(old.read_text(encoding="utf-8"), "keep")
+            self.assertFalse((home / "ve-lib" / "4.5" / "VEStart").exists())
 
     def test_optional_memory_cap_uses_docker_argument_array(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict("os.environ", {"VISIONEVAL_MEMORY_GB": "6"}), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):

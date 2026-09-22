@@ -7,7 +7,7 @@ This repository copy is generated from the same Windows guide bundled with Visio
 
 ## Overview
 
-VisionEval Workbench 2.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios and bounded Hypercubes, running them through an existing `VE_Runtime`, and analyzing completed datastores. Project data remains in the workspace you select.
+VisionEval Workbench 2.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios and bounded Hypercubes, running them through a verified `VE_RUNTIME`, and analyzing completed datastores. It can connect to an existing installation or install the certified R 4.5.3 and VisionEval RC7 pair for the current user. Project data remains in the workspace you select.
 
 The normal workflow has five parts:
 
@@ -21,10 +21,10 @@ The normal workflow has five parts:
 
 ## How it works
 
-- Workbench connects to your existing `VE_RUNTIME` working folder, `VE_HOME` package library, and compatible `Rscript.exe`.
+- Workbench discovers or independently selects `VE_RUNTIME`, `VE_HOME`, and a compatible `Rscript.exe`; its optional managed installation requires no administrator privileges.
 - Installed regional packages provide compatible model templates, InputLibraries, and map context.
 - Saved scenarios record deliberate CSV changes and notes. Each run prepares a fresh model copy, applies the selected scenario, and preserves provenance.
-- Windows jobs run one at a time through the native runtime. Workbench owns the prepared models, logs, and results in its workspace and does not modify the runtime installation.
+- Windows jobs run one at a time through the native runtime. Workbench owns the prepared models, logs, and results in its workspace. A managed runtime installation occurs only after explicit approval and never places `VE_RUNTIME` inside `VE_HOME`.
 - Successful datastores are registered for Compare. A disposable cache accelerates filtering, statistics, maps, and exports while the RDA datastore remains authoritative.
 
 ## Start here
@@ -55,7 +55,7 @@ Workbench refreshes this managed guide during upgrades. Put personal documentati
 
 ## Connect VE_Runtime on Windows
 
-Workbench uses an existing native VisionEval installation. It does not install or replace VisionEval, R, or your package library.
+Workbench can connect to an existing native VisionEval installation or install the certified R 4.5.3 and VisionEval VE-40-RC7 pair for the current user. The managed installation does not require administrator privileges.
 
 ## What you need
 
@@ -64,7 +64,7 @@ Workbench uses an existing native VisionEval installation. It does not install o
 - A `VE_HOME` package library containing the required VisionEval packages.
 - A compatible `Rscript.exe`.
 
-These three paths may be in different folders.
+These three paths are validated independently. `VE_HOME` and `VE_RUNTIME` must be separate, non-nested folders. Workbench resolves junctions and symbolic links before accepting them, so an alias cannot hide an overlap.
 
 ## 1. Install Workbench
 
@@ -72,11 +72,13 @@ Download the Windows x64 artifact, extract it, and run the NSIS setup executable
 
 ## 2. Choose a workspace
 
-On first launch, accept the suggested File Explorer-visible workspace or choose an empty folder that is separate from `VE_RUNTIME`. The workspace holds projects, installed assets, prepared runs, logs, results, caches, and personal notes. Workbench remembers it on later launches.
+On first launch, accept the suggested File Explorer-visible workspace or choose an empty folder that is separate from `VE_RUNTIME` and `VE_HOME`. The workspace holds projects, installed assets, prepared runs, logs, results, caches, and personal notes. Workbench remembers it on later launches. A folder on an external SSD is supported and is recommended when internal disk space is limited.
 
 If an existing workspace was moved or disconnected, use **Open existing workspace**. Workbench never silently substitutes a different folder.
 
-## 3. Connect VE_Runtime
+## 3. Connect or install the runtime
+
+If Workbench finds no usable runtime, first-run setup opens automatically. Choose **Detect again**, select all three existing paths, or choose **Install R 4.5.3 + VisionEval RC7**.
 
 1. Open **Settings → Runtime**.
 2. Select **Choose VE_Runtime…** and choose the folder used as `VE_RUNTIME`.
@@ -84,7 +86,11 @@ If an existing workspace was moved or disconnected, use **Open existing workspac
 4. Expand **Detected paths and advanced overrides** only if either detected path is incorrect.
 5. Select **Verify runtime**.
 
-Verification starts that R installation and reports detected R, VisionEval, and package versions plus registered modules. It does not compare source hashes, download packages, alter the runtime, or copy results into it.
+Verification starts that R installation and reports detected R, VisionEval, package versions, registered modules, release tag, and `VECommit`. VisionEval packages continue to report version 4.0.0, so Workbench uses `VECommit` to identify RC7 correctly.
+
+The managed installer reuses a compatible R 4.5 installation when available. Otherwise it installs R 4.5.3 under the current user's local application directory, installs the RC7 library under `%USERPROFILE%\VE_Home`, and creates the working folder at `%LOCALAPPDATA%\VisionEval\VE_Runtime`. Downloads use pinned official URLs and SHA-256 values. A failed checksum, TLS error, interrupted extraction, or failed verification stops the installation and cleans incomplete VisionEval files.
+
+For offline setup, obtain the exact files listed in `WINDOWS-RUNTIME-COMPATIBILITY.md`, verify their SHA-256 values, install R for the current user, extract the VisionEval library into a separate `VE_HOME`, and then select `VE_HOME`, `VE_RUNTIME`, and `Rscript.exe` in Workbench. Never place `VE_RUNTIME` below `VE_HOME`.
 
 The Runtime page reports exactly which path failed when the working folder, package library, or R executable cannot be used. Correct that path and verify again.
 
@@ -106,7 +112,7 @@ Windows runs are queued and execute one at a time. Successful results are regist
 
 ## Moving or upgrading VE_Runtime
 
-If the runtime, package library, or R installation moves, return to **Settings → Runtime**, select the new working folder, and verify it again. Upgrade the VisionEval installation through its normal managed process; Workbench will not update it automatically.
+If the runtime, package library, or R installation moves, return to **Settings → Runtime**, select all changed paths, and verify again. Workbench does not automatically adopt a newer R or VisionEval release until that pair passes the full certification suite.
 
 ---
 
@@ -114,11 +120,11 @@ If the runtime, package library, or R installation moves, return to **Settings �
 
 ## First launch
 
-Choose where Workbench should keep its workspace. Use the suggested location or an empty recognizable folder separate from `VE_RUNTIME`. If a saved workspace is later moved or unavailable, Workbench asks you to locate it rather than creating a replacement.
+Choose where Workbench should keep its workspace. Use the suggested location or an empty recognizable folder separate from `VE_RUNTIME` and `VE_HOME`. An external SSD is supported when internal space is limited. If a saved workspace is later moved or unavailable, Workbench asks you to locate it rather than creating a replacement.
 
 ## Runtime setup
 
-Onboarding can connect the native runtime immediately or defer it. Follow [Connect VE_Runtime on Windows](docs/user/setup.md) to select the `VE_RUNTIME` working folder, review the detected `VE_HOME` and `Rscript.exe`, and verify the connection.
+When no verified runtime is available, onboarding opens automatically. Follow [Connect VE_Runtime on Windows](docs/user/setup.md) to detect or select the three independent paths, or choose **Install R 4.5.3 + VisionEval RC7** for a current-user installation. Administrator privileges are not required.
 
 Choose **Skip for now** if you only need to inspect inputs, edit projects, or view existing results. A verified connection is required before a run can start.
 
@@ -487,7 +493,7 @@ Excel workbooks add frozen and filtered headers, typed values, readable widths, 
 
 ## Hypercube Workflow
 
-Open primary tab **5 Hypercube** or press **Ctrl+5**. Workbench presents the resource disclosure once per application launch because a small-looking parameter grid can create many complete model runs. Hypercubes are intended for a dedicated computer; avoid a large matrix on a computer needed for other work.
+Open primary tab **5 Hypercube** or press **Ctrl+5**. Hypercubes are safe to run on a laptop, but Windows runs one VisionEval case at a time, so larger matrices can take many hours and use substantial memory and workspace storage. On computers with less than 16 GB of RAM, use small matrices and close other memory-intensive applications. This is guidance, not a blocker. Version 2 limits Hypercubes to two parameter axes and 400 cases to keep experiments bounded.
 
 ## Build
 
@@ -495,7 +501,7 @@ Create or select a Hypercube project, then configure one or two numeric paramete
 
 Setup changes save automatically without creating cases. **Saving…**, **Saved**, and **Not saved—Retry** report the draft state. Preview uses the latest saved revision and shows every generated value, exact case count, shared row scope, estimated serialized runtime, and retained disk. Only **Generate Scenarios** creates or replaces cases.
 
-The project name is the matrix name. Shared year selects dated input rows; it does not change model years. **All matching rows** applies each combination to every compatible row without adding a location dimension. A specific geography requires at least one location.
+The project name is the matrix name. Shared year selects dated input rows; it does not change model years. **All matching rows** applies each combination to every compatible row without adding a location dimension. A specific geography requires at least one location. Before a run, Workbench shows detected RAM, workspace free space, case count, serialized execution waves, estimated elapsed time, and retained storage when available. If retained data plus a safety reserve is larger than free workspace space, Workbench asks for confirmation; RAM alone never blocks creation or execution.
 
 ## Review
 
@@ -503,7 +509,9 @@ Review shows the immutable generated definition, axes and values, case count, ye
 
 ## Run
 
-Choose the project rather than dozens of individual scenarios. **Run Missing** queues only a missing baseline and missing cases. **Retry Failed** queues only failed work. Successful work is not routinely rerun. The batch card reports totals, progress, elapsed time, estimated remaining time, waves, and concurrency. Completed elapsed time is frozen at the latest terminal job instead of continuing to advance. **Stop This Hypercube** removes its waiting jobs and stops its owned active containers without disturbing unrelated batches. Normal Run history shows one compact Hypercube card; detailed case logs remain here. A completion notification is sent for the project rather than for every case.
+Choose the project rather than dozens of individual scenarios. **Run Missing** queues only a missing baseline and missing cases. **Retry Failed** queues only failed work. Successful work is not routinely rerun. The batch card reports totals, progress, elapsed time, estimated remaining time, waves, and the single active native slot. Completed elapsed time is frozen at the latest terminal job instead of continuing to advance. **Stop This Hypercube** removes its waiting jobs and stops its owned active R process tree without disturbing unrelated batches. Normal Run history shows one compact Hypercube card; detailed case logs remain here. A completion notification is sent for the project rather than for every case.
+
+A 9 × 9 matrix creates 81 cases, 81 serialized execution waves, and takes about 15 hours under the current planning assumption. A future verified container or cloud execution engine could support parallel cases, but parallel execution is not available in Windows 2.0 and is not promised for a particular release.
 
 New Hypercube runs retain the authoritative Datastore and skip the optional full CSV export tree.
 
@@ -561,9 +569,9 @@ Appearance controls theme and accessible decrease, neutral, and increase palette
 
 ## Runtime and resources
 
-Runtime shows the selected `VE_RUNTIME`, detected `VE_HOME`, `Rscript.exe`, R and VisionEval versions, verification result, and repair actions. Re-run verification after any path or installation change.
+Runtime shows the independently selected `VE_RUNTIME`, `VE_HOME`, `Rscript.exe`, R and VisionEval versions, RC7 commit provenance, verification result, managed-install progress, cancellation, and repair actions. Re-run verification after any path or installation change. The runtime/home folders may not be equal or nested.
 
-Windows executes one VisionEval job at a time. Resource guidance reports native-process and workspace usage.
+Windows executes one VisionEval job at a time. Resource guidance reports detected RAM and workspace capacity. Less than 16 GB of RAM is an advisory for smaller Hypercubes, never a technical block.
 
 ## Storage
 

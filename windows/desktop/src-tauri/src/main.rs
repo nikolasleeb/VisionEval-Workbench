@@ -21,7 +21,7 @@ const UNPATCHED_RC6_RUNTIME_IMAGE: &str = "local/visioneval:ve-40-rc6-arm64";
 const ARM64_RUNTIME_IMAGE: &str = "local/visioneval:2.0.0-arm64";
 #[cfg(target_os = "windows")]
 const AMD64_RUNTIME_IMAGE: &str = "local/visioneval:2.0.0-amd64";
-const ONBOARDING_VERSION: u32 = 1;
+const ONBOARDING_VERSION: u32 = 2;
 const WORKSPACE_FORMAT_VERSION: u32 = 2;
 const WORKSPACE_MARKER: &str = ".visioneval-workspace.json";
 const WORKSPACE_SETTINGS: &str = ".workbench/settings.json";
@@ -919,7 +919,7 @@ fn read_config(app: &AppHandle) -> DesktopConfig {
         if runtime_image_needs_migration(&profile.image_reference) {
             profile.image_reference = default_runtime_image().into();
             profile.image_digest.clear();
-            profile.runtime_version = "Compatible VisionEval runtime / R 4.5.1".into();
+            profile.runtime_version = "Compatible VisionEval runtime / R 4.5.3".into();
             profile.verified = false;
             profile.verified_at.clear();
             profile.verification_message =
@@ -2292,6 +2292,42 @@ fn save_runtime_profile(
             "Select and verify VE_RUNTIME, VE_HOME, and Rscript.exe before saving the Windows runtime"
                 .into(),
         );
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let runtime = fs::canonicalize(&profile.ve_runtime_path)
+            .map_err(|error| format!("VE_RUNTIME could not be validated: {error}"))?;
+        let home = fs::canonicalize(&profile.ve_home_path)
+            .map_err(|error| format!("VE_HOME could not be validated: {error}"))?;
+        let rscript = fs::canonicalize(&profile.rscript_path)
+            .map_err(|error| format!("Rscript.exe could not be validated: {error}"))?;
+        let runtime_key = runtime.to_string_lossy().to_lowercase();
+        let home_key = home.to_string_lossy().to_lowercase();
+        let separator = std::path::MAIN_SEPARATOR;
+        let runtime_prefix = format!("{runtime_key}{separator}");
+        let home_prefix = format!("{home_key}{separator}");
+        if runtime_key == home_key
+            || runtime_key.starts_with(&home_prefix)
+            || home_key.starts_with(&runtime_prefix)
+        {
+            return Err(
+                "VE_RUNTIME and VE_HOME must be separate folders; neither can be inside the other."
+                    .into(),
+            );
+        }
+        if !rscript.is_file()
+            || rscript
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_lowercase)
+                != Some("rscript.exe".into())
+        {
+            return Err("Choose a valid Rscript.exe".into());
+        }
+        profile.ve_runtime_path = runtime.to_string_lossy().to_string();
+        profile.ve_home_path = home.to_string_lossy().to_string();
+        profile.rscript_path = rscript.to_string_lossy().to_string();
+        profile.image_reference = profile.ve_home_path.clone();
     }
     #[cfg(not(target_os = "windows"))]
     if profile.adapter != "docker" || !profile.verified || profile.image_digest.is_empty() {

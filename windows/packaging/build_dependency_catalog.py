@@ -31,7 +31,7 @@ def main() -> None:
     add_rows(modules, source)
     supplemental = Path(sys.argv[3]) if len(sys.argv) == 4 else Path(__file__).with_name("multimodal_module_specifications.csv")
     add_rows(modules, supplemental, only_missing_modules=True)
-    payload = {"version": 1, "visionEvalVersion": "VE-40-RC6", "modules": modules}
+    payload = {"version": 1, "visionEvalVersion": "VE-40-RC7", "modules": modules}
     output.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"Wrote {len(modules)} modules to {output}")
 

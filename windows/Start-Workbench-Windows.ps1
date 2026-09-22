@@ -1,5 +1,8 @@
 param(
     [string]$Workspace = (Join-Path $env:USERPROFILE "VisionEval Workbench Workspace"),
+    [string]$VeRuntime = (Join-Path $env:LOCALAPPDATA "VisionEval\VE_Runtime"),
+    [string]$VeHome = (Join-Path $env:USERPROFILE "VE_Home"),
+    [string]$Rscript = (Join-Path $env:LOCALAPPDATA "Programs\R\R-4.5.3\bin\Rscript.exe"),
     [int]$Port = 3000,
     [switch]$NoBrowser
 )
@@ -7,24 +10,28 @@ param(
 $ErrorActionPreference = "Stop"
 $projectRoot = $PSScriptRoot
 $backend = Join-Path $projectRoot "dist\visioneval-workbench-backend.exe"
-$veRuntimeHome = Join-Path $projectRoot ".tools\VisionEval"
-$veRscript = Join-Path $projectRoot ".tools\R-4.5.1\bin\Rscript.exe"
 
 if (-not (Test-Path -LiteralPath $backend)) {
     throw "The Windows backend has not been built. Run .\.venv\Scripts\python.exe packaging\build_backend.py first."
 }
-if (-not (Test-Path -LiteralPath $veRscript) -or -not (Test-Path -LiteralPath (Join-Path $veRuntimeHome "WORKBENCH-RELEASE"))) {
-    throw "The native VisionEval runtime is incomplete. See the Windows Installation and Runtime wiki guide."
+if (-not (Test-Path -LiteralPath $Rscript) -or -not (Test-Path -LiteralPath (Join-Path $VeHome "ve-lib"))) {
+    throw "The native VisionEval runtime is incomplete. Open Workbench setup or see the Windows Installation and Runtime guide."
+}
+
+$runtimePath = [IO.Path]::GetFullPath($VeRuntime).TrimEnd('\')
+$homePath = [IO.Path]::GetFullPath($VeHome).TrimEnd('\')
+if ($runtimePath -eq $homePath -or $runtimePath.StartsWith($homePath + '\', [StringComparison]::OrdinalIgnoreCase) -or $homePath.StartsWith($runtimePath + '\', [StringComparison]::OrdinalIgnoreCase)) {
+    throw "VE_RUNTIME and VE_HOME must be separate folders; neither can be inside the other."
 }
 
 $env:PORT = [string]$Port
 $env:VISIONEVAL_WORKSPACE_ROOT = $Workspace
 $env:VISIONEVAL_RUNTIME_ADAPTER = "native"
-$env:VISIONEVAL_RUNTIME = $veRuntimeHome
-$env:VE_RUNTIME = $veRuntimeHome
-$env:VISIONEVAL_HOME = $veRuntimeHome
-$env:VE_HOME = $veRuntimeHome
-$env:RSCRIPT = $veRscript
+$env:VISIONEVAL_RUNTIME = $runtimePath
+$env:VE_RUNTIME = $runtimePath
+$env:VISIONEVAL_HOME = $homePath
+$env:VE_HOME = $homePath
+$env:RSCRIPT = [IO.Path]::GetFullPath($Rscript)
 $env:VISIONEVAL_RUNTIME_ENABLED = "false"
 
 $process = Start-Process -FilePath $backend -PassThru -WindowStyle Hidden

@@ -34,9 +34,9 @@ Appearance controls theme and accessible decrease, neutral, and increase palette
 
 ## Runtime and resources
 
-Runtime shows the selected `VE_RUNTIME`, detected `VE_HOME`, `Rscript.exe`, R and VisionEval versions, verification result, and repair actions. Re-run verification after any path or installation change.
+Runtime shows the independently selected `VE_RUNTIME`, `VE_HOME`, `Rscript.exe`, R and VisionEval versions, RC7 commit provenance, verification result, managed-install progress, cancellation, and repair actions. Re-run verification after any path or installation change. The runtime/home folders may not be equal or nested.
 
-Windows executes one VisionEval job at a time. Resource guidance reports native-process and workspace usage.
+Windows executes one VisionEval job at a time. Resource guidance reports detected RAM and workspace capacity. Less than 16 GB of RAM is an advisory for smaller Hypercubes, never a technical block.
 
 ## Storage
 

@@ -112,7 +112,7 @@ class DependencyService:
         return modules
 
     def _cache_path(self, template: dict[str, Any]) -> Path:
-        token = hashlib.sha256(f"{template.get('fingerprint')}|VE-40-RC6|{SCHEMA_VERSION}".encode()).hexdigest()[:24]
+        token = hashlib.sha256(f"{template.get('fingerprint')}|VE-40-RC7|{SCHEMA_VERSION}".encode()).hexdigest()[:24]
         return self.cache_root / f"{template['id']}-{token}.json"
 
     def graph(
@@ -585,7 +585,7 @@ class DependencyService:
                     edges.append({"from": file_id, "to": input_id, "kind": "contains"})
 
         result = {
-            "version": SCHEMA_VERSION, "visionEvalVersion": self.catalog.get("visionEvalVersion", "VE-40-RC6"),
+            "version": SCHEMA_VERSION, "visionEvalVersion": self.catalog.get("visionEvalVersion", "VE-40-RC7"),
             "template": {"id": template["id"], "name": template["name"], "fingerprint": template.get("fingerprint", "")},
             "graphMode": "execution", "executionOrderAvailable": True,
             "notice": "Declared possible effects show executable dependency paths; they do not guarantee a numeric output change.",

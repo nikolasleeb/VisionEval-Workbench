@@ -1,6 +1,6 @@
 # VisionEval Workbench User Guide for Windows
 
-VisionEval Workbench 2.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios and bounded Hypercubes, running them through an existing `VE_Runtime`, and analyzing completed datastores. Project data remains in the workspace you select.
+VisionEval Workbench 2.0.0 is a native Windows x64 desktop application for inspecting VisionEval inputs, designing repeatable scenarios and bounded Hypercubes, running them through a verified `VE_RUNTIME`, and analyzing completed datastores. It can connect to an existing installation or install the certified R 4.5.3 and VisionEval RC7 pair for the current user. Project data remains in the workspace you select.
 
 The normal workflow has five parts:
 
@@ -14,10 +14,10 @@ The normal workflow has five parts:
 
 ## How it works
 
-- Workbench connects to your existing `VE_RUNTIME` working folder, `VE_HOME` package library, and compatible `Rscript.exe`.
+- Workbench discovers or independently selects `VE_RUNTIME`, `VE_HOME`, and a compatible `Rscript.exe`; its optional managed installation requires no administrator privileges.
 - Installed regional packages provide compatible model templates, InputLibraries, and map context.
 - Saved scenarios record deliberate CSV changes and notes. Each run prepares a fresh model copy, applies the selected scenario, and preserves provenance.
-- Windows jobs run one at a time through the native runtime. Workbench owns the prepared models, logs, and results in its workspace and does not modify the runtime installation.
+- Windows jobs run one at a time through the native runtime. Workbench owns the prepared models, logs, and results in its workspace. A managed runtime installation occurs only after explicit approval and never places `VE_RUNTIME` inside `VE_HOME`.
 - Successful datastores are registered for Compare. A disposable cache accelerates filtering, statistics, maps, and exports while the RDA datastore remains authoritative.
 
 ## Start here
