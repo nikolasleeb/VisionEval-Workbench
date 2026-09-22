@@ -197,7 +197,8 @@
               <label class="batch-location-search">Location search<input id="batchLocationSearch" type="search" placeholder="Search locations"></label>
               <label class="batch-year">Target year<select id="batchYear"><option value="">Choose year</option></select></label>
               <label class="batch-operation">Operation<select id="batchOperation"><option value="">Choose operation</option><option value="set">Set to</option><option value="add">Increase by</option><option value="subtract">Decrease by</option><option value="multiply">Multiply by</option><option value="percent">Increase by %</option><option value="decrease_percent">Decrease by %</option></select></label>
-              <label class="batch-value">Value<input id="batchValue" type="number" step="any"></label>
+              <label class="batch-value">Value<input id="batchValue" type="number" step="any"><select id="batchCategoryValue" hidden aria-label="Categorical value"></select></label>
+              <div id="batchShareGroup" class="share-group-editor batch-share-group" hidden></div>
               <label class="batch-from-baseline"><span class="batch-baseline-copy"><strong>Choose the starting values</strong><small id="batchBaselineDescription">Current scenario values — apply this operation on top of changes already saved.</small></span><span class="inline-check batch-baseline-toggle"><input id="batchFromBaseline" type="checkbox"> Start this batch from the untouched baseline</span><span id="batchBaselineHelp" class="control-help" tabindex="0" aria-label="Current scenario values — apply this operation on top of changes already saved.">i<span class="control-help-tooltip" role="tooltip">Current scenario values — apply this operation on top of changes already saved.</span></span></label>
               <div class="field-block batch-locations"><div class="checklist-heading"><span>Locations</span><label class="inline-check"><input id="batchSelectAllLocations" type="checkbox" disabled> Select all locations</label></div><div id="batchLocations" class="location-checklist"><p class="muted">Choose a location type.</p></div></div>
               <div id="batchSavedScopeSummary" class="saved-scope-summary muted" role="status" aria-live="polite" hidden></div>
@@ -218,12 +219,14 @@
                 <label class="editor-location-search">Location search<input id="editorLocationSearch" type="search" placeholder="Type to filter locations"></label>
                 <label class="editor-year">Target year<select id="editorYear"></select></label>
                 <label class="editor-operation">Operation<select id="editorOperation"><option value="">Choose operation</option><option value="set">Set to</option><option value="add">Increase by</option><option value="subtract">Decrease by</option><option value="multiply">Multiply by</option><option value="percent">Increase by %</option><option value="decrease_percent">Decrease by %</option></select></label>
-                <label class="editor-value">Value<input id="editorValue" type="number" step="any"></label>
+                <label class="editor-value">Value<input id="editorValue" type="number" step="any"><select id="editorCategoryValue" hidden aria-label="Categorical value"></select></label>
+                <div id="editorShareGroup" class="share-group-editor editor-share-group" hidden></div>
                 <div class="field-block editor-locations"><div class="checklist-heading"><span>Locations</span><label class="inline-check"><input id="editorSelectAllLocations" type="checkbox" disabled> Select all locations</label></div><div id="editorLocations" class="location-checklist"><p class="muted">Choose a location type.</p></div></div>
                 <div id="editorSavedScopeSummary" class="saved-scope-summary muted" role="status" aria-live="polite" hidden></div>
                 <div class="field-block editor-columns"><div class="checklist-heading"><span>Columns</span><div class="column-actions"><label class="inline-check"><input id="editorSelectAllColumns" type="checkbox" disabled> Select all columns</label><button id="clearEditorColumns" class="text-button" type="button">Clear</button></div></div><div id="editorColumns" class="location-checklist" aria-label="Columns"><p class="muted">Choose an input file.</p></div></div>
                 <div class="edit-actions"><button id="applyEditorChange" type="button">Apply and Save Change</button><button id="clearEditorSelections" class="secondary" type="button">Clear selections</button><button id="resetEditorFile" class="secondary" type="button">Revert Direct Edits</button><button id="undoEditorChange" class="secondary" type="button" disabled>Undo</button><button id="redoEditorChange" class="secondary" type="button" disabled>Redo</button></div>
-                <div class="preview-help"><p><strong>Apply and Save Change</strong> calculates and saves one operation. Direct table edits use <strong>Save Direct Edits</strong>.</p><div class="change-legend" aria-label="Cell change colors"><span><i class="saved-change-swatch"></i>Saved change from baseline</span><span><i class="preview-change-swatch"></i>Unsaved direct edit</span></div></div>
+                <div id="editorValidationStatus" class="validation-status" role="alert" aria-live="polite" hidden></div>
+                <div class="preview-help"><p><strong>Apply and Save Change</strong> calculates and saves one operation. Direct table edits use <strong>Save Direct Edits</strong>.</p><div class="change-legend" aria-label="Cell change colors"><span><i class="saved-change-swatch"></i>Saved change from baseline</span><span><i class="preview-change-swatch"></i>Unsaved direct edit</span><span><i class="invalid-change-swatch"></i>Invalid value</span></div></div>
               </div>
               <div id="csvTableWrap" class="table-wrap editor-table"><p class="empty-state">Choose an input file to preview rows.</p></div>
             </section>
@@ -510,7 +513,7 @@
     </form>
   </dialog>
 
-  <dialog id="hypercubeSafetyDialog" class="hypercube-safety-dialog">
+  <dialog id="hypercubeSafetyDialog" class="hypercube-safety-dialog workbench-large-dialog">
     <form method="dialog" class="hypercube-safety-form">
       <header class="hypercube-safety-header">
         <p class="eyebrow">Before you create a Hypercube</p>
@@ -664,7 +667,7 @@
       </div>
     </div>
   </dialog>
-  <dialog id="onboardingDialog" class="wide-dialog taskbar-safe-dialog">
+  <dialog id="onboardingDialog" class="wide-dialog taskbar-safe-dialog workbench-large-dialog">
     <form id="onboardingForm" class="settings-dialog-form">
       <header class="dialog-fixed-header"><p class="eyebrow">First-launch setup</p><h2>Finish setting up this workspace</h2></header>
       <div class="settings-dialog-body stack">
@@ -676,7 +679,7 @@
     </form>
   </dialog>
 
-  <dialog id="settingsDialog" class="wide-dialog taskbar-safe-dialog">
+  <dialog id="settingsDialog" class="wide-dialog taskbar-safe-dialog workbench-large-dialog">
     <form id="settingsForm" class="settings-dialog-form">
       <div class="section-title dialog-fixed-header"><div><p class="eyebrow">VisionEval Workbench</p><h2>Settings</h2></div><button id="closeSettings" type="button" class="secondary">Close</button></div>
       <div class="settings-dialog-body">
@@ -696,9 +699,10 @@
       </div>
       <div class="dialog-actions dialog-fixed-footer"><div id="settingsNotice" class="notice" role="status" aria-live="polite" aria-atomic="true" hidden><span id="settingsNoticeText"></span><button id="settingsNoticeAction" type="button" class="secondary" hidden></button></div><button id="saveSettings" type="submit">Save Settings</button><button id="saveCloseSettings" type="button">Save and Close Settings</button></div>
     </form>
+    <div id="settingsDialogResizer" class="dialog-resize-handle" role="separator" aria-label="Resize Settings" tabindex="0"></div>
   </dialog>
 
-  <dialog id="documentationReaderDialog" class="documentation-reader-dialog" aria-labelledby="documentationReaderTitle">
+  <dialog id="documentationReaderDialog" class="documentation-reader-dialog workbench-large-dialog" aria-labelledby="documentationReaderTitle">
     <div class="documentation-reader-shell">
       <header class="documentation-reader-header">
         <div><p class="eyebrow">VisionEval Workbench documentation</p><h2 id="documentationReaderTitle">Document</h2></div>
@@ -718,7 +722,7 @@
       <div class="dialog-actions"><button value="cancel" class="secondary">Cancel</button><button id="choosePackageZip" type="button" class="secondary">Choose ZIP…</button><button id="choosePackageFolder" type="button">Choose extracted folder…</button></div>
     </form>
   </dialog>
-  <dialog id="packagePreviewDialog" class="wide-dialog">
+  <dialog id="packagePreviewDialog" class="wide-dialog workbench-large-dialog">
     <form method="dialog" class="stack">
       <p class="eyebrow">Package information</p><h2 id="packagePreviewName">Review package</h2>
       <div id="packagePreviewWarning" class="notice warning-notice" hidden></div>
@@ -747,7 +751,7 @@
     <!-- runtime-platform:macos:start --><section data-runtime-platform="macos"><ol class="runtime-steps"><li><strong>Install and start Docker Desktop</strong><span>Docker Desktop is required only for model runs and uncached R data.</span></li><li><strong>Select Install runtime</strong><span>Workbench pulls the immutable Apple Silicon image, creates the local alias, and performs the complete verification automatically.</span></li><li><strong>Run models</strong><span>After verification, Workbench creates temporary containers only while jobs are running.</span></li></ol><details class="settings-disclosure"><summary>Advanced manual setup</summary><p class="muted">Use these commands only to audit or troubleshoot the same pinned installation performed by <strong>Install runtime</strong>.</p><div class="runtime-command"><code id="runtimeInstallCommands">docker pull --platform linux/arm64 ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791<br>docker tag ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791 local/visioneval:2.0.0-arm64</code><button id="copyRuntimeInstallCommands" type="button" class="secondary">Copy install commands</button></div><div class="runtime-command"><code id="runtimeAdvancedCommands">docker run --rm --platform linux/arm64 local/visioneval:2.0.0-arm64 doctor<br>docker run --rm --platform linux/arm64 local/visioneval:2.0.0-arm64 verify-upstream-release<br>docker run --rm --platform linux/arm64 local/visioneval:2.0.0-arm64 verify-household-id-alignment</code><button id="copyRuntimeAdvancedCommands" type="button" class="secondary">Copy verification commands</button></div></details></section><!-- runtime-platform:macos:end -->
     </div>
   </form></dialog>
-  <dialog id="regionMapDialog" class="region-map-dialog">
+  <dialog id="regionMapDialog" class="region-map-dialog workbench-large-dialog">
     <form method="dialog" class="region-map-shell">
       <div class="section-title"><div><p class="eyebrow">Boundary review</p><h2 id="regionMapTitle">Virginia MPO geography</h2><p id="regionMapSubtitle" class="muted">Loading official map geometry…</p></div><button value="close" class="secondary">Close</button></div>
       <div id="regionMapFocus" class="region-map-focus">
@@ -782,7 +786,7 @@
       <p class="muted region-map-footnote">Official geometry is downloaded on first use and cached locally. Region preview and build do not require the map or an internet connection.</p>
     </form>
   </dialog>
-  <dialog id="regionGeographyDialog" class="wide-dialog region-geography-dialog">
+  <dialog id="regionGeographyDialog" class="wide-dialog region-geography-dialog workbench-large-dialog">
     <form method="dialog" class="region-geography-form">
       <header class="section-title region-geography-header"><div><p class="eyebrow">Build your own region</p><h2>Choose custom geography</h2><p class="muted">Select whole Azones or fine-tune individual Bzones.</p></div><button value="cancel" class="secondary">Close</button></header>
       <div class="region-geography-scroll">

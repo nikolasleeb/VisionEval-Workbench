@@ -18,6 +18,7 @@ datas = [
     (str(root / "backend" / "explore_catalog.json"), "."),
     (str(root / "backend" / "unit_conflicts.json"), "."),
     (str(root / "backend" / "dependency_catalog.json"), "."),
+    (str(root / "backend" / "input_validation_rules.json"), "."),
     (str(root / "backend" / "asset_catalog.json"), "."),
     (str(root / "resources" / "examples" / "planrva-mm"), "bundled_assets/planrva-mm"),
     (str(root / "runtime" / "scripts" / "ve-cli-native.R"), "."),

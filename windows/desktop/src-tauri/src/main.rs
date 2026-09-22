@@ -254,6 +254,24 @@ struct DesktopState {
     blocking_job_count: usize,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicalRect {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowLayoutMetrics {
+    client: PhysicalRect,
+    work_area: PhysicalRect,
+    scale_factor: f64,
+    maximized: bool,
+}
+
 fn default_notification_success_threshold_seconds() -> u64 {
     60
 }
@@ -2598,6 +2616,33 @@ fn renderer_smoke_mode() -> bool {
 }
 
 #[tauri::command]
+fn window_layout_metrics(window: tauri::WebviewWindow) -> Result<WindowLayoutMetrics, String> {
+    let position = window.inner_position().map_err(|error| error.to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "The current display could not be identified".to_string())?;
+    let work_area = monitor.work_area();
+    Ok(WindowLayoutMetrics {
+        client: PhysicalRect {
+            x: position.x,
+            y: position.y,
+            width: size.width,
+            height: size.height,
+        },
+        work_area: PhysicalRect {
+            x: work_area.position.x,
+            y: work_area.position.y,
+            width: work_area.size.width,
+            height: work_area.size.height,
+        },
+        scale_factor: monitor.scale_factor(),
+        maximized: window.is_maximized().map_err(|error| error.to_string())?,
+    })
+}
+
+#[tauri::command]
 fn report_renderer_smoke(app: AppHandle, result: Value) -> Result<(), String> {
     if !renderer_smoke_mode() {
         return Err("Renderer smoke reporting is only available in smoke mode".into());
@@ -2648,15 +2693,38 @@ fn main() {
                 if let Ok(value) = serde_json::to_string(action) { let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('visioneval-menu-action', {{ detail: {value} }}));")); }
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, factory_reset_workspace, reset_preferences, reveal_workspace, reveal_workspace_location, open_external_url, open_documentation_document, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, acknowledge_upgrade_notice, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
-        .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            let already_quitting = window.try_state::<BackendState>().and_then(|state| state.quit_requested.lock().ok().map(|value| *value)).unwrap_or(false);
-            if !already_quitting {
-                api.prevent_close();
+        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, factory_reset_workspace, reset_preferences, reveal_workspace, reveal_workspace_location, open_external_url, open_documentation_document, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, acknowledge_upgrade_notice, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, window_layout_metrics, renderer_smoke_mode, report_renderer_smoke, complete_quit])
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(webview) = window.app_handle().get_webview_window("main") {
-                    let _ = webview.eval("window.requestWorkbenchQuit && window.requestWorkbenchQuit();");
+                    let _ = webview.eval(
+                        "window.dispatchEvent(new Event('workbench-native-layout-change'));",
+                    );
                 }
             }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let already_quitting = window
+                    .try_state::<BackendState>()
+                    .and_then(|state| {
+                        state
+                            .quit_requested
+                            .lock()
+                            .ok()
+                            .map(|value| *value)
+                    })
+                    .unwrap_or(false);
+                if !already_quitting {
+                    api.prevent_close();
+                    if let Some(webview) = window.app_handle().get_webview_window("main") {
+                        let _ = webview.eval(
+                            "window.requestWorkbenchQuit && window.requestWorkbenchQuit();",
+                        );
+                    }
+                }
+            }
+            _ => {}
         })
         .run(tauri::generate_context!()).expect("error while running VisionEval Workbench");
 }

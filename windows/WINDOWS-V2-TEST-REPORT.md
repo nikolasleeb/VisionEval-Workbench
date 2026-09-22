@@ -12,7 +12,7 @@ Certified runtime: VisionEval `VE-40-RC7`
 
 | Gate | Result |
 | --- | --- |
-| Python suite | PASS — 379 tests, 18 dependency/integration skips |
+| Python suite | PASS — 368 tests, 18 dependency/integration skips |
 | JavaScript syntax and frontend contract/accessibility coverage | PASS |
 | Rust tests | PASS — 15 tests |
 | `cargo fmt --check` | PASS |
@@ -101,8 +101,38 @@ add the selected `VE_HOME` library before loading `jsonlite`, and Hypercube expo
 staging uses a short fixed hash to remain below legacy Windows path limits.
 
 The final RC7/setup/layout changes do not alter the model execution engine. After
-those changes, the complete 379-test regression suite and installed
+those changes, the complete 368-test regression suite and installed
 startup/runtime/storage/shutdown smoke were rerun against the final candidate.
+
+## Native work-area and input-validation follow-up
+
+- Added the native Tauri `window_layout_metrics` command. It reports the WebView
+  client rectangle, the current monitor work area, scale factor, and maximized
+  state in physical pixels. The frontend intersects that rectangle with the DOM
+  client area and `VisualViewport`, maps it through the measured physical/CSS
+  ratios, and centers large dialogs within a fixed 24 CSS-pixel inset.
+- Window move, resize, maximize/restore, scale-factor, visual-viewport, document
+  resize, and Workbench zoom changes all trigger reclamping. Settings has a
+  persistent pointer/keyboard resize handle; Hypercube remains non-resizable.
+- Added the authoritative packaged input-validation catalog, structured
+  `input_validation` HTTP 400 responses, categorical and linked-share editing,
+  timeless-file handling, atomic multi-file Batch Change rollback, and matching
+  Hypercube axis/candidate enforcement.
+- Final automated gates: 368 Python tests passed with 18 dependency/integration
+  skips; 74 frontend contract tests passed with 2 skips; 15 Rust tests passed;
+  JavaScript syntax, Rust formatting, and `git diff --check` passed.
+- A per-user install of the temporary candidate started successfully and reported
+  application 2.0.0, the SSD workspace, the native adapter, R 4.5.3, VisionEval
+  RC7, and the existing separate runtime/home paths. The packaged backend contains
+  `input_validation_rules.json`.
+- The privacy-clean installer and installed executables contain no user-profile,
+  private project, SSD build, Docker executable, Datastore, or workspace paths.
+  The installer is unsigned, as expected.
+
+Manual on-screen confirmation of the exact Settings/Hypercube taskbar clearance
+is still required because native window automation is unavailable in this Codex
+session. Until that confirmation, the installer remains in the temporary SSD
+candidate folder and has not replaced the published release-candidate artifacts.
 
 ## Popup safe-area follow-up
 

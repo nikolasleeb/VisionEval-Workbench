@@ -2524,6 +2524,79 @@ class Workspace:
         self.save_project(project)
         return item
 
+    def save_overlays_atomic(
+        self, project_id: str, variation_id: str, changes: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Stage and commit a validated overlay batch without partial file updates."""
+        directory, project = self.project(project_id)
+        self.require_standard_project(project)
+        variant = next((item for item in project["variations"] if item["id"] == variation_id), None)
+        if not variant:
+            raise WorkspaceError("Unknown project variation")
+        if not changes:
+            raise WorkspaceError("Choose at least one file to change")
+        names = [str(item.get("filename", "")) for item in changes]
+        if len(names) != len(set(names)):
+            raise WorkspaceError("A batch may include each input file only once")
+        overlay_root = directory / "overlays" / variation_id
+        self.validate_managed_path(overlay_root)
+        overlay_root.mkdir(parents=True, exist_ok=True)
+        staging = overlay_root / f".batch-{uuid.uuid4().hex}"
+        self.validate_managed_path(staging)
+        staging.mkdir()
+        backups: dict[Path, bytes | None] = {}
+        committed: list[Path] = []
+        next_items: list[dict[str, Any]] = []
+        prior_by_name = {str(item.get("fileName", "")): item for item in variant.get("overlays", [])}
+        try:
+            for change in changes:
+                safe_name = Path(str(change.get("filename", ""))).name
+                if safe_name != change.get("filename") or not safe_name.lower().endswith(".csv"):
+                    raise WorkspaceError("Only CSV input files may be edited")
+                library_file = self.within(self.input_library / project["inputLibrary"]["id"] / safe_name, self.input_library)
+                if not library_file.is_file():
+                    raise WorkspaceError(f"{safe_name} is not in the selected library")
+                (staging / safe_name).write_text(str(change.get("content", "")), encoding="utf-8")
+                target = overlay_root / safe_name
+                self.validate_managed_path(target)
+                backups[target] = target.read_bytes() if target.is_file() else None
+                prior = prior_by_name.get(safe_name, {})
+                item = {"fileName": safe_name, "path": str(target), "updatedAt": now_iso()}
+                operations = change.get("editOperations") if change.get("editOperations") is not None else prior.get("editOperations")
+                if operations:
+                    deduplicated: list[dict[str, Any]] = []
+                    operation_ids: set[str] = set()
+                    for operation in operations:
+                        if not isinstance(operation, dict):
+                            continue
+                        operation_id = str(operation.get("operationId", "")).strip()
+                        if operation_id and operation_id in operation_ids:
+                            continue
+                        if operation_id:
+                            operation_ids.add(operation_id)
+                        deduplicated.append(copy.deepcopy(operation))
+                    if deduplicated:
+                        item["editOperations"] = deduplicated
+                next_items.append(item)
+            for item in next_items:
+                target = Path(item["path"])
+                os.replace(staging / item["fileName"], target)
+                committed.append(target)
+            changed_names = {item["fileName"] for item in next_items}
+            variant["overlays"] = [item for item in variant.get("overlays", []) if item.get("fileName") not in changed_names] + next_items
+            self.save_project(project)
+            return {"saved": next_items, "count": len(next_items)}
+        except Exception:
+            for target in reversed(committed):
+                original = backups.get(target)
+                if original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_bytes(original)
+            raise
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
     def delete_overlay(self, project_id: str, variation_id: str, filename: str) -> dict[str, Any]:
         directory, project = self.project(project_id)
         self.require_standard_project(project)
@@ -2549,7 +2622,8 @@ class Workspace:
     @staticmethod
     def _summary_protected_column(name: str) -> bool:
         value = str(name).lower()
-        return value in {"geo", "year", "county", "bzone", "azone", "marea", "zone", "taz", "id"} or value.endswith("id") or value.endswith("_id") or value.endswith("code")
+        compact = re.sub(r"[^a-z0-9]+", "", value)
+        return value in {"geo", "year", "county", "bzone", "azone", "marea", "zone", "taz", "id"} or value.endswith("_id") or compact in {"hhid", "vehid", "wkrid"} or compact.endswith("code")
 
     @classmethod
     def _summary_numeric_columns(cls, columns: list[str], rows: list[dict[str, str]]) -> set[str]:
@@ -2608,6 +2682,10 @@ class Workspace:
 
     @staticmethod
     def _summary_action(operation: dict[str, Any]) -> tuple[str, str]:
+        if operation.get("valueType") == "share_group":
+            values = operation.get("groupValues") or operation.get("value") or {}
+            if isinstance(values, dict):
+                return "set linked shares to", ", ".join(f"{key}={value}" for key, value in values.items())
         kind = str(operation.get("operation", ""))
         action = {
             "set": "set to", "add": "increased by", "subtract": "decreased by",
@@ -2663,6 +2741,44 @@ class Workspace:
         for index, operation in enumerate(operations):
             columns = {str(item) for item in operation.get("columns", [])} & editable_columns
             kind = str(operation.get("operation", ""))
+            categorical = operation.get("valueType") == "categorical"
+            share_group = operation.get("valueType") == "share_group"
+            if share_group:
+                values = operation.get("groupValues") or operation.get("value") or {}
+                if kind != "set" or not columns or not isinstance(values, dict) or not columns.issubset(values):
+                    continue
+                valid_operations[index] = True
+                allowed = resolved_targets[index] if index < len(resolved_targets) else set()
+                for row_index, row in enumerate(expected_rows):
+                    year, geo = str(row.get("Year", "")), str(row.get("Geo", ""))
+                    if operation.get("year") and str(operation.get("year")) != year:
+                        continue
+                    if not operation.get("allLocations") and (not allowed or geo not in allowed):
+                        continue
+                    if geo:
+                        operation_targeted_geographies[index].add(geo)
+                    for column in columns:
+                        row[column] = str(values[column])
+                        operation_cells[index].add((row_index, column))
+                continue
+            if categorical:
+                if kind != "set" or len(columns) != 1:
+                    continue
+                value = str(operation.get("value", ""))
+                valid_operations[index] = True
+                allowed = resolved_targets[index] if index < len(resolved_targets) else set()
+                for row_index, row in enumerate(expected_rows):
+                    year, geo = str(row.get("Year", "")), str(row.get("Geo", ""))
+                    if operation.get("year") and str(operation.get("year")) != year:
+                        continue
+                    if not operation.get("allLocations") and (not allowed or geo not in allowed):
+                        continue
+                    column = next(iter(columns))
+                    if geo:
+                        operation_targeted_geographies[index].add(geo)
+                    row[column] = value
+                    operation_cells[index].add((row_index, column))
+                continue
             try:
                 value = float(operation.get("value", 0))
             except (TypeError, ValueError):
@@ -2696,8 +2812,6 @@ class Workspace:
                     if geo:
                         operation_targeted_geographies[index].add(geo)
                     next_value = calculator(current)
-                    if "prop" in column.lower():
-                        next_value = min(1, next_value)
                     row[column] = rounded(operation, column, next_value)
                     operation_cells[index].add((row_index, column))
 
@@ -2729,7 +2843,10 @@ class Workspace:
                 try:
                     expected, actual = float(expected_value), float(after_text)
                 except (TypeError, ValueError):
-                    unexplained.add(cell)
+                    if str(expected_value) == after_text:
+                        explained.add(cell)
+                    else:
+                        unexplained.add(cell)
                     continue
                 decimals = len(after_text.split(".", 1)[1]) if "." in after_text else 0
                 tolerance = max(1e-9, 0.5 * (10 ** -max(0, decimals)))
@@ -2746,6 +2863,8 @@ class Workspace:
         actual_all_variables = bool(editable_columns and changed_columns == editable_columns)
         selected_columns = {column for index in used_indexes for _, column in effective_operation_cells[index] if column in editable_columns}
         all_variables = bool(editable_columns and selected_columns == editable_columns) if used_indexes else actual_all_variables
+        if any(operations[index].get("valueType") == "categorical" for index in used_indexes):
+            all_variables = False
         variable_text = "all variables" if all_variables else ", ".join(sorted(changed_columns, key=str.lower)) or "values"
         groups: list[dict[str, Any]] = []
         signatures: list[tuple[str, str, str, str]] = []
@@ -2780,7 +2899,7 @@ class Workspace:
                         f"{unchanged_count:,} unchanged after rounding"
                     )
                 variables = sorted({column for _,column in effective_cells if column in editable_columns},key=str.lower)
-                group_all = bool(editable_columns and set(variables) == editable_columns)
+                group_all = bool(editable_columns and set(variables) == editable_columns and operation.get("valueType") != "categorical")
                 group = {
                     "variables": variables, "allVariables": group_all,
                     "action": action, "amount": amount,
@@ -2970,6 +3089,12 @@ class Workspace:
                     if str(row.get("Geo", "")) and (not relevant_years or str(row.get("Year", "")) in relevant_years)
                 }
                 operations = [item for item in overlay.get("editOperations", []) if isinstance(item, dict)]
+                editable_columns |= {
+                    str(column)
+                    for operation in operations if operation.get("valueType") in {"categorical", "share_group"}
+                    for column in operation.get("columns", [])
+                    if str(column) in original_columns and not self._summary_protected_column(str(column))
+                }
                 file_record["editSource"] = self._edit_source(operations)
                 operation_targets = []
                 try:

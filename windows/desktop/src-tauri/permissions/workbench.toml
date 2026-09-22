@@ -39,6 +39,7 @@ commands.allow = [
   "start_docker_desktop",
   "start_backend",
   "restart_backend",
+  "window_layout_metrics",
   "renderer_smoke_mode",
   "report_renderer_smoke",
   "complete_quit"
