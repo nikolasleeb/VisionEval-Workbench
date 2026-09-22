@@ -1,42 +1,73 @@
 # VisionEval Workbench 2.0 — Windows Test Report
 
 Candidate status: **UNSIGNED**  
-Test date: September 20–21, 2026  
+Test date: September 20–22, 2026
 Checkpoint: `77d28f320ce6a315d7ea50ffb9ca50df5fe8eb84`  
 Branch: `codex/windows-v2.0-port`
+
+Certified runtime: VisionEval `VE-40-RC7`
+(`7852dc58fad460ff279f5eebf4dd55fe191470ad`) with R 4.5.3 x64.
 
 ## Automated gates
 
 | Gate | Result |
 | --- | --- |
-| Python suite | PASS — 369 tests, 22 dependency/integration skips |
+| Python suite | PASS — 379 tests, 18 dependency/integration skips |
 | JavaScript syntax and frontend contract/accessibility coverage | PASS |
 | Rust tests | PASS — 15 tests |
 | `cargo fmt --check` | PASS |
-| Documentation source validation | PASS — 60 Markdown files |
-| Generated PDF consistency | PASS — User Guide 20 pages; What's New 1 page |
-| Native R help/doctor/capability checks | PASS |
+| Documentation source validation | PASS — 62 Markdown files |
+| Generated document consistency | PASS — User Guide PDF 20 pages and DOCX 27 pages; What's New PDF/DOCX 1 page each |
+| Native R help/doctor/capability/provenance checks | PASS |
 | `git diff --check` | PASS |
 
 The Python suite covers workspace leases, restart serialization, port closure,
 Windows child cleanup, runtime discovery precedence and stale candidates, Unicode
-paths, FIFO batch ownership and recovery, Hypercube generation/regeneration,
-scoped stop/retry behavior, matrix/cache/discovery/export workflows, package safety,
-documentation contracts, and frontend accessibility contracts.
+and spaced paths, junction/overlap rejection, FIFO batch ownership and recovery,
+managed-install checksum failure/cancellation/rollback/compatible-R reuse,
+Hypercube generation/regeneration, scoped stop/retry behavior, matrix/cache/
+discovery/export workflows, package safety, documentation contracts, and frontend
+accessibility contracts.
+
+## RC7 runtime and first-run setup
+
+- Runtime discovery independently resolved R 4.5.3, `VE_HOME`, and `VE_RUNTIME`.
+- Package `DESCRIPTION` metadata reported `VECommit`
+  `7852dc58fad460ff279f5eebf4dd55fe191470ad`; Workbench therefore reported
+  `VE-40-RC7` even though package versions remain 4.0.0.
+- Native `doctor`, `verify-capabilities`, and `verify-upstream-release` completed
+  successfully against the installed runtime.
+- Automated managed-install tests verified pinned HTTPS URLs and SHA-256 values,
+  current-user locations, R 4.5 reuse, safe ZIP extraction, cancellation,
+  temporary-file cleanup, and rollback after failed verification.
+- First-run contracts show **Install R 4.5.3 + VisionEval RC7** only when no usable
+  runtime is found. Explicit selections are canonicalized and cannot place
+  `VE_RUNTIME` inside `VE_HOME` or vice versa.
 
 ## Packaged-candidate inspection
 
-- Built with a user-scoped Node/Python/LLVM toolchain; no administrator access was
-  required.
+- Built with a user-scoped Node/Python/LLVM/Windows SDK toolchain on the external
+  SSD; no administrator access was required.
 - NSIS installs per-user and registers version 2.0.0.
+- The release application compiled successfully and NSIS produced the x64
+  installer. Windows intermittently returned OS error 1224 after NSIS wrote the
+  installer because the new executable was temporarily memory-mapped; the
+  resulting installer passed PE metadata, hash, install, launch, and uninstall
+  checks.
 - The installed application contains exactly the desktop executable, packaged
   backend executable, and uninstaller.
 - Installer and extracted executables were scanned for private build/user paths,
   Docker executables/client payloads, credential paths, and credential files; no
   matches were found. Rust source paths were remapped before the final build.
-- Installed startup reported a responsive `VisionEval Workbench` window, local
-  backend health, application version 2.0.0, native adapter, R 4.5.3, and the
-  expected independent VE runtime/home paths.
+- The final per-user install completed with exit code 0. Startup reported a
+  responsive `VisionEval Workbench` window, local backend health, application
+  version 2.0.0, native adapter, R 4.5.3, RC7 provenance, and the expected
+  independent VE runtime/home paths.
+- The live packaged backend reported the SSD workspace
+  `D:\VDOT\VE Workbench\Workspaces`, approximately 478 GB free, and 8 GB RAM as
+  an advisory condition only. Runtime execution remained enabled.
+- Graceful window close terminated the complete backend process tree and closed
+  its loopback port.
 - Both packaged documentation PDFs were available through the installed backend.
 - Silent uninstall returned success, removed the application directory, and
   preserved the pre-existing R, VisionEval runtime/home, and Workbench workspace
@@ -69,8 +100,16 @@ Two acceptance findings were corrected and retested: native analysis helpers now
 add the selected `VE_HOME` library before loading `jsonlite`, and Hypercube export
 staging uses a short fixed hash to remain below legacy Windows path limits.
 
+The final RC7/setup/layout changes do not alter the model execution engine. After
+those changes, the complete 379-test regression suite and installed
+startup/runtime/storage/shutdown smoke were rerun against the final candidate.
+
 ## Expected warnings
 
-The missing `WORKBENCH-RELEASE` marker and Windows `C.UTF-8` locale warnings are
-documented compatibility limitations. They did not prevent native doctor,
-capability verification, or the successful Standard model run.
+Windows R still emits `C.UTF-8` locale warnings. The official RC7 Windows library
+does not include the legacy `WORKBENCH-RELEASE` marker; RC7 provenance is instead
+verified from `VECommit` in package `DESCRIPTION` metadata. Neither warning blocks
+native execution.
+
+This candidate is **UNSIGNED**. Windows SmartScreen may show an unknown-publisher
+warning. No tag was created and nothing was published.
