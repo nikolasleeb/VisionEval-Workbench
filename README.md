@@ -12,14 +12,16 @@ VisionEval is powerful, but a complete workflow normally involves many folders, 
 2. **Create** a project, preserve a baseline, and make scenario changes.
 3. **Run** validated scenarios through the appropriate VisionEval runtime.
 4. **Compare** completed datastores with tables, charts, maps, and exports.
+5. **Hypercube** builds and analyzes bounded scenario matrices.
 
 ## Supported editions
 
 | Edition | Supported system | Installer | VisionEval runtime |
 |---|---|---|---|
-| Windows | Windows 11 x64 | `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe` | Existing native `VE_Runtime`, `VE_HOME`, and compatible R installation |
-| Apple Silicon Mac | macOS 12 or newer | `VisionEval-Workbench-v1.1.0-macos-arm64.dmg` | Docker Desktop with the managed ARM64 Workbench runtime |
-| Intel Mac | macOS 12 or newer | `VisionEval-Workbench-v1.1.0-macos-x64.dmg` | Docker Desktop with the managed AMD64 Workbench runtime |
+| Windows | Windows 11 x64 | `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` | Existing native VisionEval VE-40-RC7 and compatible R, or the optional current-user runtime setup |
+| Apple Silicon Mac | macOS 12 or newer | `VisionEval-Workbench-v2.0.0-macos-arm64.dmg` | Docker Desktop with the verified ARM64 Workbench runtime |
+
+Version 2.0 does not include an Intel Mac installer. Earlier Intel releases remain available in [past releases](https://github.com/nikolasleeb/VisionEval-Workbench/releases).
 
 The editions are maintained separately because their runtime setup and operating-system integration differ. Their source code is available in the [`windows`](windows), [`macos`](macos), and [`intel`](intel) folders.
 
@@ -27,39 +29,35 @@ The editions are maintained separately because their runtime setup and operating
 
 Go to the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
 
-- **Windows:** download `VisionEval-Workbench-v1.0.1-windows-x64-setup.exe`, run the installer, and connect Workbench to an existing native VisionEval runtime.
-- **Apple Silicon Mac:** download `VisionEval-Workbench-v1.1.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Apple silicon before setting up the runtime.
-- **Intel Mac:** download `VisionEval-Workbench-v1.1.0-macos-x64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. Install Docker Desktop for Mac with an Intel chip before setting up the runtime.
+- **Windows:** download `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` and run the installer. Workbench can connect to an existing native runtime or offer the verified current-user R 4.5.3 and VisionEval VE-40-RC7 setup. The installer is unsigned, so Windows SmartScreen may show an unknown-publisher warning. Verify its SHA-256 in the release notes before deciding whether to run it.
+- **Apple Silicon Mac:** download `VisionEval-Workbench-v2.0.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. The app is Developer ID signed and Apple notarized. Install Docker Desktop for Apple silicon and follow the runtime setup in Workbench.
 
-The release also provides `VisionEval-Workbench-v1.1.0-intel-source.zip`, an exact buildable snapshot of the Intel source tree.
-
-The Mac applications are ad-hoc signed but are not Apple-notarized. If macOS blocks the first launch, follow the one-time Gatekeeper instructions in the matching [Apple Silicon](https://github.com/nikolasleeb/VisionEval-Workbench/wiki/macOS-Installation-and-Runtime) or [Intel](https://github.com/nikolasleeb/VisionEval-Workbench/wiki/Intel-macOS-Installation-and-Runtime) installation guide.
+The v2.0 tag includes the complete Mac and Windows source. GitHub provides source ZIP and TAR archives automatically.
 
 ## Regional packages
 
-The release also includes two optional platform-neutral packages:
+The release includes three optional platform-neutral packages:
 
-- `planrva-2.2.zip` provides the PlanRVA multimodal model template and matching InputLibrary.
-- `virginia-mpo-regions.zip` provides Virginia MPO regional data and Region Builder support.
+- `planrva-2.0.zip` provides the PlanRVA model template and matching InputLibrary.
+- `virginia-mpo-regions-2.0.zip` provides Virginia MPO regional data and Region Builder support.
+- `wppdc-2.0.zip` provides the WPPDC regional package.
 
 Do not unzip these packages. In Workbench, open **Settings → Assets**, choose the downloaded ZIP, review its information, and install it into your workspace.
 
 ## Tutorials
 
-The repository includes a screenshot-driven scenario walkthrough and separate installation guidance for Windows 11 x64, Apple Silicon macOS, and Intel macOS. The Windows installation PDF and editable Word guide remain accurate for installing version 1.0.1. The text-based User Guide provides additional operating and troubleshooting detail.
+The v2.0 applications include their current User Guide and What's New documents under **Settings → Documentation**. Earlier installation tutorials in this repository describe previous versions and are being refreshed for v2.0.
 
 - [Browse all tutorials and walkthroughs](docs/tutorials/README.md)
 - [Scenario walkthrough (PDF)](docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf)
-- [Windows 11 x64 installation guide](docs/tutorials/VisionEval-Workbench-Installation-Windows-x64.pdf)
 - [Windows User Guide](windows/UserGuide.md)
-- [Apple Silicon macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf)
-- [Intel macOS installation guide (PDF)](docs/tutorials/VisionEval-Workbench-Installation-macOS-Intel.pdf)
+- [Apple Silicon macOS User Guide](macos/UserGuide.md)
 
-The two macOS editions require different installers and runtime images. Choose the Apple Silicon guide for M-series Macs and the Intel guide for Intel-based Macs.
+Visit the [VisionEval Workbench website](https://sites.google.com/view/ve-workbench/home) for additional guidance and future Version 2 tutorials.
 
 ## Help and documentation
 
-The [Workbench wiki](https://github.com/nikolasleeb/VisionEval-Workbench/wiki) contains separate Windows, Apple Silicon macOS, and Intel macOS instructions, workflow explanations, troubleshooting, tutorials, and developer-oriented build notes.
+The [Workbench wiki](https://github.com/nikolasleeb/VisionEval-Workbench/wiki) contains additional workflow and developer information. Check the bundled Version 2 guides for the current application behavior.
 
 If something fails, [open an issue](https://github.com/nikolasleeb/VisionEval-Workbench/issues) and include your operating system, Workbench version, runtime status, installed packages, and a diagnostic ZIP when available.
 
