@@ -1,6 +1,26 @@
 {
-  "schemaVersion": 1,
-  "documentationVersion": "1.1.0-macos",
-  "title": "VisionEval Workbench User Guide",
-  "entrypoint": "README.md"
+  "schemaVersion": 2,
+  "documentationVersion": "2.0.0-macos-rev2",
+  "title": "VisionEval Workbench 2.0 Documentation",
+  "entrypoint": "VisionEval-Workbench-2.0-macOS-User-Guide.pdf",
+  "documents": [
+    {
+      "id": "user-guide",
+      "title": "VisionEval Workbench 2.0 macOS User Guide",
+      "description": "The complete reference for Explore, Create, Run, Compare, Hypercube analysis and export, settings, storage, and troubleshooting on Apple Silicon macOS.",
+      "filename": "VisionEval-Workbench-2.0-macOS-User-Guide.pdf",
+      "format": "pdf",
+      "pageCount": 16,
+      "version": "2.0"
+    },
+    {
+      "id": "whats-new",
+      "title": "What Is New in VisionEval Workbench 2.0 for Mac",
+      "description": "A one-page, plain-language overview of the most important changes since the public Version 1.0 release.",
+      "filename": "VisionEval-Workbench-2.0-Whats-New-macOS.pdf",
+      "format": "pdf",
+      "pageCount": 1,
+      "version": "2.0"
+    }
+  ]
 }

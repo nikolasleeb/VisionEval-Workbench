@@ -19,7 +19,7 @@ from backend.workbench.transit_inputs import TRANSIT_NORMALIZATION_RULE, normali
 
 
 PACKAGE_ID = "virginia-mpo-regions"
-PACKAGE_VERSION = "2026.08.12.3"
+PACKAGE_VERSION = "2.0"
 RETRIEVED_AT = "2026-08-05"
 
 
@@ -115,6 +115,28 @@ def build(input_library: Path, output: Path) -> Path:
         package = Path(temporary) / f"{PACKAGE_ID}-{PACKAGE_VERSION}"
         data = package / "data"
         shutil.copytree(input_library, data / "input-library", ignore=shutil.ignore_patterns(".DS_Store"))
+        input_explanations = input_library.parent / "input-explanations"
+        input_explanations_component = None
+        content_source_version = None
+        if input_explanations.is_dir():
+            shutil.copytree(
+                input_explanations,
+                data / "input-explanations",
+                ignore=shutil.ignore_patterns(".DS_Store"),
+            )
+            catalog_path = data / "input-explanations" / "catalog.json"
+            if catalog_path.is_file():
+                catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+                catalog_package = catalog.get("package") or {}
+                content_source_version = str(catalog_package.get("version") or "").strip() or None
+                input_explanations_component = {
+                    "id": str(catalog_package.get("id", "virginia-visioneval-input-explanations")),
+                    "name": str(catalog_package.get("name", "Virginia VisionEval Input Explanations")),
+                    "version": str(catalog_package.get("version", PACKAGE_VERSION)),
+                    "path": "data/input-explanations/catalog.json",
+                    "fileCount": len(catalog.get("coveredFiles") or []),
+                    "appliesTo": catalog_package.get("appliesTo") or {"state": "VA"},
+                }
         transit_normalization = normalize_virginia_transit_inputs(data / "input-library")
         scaffold = ROOT / "resources" / "region-builder" / "model-template"
         if not (scaffold / "visioneval.cnf").is_file():
@@ -139,10 +161,22 @@ def build(input_library: Path, output: Path) -> Path:
             "id": PACKAGE_ID,
             "name": "Virginia MPO Regional Data",
             "version": PACKAGE_VERSION,
+            **({"contentSourceVersion": content_source_version} if content_source_version else {}),
             "coverage": "Virginia",
             "state": "VA",
             "retrievedAt": RETRIEVED_AT,
-            "description": "Official VDOT MPO boundaries joined to Virginia VisionEval Bzones, with a statewide InputLibrary.",
+            "description": "Build supported Virginia MPO and custom regional model packages from verified statewide source data.",
+            "compatibility": "VisionEval Workbench 2.0 package format",
+            "intendedUse": "Build supported Virginia MPO or custom regional model packages in Workbench.",
+            "executionSupport": "Source data only; not supported for running Virginia as one statewide model.",
+            "capabilities": [
+                "Build supported Virginia MPO regions",
+                "Build custom Virginia regions",
+                "Provide statewide Virginia map context",
+            ],
+            "warnings": [
+                "This package is not intended to run Virginia as one statewide model. Use it to build a supported MPO or custom regional package."
+            ],
             "terminology": {"regionSingular": "MPO", "regionPlural": "MPOs", "regionSelector": "Virginia MPO"},
             "inputLibrary": {
                 "name": "Virginia InputLibrary",
@@ -213,6 +247,7 @@ def build(input_library: Path, output: Path) -> Path:
                     "retrievedAt": RETRIEVED_AT,
                 },
             ],
+            **({"inputExplanations": input_explanations_component} if input_explanations_component else {}),
             "files": inventory,
         }
         (package / "workbench-package.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

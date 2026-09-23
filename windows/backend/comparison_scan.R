@@ -1,5 +1,10 @@
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 3) stop("Usage: comparison_scan.R request.json output.json progress.json", call. = FALSE)
+if (identical(tolower(Sys.getenv("VISIONEVAL_RUNTIME_ADAPTER", "")), "native")) {
+  ve_home <- normalizePath(Sys.getenv("VE_HOME", ""), mustWork = TRUE)
+  r_minor <- strsplit(R.version$minor, "\\.")[[1]][1]
+  .libPaths(c(file.path(ve_home, "ve-lib", paste(R.version$major, r_minor, sep = ".")), .libPaths()))
+}
 suppressPackageStartupMessages(library(jsonlite))
 
 request <- fromJSON(args[[1]], simplifyVector = FALSE)

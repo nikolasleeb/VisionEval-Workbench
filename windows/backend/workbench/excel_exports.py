@@ -29,7 +29,7 @@ def _registration_fingerprint(record: dict[str, Any]) -> str:
 
 
 class WorkbookWriter:
-    def __init__(self, path: Path, app_version: str = "1.0.0"):
+    def __init__(self, path: Path, app_version: str = "2.0.0"):
         try:
             import xlsxwriter
         except ImportError as exc:
@@ -312,12 +312,13 @@ class WorkbookWriter:
         try:
             formats = self._formats(workbook)
             aggregation = str(payload.get("aggregation", "mean")).replace("_", " ").title()
-            headers = ["Geography ID", "Geography", f"Reference {aggregation}", f"Comparison {aggregation}", "Reference rows", "Comparison rows", "Absolute change", "Change %", "Units"]
+            headers = ["Geography ID", "Geography", "Member Bzones", f"Reference {aggregation}", f"Comparison {aggregation}", "Reference rows", "Comparison rows", "Absolute change", "Change %", "Units"]
             values = [[
-                item.get("geographyId"), item.get("name"), item.get("referenceValue"), item.get("comparisonValue"),
-                item.get("referenceCount"), item.get("comparisonCount"), item.get("absoluteChange"), item.get("percentChange"), payload.get("units", ""),
+                item.get("geographyId"), item.get("name"), "|".join(map(str, (payload.get("mareaBzones") or {}).get(str(item.get("geographyId")), []))),
+                item.get("referenceValue"), item.get("comparisonValue"), item.get("referenceCount"), item.get("comparisonCount"),
+                item.get("absoluteChange"), item.get("percentChange"), payload.get("units", ""),
             ] for item in rows]
-            self._write_table_sheets(workbook, "Map Data", headers, values, {6, 7}, formats, cancelled)
+            self._write_table_sheets(workbook, "Map Data", headers, values, {7, 8}, formats, cancelled)
             provenance = {
                 **payload, "comparisons": [payload.get("comparison") or {}],
                 "metadata": {"units": payload.get("units", "")},
@@ -328,10 +329,56 @@ class WorkbookWriter:
             workbook.close()
         return _safe_filename(f"comparison_map_{payload.get('table','')}_{payload.get('variable','')}_{payload.get('year','')}.xlsx")
 
+    def hypercube_analysis(self, payload: dict[str, Any], cancelled: Callable[[], bool]) -> str:
+        workbook = self.xlsxwriter.Workbook(str(self.path), {"constant_memory": True, "strings_to_formulas": False, "strings_to_urls": False})
+        try:
+            formats = self._formats(workbook)
+            axes = payload.get("hypercube", {}).get("axes", [])
+            axis_headers = [str(axis.get("column") or axis.get("id") or "Axis") for axis in axes]
+            headers = ["Case", "Scenario", *axis_headers, "Displayed value", "Scenario value", "Baseline value", "Absolute change", "Percent change", "Typical row change", "Rows changed (%)", "Aggregation", "Matched rows", "Unmatched rows", "Units"]
+            rows = []
+            for cell in payload.get("cells") or []:
+                if cancelled():
+                    raise WorkspaceError("Hypercube analysis export cancelled")
+                values = {str(item.get("axisId")): item.get("value") for item in cell.get("values") or []}
+                rows.append([
+                    cell.get("caseIndex"), cell.get("name"), *[values.get(str(axis.get("id"))) for axis in axes],
+                    cell.get("value"), cell.get("scenarioValue"), cell.get("referenceValue"), cell.get("absoluteChange"),
+                    cell.get("percentChange"), cell.get("typicalRowChange"), cell.get("breadth"), cell.get("aggregationLabel"),
+                    cell.get("matchedRows"), cell.get("unmatchedRows"), (payload.get("metadata") or {}).get("units", ""),
+                ])
+            first_metric = 2 + len(axis_headers)
+            self._write_table_sheets(workbook, "Displayed Matrix", headers, rows, set(range(first_metric, first_metric + 7)), formats, cancelled)
+            provenance = {
+                **payload,
+                "reference": payload.get("baseline") or {},
+                "comparisons": [cell.get("datastore") or {} for cell in payload.get("cells") or []],
+            }
+            self._write_provenance(workbook, provenance, "hypercube-analysis", formats)
+            sheet = workbook.add_worksheet("Matrix Definition")
+            sheet.write_string(0, 0, "Hypercube matrix definition", formats["title"])
+            definition = [
+                ("Project", (payload.get("project") or {}).get("name", "")),
+                ("Metric", payload.get("metric", "")), ("Requested aggregation", payload.get("aggregationRequested", "")),
+                ("Generated at", payload.get("generatedAt", "")), ("Unavailable cases", len(payload.get("unavailable") or [])),
+            ]
+            for row, (label, value) in enumerate(definition, 2):
+                sheet.write_string(row, 0, label, formats["label"]); self._write_value(sheet, row, 1, value, formats)
+            start = len(definition) + 4
+            for column, header in enumerate(["Axis", "Input file", "Operation", "Values"]): sheet.write_string(start, column, header, formats["header"])
+            for row, axis in enumerate(axes, start + 1):
+                values = [axis.get("column"), axis.get("filename"), axis.get("operation"), ", ".join(str(value) for value in axis.get("values") or [])]
+                for column, value in enumerate(values): self._write_value(sheet, row, column, value, formats)
+            sheet.set_column(0, 0, 28); sheet.set_column(1, 3, 48)
+        finally:
+            workbook.close()
+        return _safe_filename(f"hypercube_analysis_{(payload.get('project') or {}).get('name','')}_{payload.get('variable','')}_{payload.get('year','')}.xlsx")
+
 
 class ComparisonExportManager:
-    def __init__(self, service, app_version: str = "1.0.0"):
+    def __init__(self, service, app_version: str = "2.0.0", hypercube_analysis=None):
         self.service = service
+        self.hypercube_analysis = hypercube_analysis
         self.app_version = app_version
         self.root = service.workspace.exchange / "comparison-exports"
         self.root.mkdir(parents=True, exist_ok=True)
@@ -344,7 +391,7 @@ class ComparisonExportManager:
 
     def start(self, payload: dict[str, Any]) -> dict[str, Any]:
         kind = payload.get("kind", "")
-        if kind not in {"current", "filtered", "change-scan", "dashboard", "full-variables", "comparison-map"}:
+        if kind not in {"current", "filtered", "change-scan", "dashboard", "full-variables", "comparison-map", "hypercube-analysis"}:
             raise WorkspaceError("Unknown comparison export type")
         if kind == "full-variables":
             export_format = payload.get("format", "")
@@ -447,6 +494,14 @@ class ComparisonExportManager:
                 scoped = {**payload, "scopeLabel": request.get("scopeLabel", "All Virginia")}
                 operation.update({"phase": "workbook", "message": "Formatting comparison map workbook"}); write_json(operation_path, operation)
                 filename = writer.comparison_map(scoped, rows, cancelled)
+                mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            elif kind == "hypercube-analysis":
+                if not self.hypercube_analysis:
+                    raise WorkspaceError("Hypercube analysis export is unavailable")
+                writer = WorkbookWriter(output, self.app_version)
+                payload = self.hypercube_analysis.matrix(request.get("analysisRequest") or {})
+                operation.update({"phase": "workbook", "message": "Formatting Hypercube analysis workbook"}); write_json(operation_path, operation)
+                filename = writer.hypercube_analysis(payload, cancelled)
                 mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             elif kind == "change-scan":
                 writer = WorkbookWriter(output, self.app_version)

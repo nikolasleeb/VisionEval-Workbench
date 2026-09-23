@@ -1,32 +1,32 @@
 {
   "schemaVersion": 1,
-  "releaseStatus": "public",
-  "applicationVersion": "1.0.0",
-  "releaseDate": "August 14, 2026",
+  "releaseStatus": "release-candidate-unsigned",
+  "applicationVersion": "2.0.0",
+  "releaseDate": "September 21, 2026",
   "developedBy": "Nikolas Lee Bishop",
   "github": "https://github.com/nikolasleeb/VisionEval-Workbench",
   "supported": [
-    {"platform": "Windows", "architecture": "x86_64", "runtimeAdapter": "native-ve-runtime", "status": "released"},
-    {"platform": "macOS", "architecture": "arm64", "runtimeAdapter": "docker", "status": "released"}
+    {"platform": "Windows", "architecture": "x86_64", "runtimeAdapter": "native-ve-runtime", "status": "release-candidate-unsigned"},
+    {"platform": "macOS", "architecture": "arm64", "runtimeAdapter": "docker", "status": "reference-only"}
   ],
-  "visionEvalVersion": "VE-40-RC6",
-  "visionEvalCommit": "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2",
-  "rVersion": "4.5.1",
+  "visionEvalVersion": "VE-40-RC7",
+  "visionEvalCommit": "7852dc58fad460ff279f5eebf4dd55fe191470ad",
+  "rVersion": "4.5.3",
   "runtimeImage": {
-    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime:1.0.0-arm64",
-    "localAlias": "local/visioneval:1.0.0-arm64",
-    "digest": "sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
-    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:d730e304e890efd6c20ff2d0e89b2301899832105917b43eaca68cbbcced7caa",
-    "immutableTag": "1.0.0-arm64-d1fd4e0205be",
-    "buildRevision": "d1fd4e0205bee36d633d24f8ee93ef096cb0008f",
-    "published": true,
+    "reference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+    "localAlias": "local/visioneval:2.0.0-arm64",
+    "digest": "sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+    "digestReference": "ghcr.io/nikolasleeb/visioneval-workbench-runtime@sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+    "immutableTag": "2.0.0-arm64",
+    "buildRevision": "",
+    "published": false,
     "distribution": "unofficial-workbench-runtime",
-    "compatibilityPatch": "2026-08-03-composite-household-id-alignment"
+    "compatibilityPatch": "none"
   },
   "nativeWindowsRuntime": {
-    "selection": "user-selected VE_RUNTIME",
+    "selection": "user-selected or current-user managed installation",
     "requiredPaths": ["VE_RUNTIME", "VE_HOME", "Rscript.exe"],
-    "verification": "functional compatibility checks",
+    "verification": "functional compatibility and DESCRIPTION VECommit checks",
     "dockerRequired": false,
     "bundled": false
   },

@@ -4,7 +4,7 @@
 
 - The public Mac application is validated for Apple Silicon and macOS 12 or newer.
 - Intel Macs are not supported.
-- The application is ad-hoc signed but is not Apple-notarized, so a one-time Gatekeeper workaround may be required.
+- The macOS 2.0 distribution is Developer ID signed with the hardened runtime, notarized by Apple, and stapled. Custom source builds do not inherit that release signature or notarization ticket.
 - The verified Docker runtime is `linux/arm64` and is not a Windows/x64 runtime.
 
 ## Virginia statewide execution

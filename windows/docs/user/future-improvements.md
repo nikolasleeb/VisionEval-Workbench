@@ -11,5 +11,6 @@ Potential Windows Workbench improvements include:
 - Safely turning supported VisionEval modules on or off for a model or project, where feasible, with dependency checks, required-input validation, and protection against invalid model configurations.
 - Module explanations sourced from and version-linked to the official VisionEval GitHub documentation, matched to the connected VisionEval release.
 - Increased error handling with clearer actionable messages, recovery guidance that preserves application state, and more useful diagnostic bundles.
+- Evaluate automatically selecting or removing editing-year controls once model-package metadata can identify the intended editable year without ambiguity; keep explicit year selection until then.
 
 These are roadmap items, not promises for a particular release.

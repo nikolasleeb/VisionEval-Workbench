@@ -40,13 +40,15 @@ Choose System, Light, or Dark. System follows macOS appearance.
 
 ## Runtime and resources
 
-Runtime shows Docker status, saved image reference/digest, verification, and repair actions. Long image references and digests wrap within the panel; **Copy Digest** copies the complete immutable value. Docker Desktop's allocation is one shared pool for active containers. Automatic memory mode adds no Workbench cap; an advanced per-run limit becomes Docker's `--memory` limit for new containers only, does not reserve memory, does not affect already-running containers, and can terminate a run that reaches it. Increase the shared allocation in Docker Desktop settings, not Workbench.
+Runtime begins with a clear **Ready**, **Needs attention**, or **Not configured** summary. Image identity, verification evidence, and advanced details are collapsible; shortened references retain their complete accessible and copyable values. Existing install, verify, rollback, Docker-start, and setup-guide actions are unchanged. Docker Desktop's allocation is one shared pool for active containers. Automatic memory mode adds no Workbench cap; an advanced per-run limit becomes Docker's `--memory` limit for new containers only, does not reserve memory, does not affect already-running containers, and can terminate a run that reaches it. Increase the shared allocation in Docker Desktop settings, not Workbench.
+
+When you select a package ZIP or extracted folder, Workbench validates it before installation and displays its name, version, type, contents, size, compatibility, provenance, intended use, execution support, warnings, and checksum status. Installation begins only after confirmation and the source is revalidated immediately before copying. The Virginia source-data package explicitly warns that it builds supported MPO or custom regional packages and is not intended to run Virginia as one statewide model.
 
 Measured MPO/regional guidance is approximately 2.5–3.5 GB of Docker memory per active run. A statewide Virginia model is provisionally estimated at 24–32 GB per active run (will be updated once tested); run its first baseline by itself. Actual use varies by model stage, population, years, and outputs, so these estimates warn but do not restrict concurrency.
 
 Docker Desktop's allocation is the total pool shared by every active run. The optional Workbench per-run limit is a ceiling for each newly created container; it does not reserve memory or increase that shared pool. A run can therefore exhaust its own cap, or several parallel runs can collectively exhaust Docker Desktop's allocation. Confirmed exhaustion is reported as a Docker out-of-memory failure; exit code 137 without Docker confirmation is reported as a likely memory-pressure failure.
 
-The panel verifies the release tag, source commit, runtime API, architecture, household-ID behavior, and immutable image digest. Workbench 1.1.0 can install a manifest-approved RC7 digest after confirmation and restore the previous verified RC6 runtime. A failed candidate never replaces the active runtime.
+The panel verifies the release tag, source commit, runtime API, architecture, household-ID behavior, and immutable image digest. Workbench 2.0.0 can install a manifest-approved RC7 digest after confirmation and restore the previous verified RC6 runtime. A failed candidate never replaces the active runtime.
 
 When Docker Desktop is stopped, Workbench can launch the installed application, wait for its engine, and verify the pinned runtime when available. It does not quit Docker Desktop or stop unrelated containers.
 
@@ -66,7 +68,9 @@ Results are cached for seven days. Offline use, GitHub rate limits, and malforme
 
 ## Storage
 
-Full VisionEval CSV exports are retained after successful runs by default. Large model runs can use substantial disk space because Workbench may retain both the authoritative datastore and optional full CSV output. Actual size depends on the model, geography, years, and output tables.
+The **Retain full VisionEval CSV exports** setting applies to Standard-project jobs and is recorded when each job is queued. New Hypercube runs always keep the authoritative Datastore without generating the optional full CSV output tree. Large Standard runs can still use substantial disk space when both are retained. Actual size depends on the model, geography, years, and output tables.
+
+The comparison cache contains requested output columns extracted from Datastores. It is disposable, shared across Compare and Hypercube Analysis, limited to 5 GB, and rebuilt on demand. Clearing it never deletes an authoritative result.
 
 Storage settings report datastore, full-export, prepared-model, asset, project, and workspace totals separately. Changing the retain-exports preference does not retroactively delete existing data.
 

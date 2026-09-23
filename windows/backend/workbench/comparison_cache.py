@@ -52,6 +52,46 @@ class ComparisonCache:
         token = hashlib.sha256(f"{record['id']}|{year}|{table}|{registration}".encode()).hexdigest()
         return token, self.root / f"{token}.sqlite", record
 
+    def output_inventory(self, root: Path, metadata_loader) -> dict[str, Any]:
+        """Return a fingerprinted, disposable inventory for one Datastore tree.
+
+        DatastoreListing is the authoritative inventory fingerprint. A replaced
+        registration also invalidates the cache, while ordinary option requests
+        never need to walk the tree again.
+        """
+        record = self._record(root)
+        listing = root / "DatastoreListing.Rda"
+        registration = hashlib.sha256(json.dumps({k: v for k, v in record.items() if k != "path"}, sort_keys=True, default=str).encode()).hexdigest()
+        fingerprint = hashlib.sha256(f"{record['id']}|{self._stat(listing)}|{registration}".encode()).hexdigest()
+        directory = self.root / "inventories"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{record['id']}.json"
+        with self._lock(f"inventory:{record['id']}"):
+            cached = read_json(path, {})
+            if cached.get("fingerprint") == fingerprint and isinstance(cached.get("items"), list):
+                cached["lastAccess"] = now_iso()
+                write_json(path, cached)
+                return cached
+            items: list[dict[str, str]] = []
+            for source in root.rglob("*.Rda"):
+                if source.name == "DatastoreListing.Rda":
+                    continue
+                relative = source.relative_to(root)
+                if len(relative.parts) >= 3 and relative.parts[0].isdigit():
+                    items.append({"year": relative.parts[0], "table": relative.parts[1], "name": source.stem})
+            payload = {
+                "schemaVersion": 1,
+                "datastoreId": str(record["id"]),
+                "fingerprint": fingerprint,
+                "createdAt": now_iso(),
+                "lastAccess": now_iso(),
+                "items": sorted(items, key=lambda item: (item["table"], item["name"], item["year"])),
+                "metadata": metadata_loader(),
+            }
+            write_json(path, payload)
+            self.enforce_limit()
+            return payload
+
     def _lock(self, token: str) -> threading.RLock:
         with self.guard: return self.locks.setdefault(token, threading.RLock())
 
@@ -200,11 +240,22 @@ class ComparisonCache:
                     pass
                 candidate.unlink(missing_ok=True)
                 removed_files += 1
+        inventory = self.root / "inventories" / f"{datastore_id}.json"
+        if inventory.is_file():
+            try:
+                removed_bytes += inventory.stat().st_size
+            except OSError:
+                pass
+            inventory.unlink(missing_ok=True)
+            removed_files += 1
         return {"cacheFilesRemoved": removed_files, "cacheBytesRemoved": removed_bytes}
 
     def enforce_limit(self) -> None:
-        summaries=list((self.root / "summaries").glob("*.json")) if (self.root / "summaries").is_dir() else []
-        files=sorted([*(path for path in self.root.glob("*.sqlite") if path not in self.pinned), *summaries], key=lambda p:p.stat().st_atime_ns)
+        summary_root = self.root / "summaries"
+        summaries = list(summary_root.rglob("*.sqlite")) if summary_root.is_dir() else []
+        summaries.extend(summary_root.glob("*.json") if summary_root.is_dir() else [])
+        inventories = list((self.root / "inventories").glob("*.json")) if (self.root / "inventories").is_dir() else []
+        files=sorted([*(path for path in self.root.glob("*.sqlite") if path not in self.pinned), *summaries, *inventories], key=lambda p:p.stat().st_atime_ns)
         total=self.report()["bytes"]
         for path in files:
             if total<=CACHE_LIMIT_BYTES: break

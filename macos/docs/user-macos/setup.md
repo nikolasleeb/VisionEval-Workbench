@@ -1,11 +1,11 @@
 ﻿# Setup
 
-This page is the setup path for VisionEval Workbench 1.1.0 on Apple Silicon macOS. Intel Mac uses the separate x64 build.
+This page is the setup path for VisionEval Workbench 2.0.0 on Apple Silicon macOS.
 
 ## What you need
 
 - An Apple Silicon Mac running macOS 12 or newer.
-- VisionEval Workbench 1.1.0.
+- VisionEval Workbench 2.0.0.
 - Docker Desktop for Apple silicon if you want to run models or read uncached RDA data.
 - The separately distributed PlanRVA package, or another VisionEval InputLibrary and complete runnable model folder for your own project.
 
@@ -13,16 +13,7 @@ Explore, Create, workspace management, and already cached comparisons work witho
 
 ## 1. Install VisionEval Workbench
 
-Download `VisionEval-Workbench-v1.1.0-macos-arm64.dmg` from the v1.1.0 GitHub release. Open it and drag **VisionEval Workbench.app** to **Applications**.
-
-The application is signed for bundle integrity. If macOS says the downloaded application cannot be opened, select **Cancel** and follow the release page's current installation guidance.
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/VisionEval Workbench.app"
-open "/Applications/VisionEval Workbench.app"
-```
-
-This removes the download quarantine attribute from this local application copy. It does not disable Gatekeeper globally.
+Open `VisionEval-Workbench-v2.0.0-macos-arm64.dmg`, drag **VisionEval Workbench.app** to **Applications**, and open it normally. The release is Developer ID signed with the hardened runtime, notarized by Apple, and stapled so Gatekeeper can validate it without a workaround.
 
 ## 2. Choose a workspace
 
@@ -56,7 +47,7 @@ Verification automatically runs `doctor`, `verify-upstream-release`, and `verify
 
 ## Advanced: runtime image details
 
-Workbench 1.1.0 reads the approved runtime profile from the signed release compatibility data and runs the image by immutable platform digest. The preferred image contains official VisionEval `VE-40-RC7` source at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad`, built for ARM64 with R 4.5.1. RC7 includes the official complete-household-ID correction and the Workbench image applies no unofficial VisionEval source patch.
+Workbench 2.0.0 reads the approved runtime profile from the signed release compatibility data and runs the image by immutable platform digest. The preferred image contains official VisionEval `VE-40-RC7` source at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad`, built for ARM64 with R 4.5.1. RC7 includes the official complete-household-ID correction and the Workbench image applies no unofficial VisionEval source patch.
 
 ### Recommended method: pull the published GHCR image
 
@@ -136,7 +127,7 @@ The RC7 runtime is smoke-tested through the complete PlanRVA model and the numer
 
 ## Updating VisionEval later
 
-Do not overwrite the trusted runtime with a floating `latest` image. Workbench 1.1.0 discovers approved updates through its validated runtime index, asks before downloading, verifies the immutable platform digest, and retains the previous verified image for rollback. For a later official VisionEval release:
+Do not overwrite the trusted runtime with a floating `latest` image. Workbench 2.0.0 discovers approved updates through its validated runtime index, asks before downloading, verifies the immutable platform digest, and retains the previous verified image for rollback. For a later official VisionEval release:
 
 1. Review the upstream release and resolve its immutable source commit.
 2. Update the runtime Dockerfile, Workbench runtime constants, compatibility manifest, workflow tags, documentation, and verification test together.

@@ -6,7 +6,7 @@ root = Path(SPEC).resolve().parent.parent
 staged_public = Path(os.environ.get("WORKBENCH_STAGED_PUBLIC", root / "build" / "staged-public"))
 if not staged_public.is_dir():
     raise RuntimeError("Run packaging/build_backend.py so the staged public tree and capability flag are generated")
-documentation_source = Path(os.environ.get("WORKBENCH_DOCUMENTATION_SOURCE", root / "docs" / "user"))
+documentation_source = Path(os.environ.get("WORKBENCH_DOCUMENTATION_SOURCE", root / "docs" / "user-macos"))
 if not documentation_source.is_dir():
     raise RuntimeError(f"Documentation source does not exist: {documentation_source}")
 datas = [
@@ -14,7 +14,9 @@ datas = [
     (str(root / "backend" / "rda_reader.R"), "."),
     (str(root / "backend" / "comparison_scan.R"), "."),
     (str(root / "backend" / "comparison_cache_extract.R"), "."),
+    (str(root / "backend" / "hypercube_summary.R"), "."),
     (str(root / "backend" / "explore_catalog.json"), "."),
+    (str(root / "backend" / "input_validation_rules.json"), "."),
     (str(root / "backend" / "unit_conflicts.json"), "."),
     (str(root / "backend" / "dependency_catalog.json"), "."),
     (str(root / "backend" / "asset_catalog.json"), "."),

@@ -27,6 +27,40 @@ def source_guide(root: Path, version: str = "test-1") -> Path:
     return guide
 
 
+def source_pdf_catalog(root: Path, version: str = "test-2") -> Path:
+    guide = root / "docs" / "user"
+    documents = [
+        {
+            "id": "user-guide",
+            "title": "User Guide",
+            "description": "Complete reference guide.",
+            "filename": "guide.pdf",
+            "format": "pdf",
+            "pageCount": 15,
+            "version": "2.0",
+        },
+        {
+            "id": "whats-new",
+            "title": "What's New",
+            "description": "One-page overview.",
+            "filename": "whats-new.pdf",
+            "format": "pdf",
+            "pageCount": 1,
+            "version": "2.0",
+        },
+    ]
+    write(guide / "documentation.json", json.dumps({
+        "schemaVersion": 2,
+        "documentationVersion": version,
+        "entrypoint": "guide.pdf",
+        "documents": documents,
+    }))
+    for document in documents:
+        (guide / document["filename"]).parent.mkdir(parents=True, exist_ok=True)
+        (guide / document["filename"]).write_bytes(b"%PDF-1.7\n")
+    return guide
+
+
 class DocumentationSyncTests(unittest.TestCase):
     def test_fresh_workspace_installs_guide_manifest_and_notes_folder(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -42,7 +76,7 @@ class DocumentationSyncTests(unittest.TestCase):
             self.assertTrue((documentation / "Workbench User Guide" / "run.md").is_file())
             self.assertTrue((documentation / "User Notes").is_dir())
             manifest = json.loads((documentation / ".workbench-documentation.json").read_text())
-            self.assertEqual(manifest["schemaVersion"], 1)
+            self.assertEqual(manifest["schemaVersion"], 2)
             self.assertEqual(manifest["documentationVersion"], "test-1")
             for item in manifest["managedFiles"]:
                 target = documentation / item["path"]
@@ -74,6 +108,46 @@ class DocumentationSyncTests(unittest.TestCase):
             self.assertFalse((documentation / "Workbench User Guide" / "run.md").exists())
             self.assertEqual((documentation / "User Notes" / "my-notes.md").read_text(), "keep me")
             self.assertEqual((documentation / "Workbench User Guide" / "personal.md").read_text(), "also keep me")
+
+    def test_pdf_catalog_installs_only_allowlisted_pdfs_and_replaces_old_managed_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            legacy = source_guide(root / "resources")
+            workspace = root / "workspace"
+            service = DocumentationService(workspace, root / "resources")
+            self.assertEqual(service.sync()["state"], "ready")
+            documentation = workspace / "Documentation"
+            write(documentation / "User Notes" / "notes.md", "keep")
+            write(documentation / "Workbench User Guide" / "unrecognized.txt", "keep")
+
+            for path in legacy.iterdir():
+                if path.is_file():
+                    path.unlink()
+            source_pdf_catalog(root / "resources")
+            status = service.sync()
+
+            self.assertEqual(status["state"], "ready")
+            self.assertEqual([item["id"] for item in status["documents"]], ["user-guide", "whats-new"])
+            self.assertFalse((documentation / "Workbench User Guide" / "README.md").exists())
+            self.assertFalse((documentation / "Workbench User Guide" / "run.md").exists())
+            self.assertTrue((documentation / "Workbench User Guide" / "guide.pdf").is_file())
+            self.assertTrue((documentation / "Workbench User Guide" / "whats-new.pdf").is_file())
+            self.assertEqual((documentation / "User Notes" / "notes.md").read_text(), "keep")
+            self.assertEqual((documentation / "Workbench User Guide" / "unrecognized.txt").read_text(), "keep")
+            self.assertIn("guide.pdf", (documentation / "README.md").read_text())
+
+    def test_pdf_catalog_and_document_paths_are_allowlisted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source_pdf_catalog(root / "resources")
+            service = DocumentationService(root / "workspace", root / "resources")
+            self.assertEqual(service.sync()["state"], "ready")
+            self.assertEqual(len(service.catalog()["documents"]), 2)
+            self.assertEqual(service.document_path("user-guide").name, "guide.pdf")
+            with self.assertRaises(ValueError):
+                service.document_path("../User Notes/private.pdf")
+            with self.assertRaises(ValueError):
+                service.document_path("missing")
 
     def test_missing_bundled_guide_is_a_nonblocking_warning(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -146,7 +220,12 @@ class DocumentationSourceTests(unittest.TestCase):
         self.assertTrue(metadata["documentationVersion"])
         self.assertTrue((guide / metadata["entrypoint"]).is_file())
         spec = (repository / "packaging" / "workbench-backend.spec").read_text()
-        self.assertIn('root / "docs" / "user"', spec)
+        self.assertIn('root / "docs" / "user-macos"', spec)
+        self.assertIn('root / "backend" / "hypercube_summary.R"', spec)
+        builder = (repository / "packaging" / "build_backend.py").read_text()
+        shell_builder = (repository / "packaging" / "build-backend.sh").read_text()
+        self.assertIn('WORKBENCH_DOCUMENTATION_SOURCE", "docs/user-macos"', builder)
+        self.assertIn('WORKBENCH_DOCUMENTATION_SOURCE:-docs/user-macos', shell_builder)
 
     def test_platform_guides_and_release_identity_are_separate(self):
         repository = Path(__file__).resolve().parents[1]
@@ -160,24 +239,36 @@ class DocumentationSourceTests(unittest.TestCase):
         macos_manifest = json.loads(
             (repository / "docs" / "compatibility-manifest-macos.json").read_text()
         )
-        self.assertEqual(tauri["version"], "1.1.0")
-        self.assertEqual(package["version"], "1.1.0")
+        self.assertEqual(tauri["version"], "2.0.0")
+        self.assertEqual(package["version"], "2.0.0")
+        entitlement_path = repository / "desktop" / "src-tauri" / tauri["bundle"]["macOS"]["entitlements"]
+        self.assertTrue(entitlement_path.is_file())
+        self.assertIn(
+            "com.apple.security.cs.disable-library-validation",
+            entitlement_path.read_text(encoding="utf-8"),
+        )
         self.assertEqual(windows["documentationVersion"], "1.0.0-windows")
-        self.assertEqual(macos["documentationVersion"], "1.1.0-macos")
+        self.assertEqual(macos["documentationVersion"], "2.0.0-macos-rev2")
+        self.assertEqual(macos["schemaVersion"], 2)
+        self.assertEqual([item["id"] for item in macos["documents"]], ["user-guide", "whats-new"])
+        self.assertEqual([item["pageCount"] for item in macos["documents"]], [16, 1])
+        for item in macos["documents"]:
+            self.assertTrue((repository / "docs" / "user-macos" / item["filename"]).is_file())
         self.assertEqual(windows_manifest["runtimeAdapter"], "native-ve-runtime")
         self.assertFalse(windows_manifest["runtime"]["dockerRequired"])
         self.assertEqual(macos_manifest["runtimeAdapter"], "docker")
         self.assertEqual(macos_manifest["releaseStatus"], "public")
         self.assertEqual(
             macos_manifest["runtimeImage"]["localAlias"],
-            "local/visioneval:1.0.0-arm64",
+            "local/visioneval:2.0.0-arm64",
         )
 
     def test_macos_guide_is_current_and_free_of_encoding_corruption(self):
         repository = Path(__file__).resolve().parents[1]
         pages = sorted((repository / "docs" / "user-macos").glob("*.md"))
         combined = "\n".join(path.read_text(encoding="utf-8") for path in pages)
-        self.assertIn("VisionEval-Workbench-v1.1.0-macos-arm64.dmg", combined)
+        self.assertIn("VisionEval-Workbench-v2.0.0-macos-arm64.dmg", combined)
+        self.assertNotIn("VisionEval-Workbench-v1.1.0-macos-arm64.dmg", combined)
         self.assertNotIn("repository's release candidate", combined)
         for corrupted in ("â", "Ã"):
             self.assertNotIn(corrupted, combined)

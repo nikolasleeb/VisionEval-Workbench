@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.0.0
+
+- Adds dedicated Hypercube creation, serialized execution, analysis, and export.
+- Adds unified FIFO batch scheduling, workspace leases, restart recovery, and queued exports.
+- Retains the Windows native VisionEval runtime contract and removes Docker from the supported Windows execution path.
+
 ## 1.0.0
 
 - First public release of the independently maintained Windows 11 x64 application.

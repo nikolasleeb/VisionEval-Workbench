@@ -12,7 +12,7 @@ A package can provide:
 - regional data and map context;
 - any combination supported by the manifest.
 
-The app installs packages from **Settings → Assets** using **Choose ZIP…** or **Choose extracted folder…**. It accepts a manifest at the selected root or inside exactly one wrapper folder, rejects ambiguous or linked content, validates `workbench-package.json`, checks the listed file hashes, and only then copies the package into the workspace.
+The app installs packages only from **Settings → Assets → Add package**. It validates `workbench-package.json`, checks the listed file hashes, and then copies the package into the workspace.
 
 ## Minimum manifest expectations
 
@@ -41,6 +41,5 @@ Do not redistribute third-party raw geometry unless the source license permits i
 2. Add model, input, regional, and documentation files.
 3. Generate `workbench-package.json` with every packaged file listed.
 4. Zip the top-level package folder.
-5. Install the ZIP—or its extracted top-level folder—into a clean Workbench workspace.
+5. Install the ZIP into a clean Workbench workspace.
 6. Create a small project, run it, compare outputs, export diagnostics if anything fails, and update `SOURCES.md`.
-

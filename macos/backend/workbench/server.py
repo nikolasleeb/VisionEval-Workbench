@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import mimetypes
@@ -19,17 +20,18 @@ from .copy_operations import CopyOperationManager
 from .dependencies import DependencyService
 from .documentation import DocumentationService
 from .diagnostics import DiagnosticsService
-from .explore import ExploreService
+from .explore import ExploreService, InputValidationError
 from .excel_exports import ComparisonExportManager
 from .input_explanations import InputExplanationPackageService
 from .model_packages import ModelPackageService
 from .hypercube import HypercubeOperationManager, HypercubeService
+from .hypercube_analysis import HypercubeAnalysisOperationManager, HypercubeAnalysisService, HypercubeCaseExportManager, HypercubeDiscoveryManager
 from .region_packages import RegionPackageService, package_manifest_type
 from .runtime import RuntimeManager
 from .runtime import CURRENT_RELEASE_TAG
 from .update_checks import UpdateCheckService
 from .region_builder import RegionBuilderService
-from .workspace import Workspace, WorkspaceError, make_id, now_iso, read_json
+from .workspace import Workspace, WorkspaceError, fingerprint_tree, make_id, now_iso, read_json
 
 # Windows' MIME registry does not consistently know modern JavaScript module
 # extensions. Chromium refuses to execute an ES module served as text/plain.
@@ -133,6 +135,10 @@ class WorkbenchApplication:
         cache_extractor_source = self.resource_root / "comparison_cache_extract.R"
         if not cache_extractor_target.exists() or cache_extractor_target.read_bytes() != cache_extractor_source.read_bytes():
             shutil.copy2(cache_extractor_source, cache_extractor_target)
+        hypercube_summary_target = self.workspace.exchange / "system" / "hypercube_summary.R"
+        hypercube_summary_source = self.resource_root / "hypercube_summary.R"
+        if not hypercube_summary_target.exists() or hypercube_summary_target.read_bytes() != hypercube_summary_source.read_bytes():
+            shutil.copy2(hypercube_summary_source, hypercube_summary_target)
         conflicts_target = self.workspace.exchange / "system" / "unit_conflicts.json"
         conflicts_source = self.resource_root / "unit_conflicts.json"
         if not conflicts_target.exists() or conflicts_target.read_bytes() != conflicts_source.read_bytes():
@@ -141,6 +147,9 @@ class WorkbenchApplication:
         if not runtime_cli.is_file():
             runtime_cli = self.resource_root.parent / "runtime" / "scripts" / "ve-cli-native.R"
         self.runtime = RuntimeManager(self.workspace, cli_path=runtime_cli)
+        # Terminal history is operational metadata, not result ownership. Keep
+        # it bounded without touching registered results or Datastores.
+        self.runtime.clear_history(older_than_days=30)
         self.update_checks = UpdateCheckService(
             self.workspace,
             __version__,
@@ -154,10 +163,15 @@ class WorkbenchApplication:
         self.comparison = ComparisonService(self.workspace, self.runtime, helper_target, scan_target, conflicts_target, cache_extractor_target)
         self.comparison_operations = ComparisonOperationManager(self.comparison)
         self.comparison_scans = ComparisonScanManager(self.comparison)
-        self.comparison_exports = ComparisonExportManager(self.comparison)
+        self.hypercube_analysis = HypercubeAnalysisService(self.workspace, self.comparison, hypercube_summary_target)
+        self.hypercube_analysis_operations = HypercubeAnalysisOperationManager(self.hypercube_analysis)
+        self.hypercube_discovery = HypercubeDiscoveryManager(self.hypercube_analysis, self.diagnostics.record_app_error)
+        self.hypercube_case_exports = HypercubeCaseExportManager(self.hypercube_analysis)
+        self.comparison_exports = ComparisonExportManager(self.comparison, __version__, self.hypercube_analysis)
         self.input_explanations = InputExplanationPackageService(self.workspace)
         self.model_packages = ModelPackageService(self.workspace)
         self.region_packages = RegionPackageService(self.workspace)
+        self.package_previews: dict[str, dict] = {}
         self.explore = ExploreService(self.workspace, self.resource_root / "explore_catalog.json", self.resource_root / "unit_conflicts.json", self.resource_root / "dependency_catalog.json")
         self.hypercubes = HypercubeOperationManager(HypercubeService(self.workspace, self.explore))
         self.copy_operations = CopyOperationManager(self.workspace)
@@ -166,11 +180,100 @@ class WorkbenchApplication:
         self._last_archive_cleanup = 0.0
         self._cleanup_archives()
 
+    def preview_package(self, source: str) -> dict:
+        source_path = Path(source).expanduser().resolve()
+        package_type = package_manifest_type(source_path)
+        service = {"input-explanations": self.input_explanations, "model-bundle": self.model_packages, "region-builder": self.region_packages}.get(package_type)
+        if not service:
+            raise WorkspaceError(f"Unsupported Workbench package type: {package_type or 'unknown'}")
+        root, temporary = RegionPackageService._package_source(source_path)
+        try:
+            manifest = service._manifest(root)
+            files = [item for item in root.rglob("*") if item.is_file()]
+            size = sum(item.stat().st_size for item in files)
+            source_fingerprint = hashlib.sha256(source_path.read_bytes()).hexdigest() if source_path.is_file() else fingerprint_tree(source_path)
+            token = hashlib.sha256(f"{source_path}\0{source_fingerprint}\0{package_type}".encode()).hexdigest()
+            warnings = [str(item) for item in manifest.get("warnings", []) if str(item)]
+            is_statewide_region_source = package_type == "region-builder" and (
+                str(manifest.get("coverage", "")).upper() in {"VA", "VIRGINIA", "STATEWIDE VIRGINIA"}
+                or "virginia" in str(manifest.get("id", "")).lower()
+            )
+            if is_statewide_region_source and not warnings and not manifest.get("executionSupport"):
+                warnings.append(
+                    "This statewide source-data package does not include an execution-support notice. "
+                    "Confirm its intended use before installing."
+                )
+            result = {
+                "token": token, "name": manifest.get("name", manifest.get("id", "Package")), "version": manifest.get("version", ""),
+                "type": package_type, "description": manifest.get("description", ""), "size": size, "fileCount": len(files),
+                "compatibility": manifest.get("compatibilitySummary", "Validated for this Workbench package format"),
+                "provenance": manifest.get("provenance", manifest.get("source", "Local package selected in Finder")),
+                "intendedUse": manifest.get("intendedUse", "Install as a local Workbench asset"),
+                "executionSupport": manifest.get("executionSupport", "Not declared by this package"),
+                "capabilities": manifest.get("capabilities", []), "warnings": warnings, "checksumStatus": "Verified against the package manifest",
+            }
+            self.package_previews[token] = {"source": str(source_path), "fingerprint": source_fingerprint, "type": package_type}
+            return result
+        finally:
+            if temporary:
+                temporary.cleanup()
+
     def _cleanup_archives(self) -> None:
         now = time.monotonic()
         if now - self._last_archive_cleanup >= 86400 or not self._last_archive_cleanup:
             self.workspace.cleanup_archives()
             self._last_archive_cleanup = now
+
+    @staticmethod
+    def _manager_active(manager, kind: str) -> list[dict]:
+        active = getattr(manager, "active", None)
+        if callable(active):
+            return [{"id": item.get("id", ""), "kind": item.get("kind") or kind, "state": item.get("state", ""), "message": item.get("message", "")} for item in active()]
+        values = getattr(manager, "operations", {}).values()
+        return [{"id": item.get("id", ""), "kind": kind, "state": item.get("state", ""), "message": item.get("message", "")} for item in values if item.get("state") in {"waiting", "running", "cancelling"}]
+
+    def active_operations(self) -> dict:
+        operations = []
+        operations.extend({"id": job.get("id", ""), "kind": "model_run", "state": job.get("state", ""), "message": job.get("variationName", "")} for job in self.runtime.list_jobs(include_archived=True) if job.get("state") not in {"succeeded", "failed", "cancelled", "cleanup_failed"})
+        for manager, kind in (
+            (self.hypercubes, "hypercube_generation"),
+            (self.hypercube_analysis_operations, "hypercube_analysis"),
+            (self.hypercube_discovery, "hypercube_discovery"),
+            (self.hypercube_case_exports, "hypercube_case_export"),
+            (self.comparison_operations, "comparison"),
+            (self.comparison_scans, "comparison_scan"),
+            (self.comparison_exports, "export"),
+            (self.copy_operations, "project_copy"),
+            (self.runtime_installations, "runtime_installation"),
+        ):
+            operations.extend(self._manager_active(manager, kind))
+        counts: dict[str, int] = {}
+        for item in operations:
+            counts[item["kind"]] = counts.get(item["kind"], 0) + 1
+        return {"active": bool(operations), "operations": operations, "counts": counts}
+
+    def stop_background_operations(self) -> dict:
+        failures = []
+        runtime_result = self.runtime.shutdown(True)
+        failures.extend(runtime_result.get("failures") or [])
+        for manager, kind in (
+            (self.hypercubes, "hypercube_generation"),
+            (self.hypercube_analysis_operations, "hypercube_analysis"),
+            (self.hypercube_discovery, "hypercube_discovery"),
+            (self.hypercube_case_exports, "hypercube_case_export"),
+            (self.comparison_operations, "comparison"),
+            (self.comparison_scans, "comparison_scan"),
+            (self.comparison_exports, "export"),
+            (self.copy_operations, "project_copy"),
+        ):
+            for item in self._manager_active(manager, kind):
+                try:
+                    manager.cancel(item["id"])
+                except Exception as exc:
+                    failures.append({"id": item["id"], "kind": kind, "message": str(exc)})
+        installs = self._manager_active(self.runtime_installations, "runtime_installation")
+        failures.extend({"id": item["id"], "kind": "runtime_installation", "message": "Runtime installation cannot be interrupted safely; wait for it to finish."} for item in installs)
+        return {"ok": not failures, "failures": failures}
 
     def state(self) -> dict:
         self._cleanup_archives()
@@ -302,6 +405,11 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.update_checks.status())
                 elif parsed.path == "/api/documentation/user-guide":
                     send_json(self, application.documentation.user_guide())
+                elif parsed.path == "/api/documentation/catalog":
+                    send_json(self, application.documentation.catalog())
+                elif parsed.path == "/api/documentation/document":
+                    path = application.documentation.document_path(first(query, "id"))
+                    send_inline_file(self, path, "application/pdf")
                 elif parsed.path == "/api/documentation/page":
                     send_json(self, application.documentation.page(first(query, "path", "README.md")))
                 elif parsed.path == "/api/documentation/asset":
@@ -340,7 +448,11 @@ def handler_class(application: WorkbenchApplication):
                     with path.open("r", encoding="utf-8-sig", newline="") as handle:
                         rows = list(csv.reader(handle))
                     columns = rows[0] if rows else []
-                    send_json(self, {"filename": filename, "columns": columns, "columnTypes": application.explore.input_column_types(filename, columns), "rows": rows[1:], "overlay": overlay})
+                    source_path, _ = application.workspace.input_file(library_id, filename)
+                    with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        source_rows = list(csv.reader(handle))
+                    metadata = application.explore.input_column_metadata(filename, columns, source_rows[1:], rows[1:])
+                    send_json(self, {"filename": filename, "columns": columns, "columnTypes": application.explore.input_column_types(filename, columns), "columnMetadata": metadata, "validationGroups": application.explore.validation_groups(filename), "rows": rows[1:], "overlay": overlay})
                 elif parsed.path == "/api/explore/files":
                     package_id = first(query, "explanationPackageId")
                     package_path = application.input_explanations.catalog_path(package_id) if package_id else None
@@ -405,8 +517,35 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, review)
                 elif parsed.path == "/api/projects/hypercubes/status":
                     send_json(self, application.hypercubes.status(first(query, "id")))
+                elif parsed.path == "/api/hypercube-analysis/inventory":
+                    send_json(self, application.hypercube_analysis.inventory(first(query, "projectId")))
+                elif parsed.path == "/api/hypercube-analysis/options":
+                    send_json(self, application.hypercube_analysis.options(first(query, "projectId")))
+                elif parsed.path == "/api/hypercube-analysis/storage":
+                    send_json(self, application.hypercube_analysis.storage(first(query, "projectId")))
+                elif parsed.path == "/api/hypercube-run/plan":
+                    send_json(self, application.hypercube_analysis.run_plan(first(query, "projectId")))
+                elif parsed.path == "/api/hypercube-analysis/discovery/status":
+                    send_json(self, application.hypercube_discovery.status(first(query, "id")))
+                elif parsed.path == "/api/hypercube-analysis/operations/status":
+                    send_json(self, application.hypercube_analysis_operations.status(first(query, "id")))
+                elif parsed.path == "/api/hypercube-exports/options":
+                    send_json(self, application.hypercube_case_exports.options(first(query, "projectId")))
+                elif parsed.path == "/api/hypercube-exports/status":
+                    send_json(self, application.hypercube_case_exports.status(first(query, "id")))
+                elif parsed.path == "/api/hypercube-exports/download":
+                    path, filename = application.hypercube_case_exports.artifact(first(query, "id"))
+                    send_file(self, path, "application/zip", filename)
+                elif parsed.path == "/api/hypercube-analysis/export.csv":
+                    request_payload = json.loads(first(query, "payload", "{}"))
+                    analysis = application.hypercube_analysis.matrix(request_payload)
+                    send_bytes(self, application.hypercube_analysis.csv_bytes(analysis), "text/csv; charset=utf-8", "visioneval_hypercube_analysis.csv")
                 elif parsed.path == "/api/jobs":
                     send_json(self, {"jobs": application.runtime.list_jobs(first(query, "projectId"))})
+                elif parsed.path == "/api/runs/history/impact":
+                    send_json(self, application.runtime.history_clear_impact())
+                elif parsed.path == "/api/operations/active":
+                    send_json(self, application.active_operations())
                 elif parsed.path == "/api/run-queue":
                     send_json(self, application.runtime.queue())
                 elif parsed.path == "/api/job":
@@ -421,6 +560,9 @@ def handler_class(application: WorkbenchApplication):
                 elif parsed.path == "/api/comparison/variables":
                     ids = [item for item in first(query, "ids").split(",") if item]
                     send_json(self, {"variables": application.comparison.variables(ids)})
+                elif parsed.path == "/api/comparison/options":
+                    ids = [item for item in first(query, "ids").split(",") if item]
+                    send_json(self, application.comparison.options(ids, first(query, "view", "compare")))
                 elif parsed.path == "/api/comparison/geo-options":
                     send_json(self, application.comparison.geo_options(first(query, "reference"), first(query, "table"), first(query, "year", "2045")))
                 elif parsed.path == "/api/comparison/cross-output-geo-options":
@@ -501,6 +643,7 @@ def handler_class(application: WorkbenchApplication):
                     rows = application.comparison.comparison_map_scope_rows(payload["mapToken"], scope_ids, feature_names)
                     export_rows = [{
                         "geography_id": item.get("geographyId"), "geography": item.get("name"),
+                        "member_bzones": "|".join(map(str, (payload.get("mareaBzones") or {}).get(str(item.get("geographyId")), []))) if payload.get("geographyLevel") == "marea" else "",
                         "reference_value": item.get("referenceValue"), "comparison_value": item.get("comparisonValue"),
                         "reference_rows": item.get("referenceCount"), "comparison_rows": item.get("comparisonCount"),
                         "absolute_change": item.get("absoluteChange"), "change_percent": item.get("percentChange"),
@@ -591,8 +734,14 @@ def handler_class(application: WorkbenchApplication):
                 payload = json_body(self)
                 if parsed.path == "/api/assets/bundled/planrva/install":
                     send_json(self, application.bundled_assets.install_planrva())
+                elif parsed.path == "/api/packages/preview":
+                    send_json(self, application.preview_package(str(payload.get("source", ""))))
                 elif parsed.path == "/api/packages/install":
                     source = payload.get("source", "")
+                    token = str(payload.get("token", ""))
+                    preview = application.preview_package(str(source))
+                    if not token or token != preview.get("token") or token not in application.package_previews:
+                        raise WorkspaceError("The selected package changed after preview. Review it again before installing.")
                     package_type = package_manifest_type(source)
                     if package_type == "input-explanations":
                         result = application.input_explanations.install(source)
@@ -602,6 +751,7 @@ def handler_class(application: WorkbenchApplication):
                         result = application.region_packages.install(source)
                     else:
                         raise WorkspaceError(f"Unsupported Workbench package type: {package_type or 'unknown'}")
+                    application.package_previews.pop(token, None)
                     send_json(self, result, 201)
                 elif parsed.path == "/api/packages/input-explanations/remove":
                     send_json(self, application.workspace.archive_asset("input-explanations", payload.get("id", "")))
@@ -653,6 +803,28 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.hypercubes.start(payload), 202)
                 elif parsed.path == "/api/projects/hypercubes/cancel":
                     send_json(self, application.hypercubes.cancel(payload.get("id", "")))
+                elif parsed.path == "/api/hypercube-analysis/matrix":
+                    send_json(self, application.hypercube_analysis.matrix(payload))
+                elif parsed.path == "/api/hypercube-analysis/operations/start":
+                    send_json(self, application.hypercube_analysis_operations.start(payload), 202)
+                elif parsed.path == "/api/hypercube-analysis/operations/cancel":
+                    send_json(self, application.hypercube_analysis_operations.cancel(payload.get("id", "")))
+                elif parsed.path == "/api/hypercube-analysis/cleanup-exports":
+                    send_json(self, application.hypercube_analysis.cleanup_exports(payload.get("projectId", "")))
+                elif parsed.path == "/api/hypercube-run/start":
+                    send_json(self, application.hypercube_analysis.start_run_plan(payload), 201)
+                elif parsed.path == "/api/hypercube-run/stop":
+                    send_json(self, application.runtime.stop_project(str(payload.get("projectId", ""))))
+                elif parsed.path == "/api/hypercube-analysis/discovery/start":
+                    send_json(self, application.hypercube_discovery.start(payload), 202)
+                elif parsed.path == "/api/hypercube-analysis/discovery/cached":
+                    send_json(self, application.hypercube_discovery.cached(payload))
+                elif parsed.path == "/api/hypercube-analysis/discovery/cancel":
+                    send_json(self, application.hypercube_discovery.cancel(payload.get("id", "")))
+                elif parsed.path == "/api/hypercube-exports/start":
+                    send_json(self, application.hypercube_case_exports.start(payload), 202)
+                elif parsed.path == "/api/hypercube-exports/cancel":
+                    send_json(self, application.hypercube_case_exports.cancel(payload.get("id", "")))
                 elif parsed.path == "/api/projects/update":
                     send_json(self, application.workspace.update_project(payload.get("projectId", ""), payload.get("name", "")))
                 elif parsed.path == "/api/projects/baseline/update":
@@ -692,15 +864,56 @@ def handler_class(application: WorkbenchApplication):
                 elif parsed.path == "/api/projects/results/unlink":
                     send_json(self, application.workspace.unlink_result(payload.get("projectId", ""), payload.get("datastoreId", "")))
                 elif parsed.path == "/api/overlays":
-                    application.explore.validate_input_rows(
-                        payload.get("filename", ""), payload.get("columns") or [], payload.get("rows") or []
+                    source_path, _ = application.workspace.input_file(
+                        application.workspace.project(payload.get("projectId", ""))[1]["inputLibrary"]["id"],
+                        payload.get("filename", ""),
                     )
+                    with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        source_rows = list(csv.reader(handle))
+                    current_path, _ = application.workspace.input_file(
+                        application.workspace.project(payload.get("projectId", ""))[1]["inputLibrary"]["id"],
+                        payload.get("filename", ""), payload.get("projectId", ""), payload.get("variationId", ""),
+                    )
+                    with current_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                        current_rows = list(csv.reader(handle))
+                    metadata = application.explore.input_column_metadata(
+                        payload.get("filename", ""), payload.get("columns") or [], source_rows[1:], current_rows[1:]
+                    )
+                    application.explore.validate_input_rows(
+                        payload.get("filename", ""), payload.get("columns") or [], payload.get("rows") or [], current_rows[1:], metadata
+                    )
+                    application.explore.validate_categorical_operations(metadata, payload.get("editOperations"))
                     content = self._csv_content(payload)
                     send_json(self, application.workspace.save_overlay(
                         payload.get("projectId", ""), payload.get("variationId", ""),
                         payload.get("filename", ""), content,
                         payload.get("editOperations") if "editOperations" in payload else None,
                     ), 201)
+                elif parsed.path == "/api/overlays/batch":
+                    project_id = str(payload.get("projectId", ""))
+                    variation_id = str(payload.get("variationId", ""))
+                    _, project = application.workspace.project(project_id)
+                    library_id = str(project["inputLibrary"]["id"])
+                    prepared: list[dict] = []
+                    for item in payload.get("items") or []:
+                        filename = str(item.get("filename", ""))
+                        columns = item.get("columns") or []
+                        rows = item.get("rows") or []
+                        source_path, _ = application.workspace.input_file(library_id, filename)
+                        current_path, _ = application.workspace.input_file(library_id, filename, project_id, variation_id)
+                        with source_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            source_rows = list(csv.reader(handle))
+                        with current_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            current_rows = list(csv.reader(handle))
+                        metadata = application.explore.input_column_metadata(filename, columns, source_rows[1:], current_rows[1:])
+                        application.explore.validate_input_rows(filename, columns, rows, current_rows[1:], metadata)
+                        application.explore.validate_categorical_operations(metadata, item.get("editOperations"))
+                        prepared.append({
+                            "filename": filename,
+                            "content": self._csv_content(item),
+                            "editOperations": item.get("editOperations") if "editOperations" in item else None,
+                        })
+                    send_json(self, application.workspace.save_overlays_atomic(project_id, variation_id, prepared), 201)
                 elif parsed.path == "/api/overlays/delete":
                     send_json(self, application.workspace.delete_overlay(payload.get("projectId", ""), payload.get("variationId", ""), payload.get("filename", "")))
                 elif parsed.path == "/api/runtime/pull":
@@ -721,6 +934,8 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.runtime.verify_runtime())
                 elif parsed.path == "/api/runtime/shutdown":
                     send_json(self, application.runtime.shutdown(bool(payload.get("cancelActive"))))
+                elif parsed.path == "/api/operations/stop-all":
+                    send_json(self, application.stop_background_operations())
                 elif parsed.path == "/api/batches":
                     send_json(self, application.runtime.create_batch(
                         payload.get("projectId", ""), payload.get("variationIds") or [],
@@ -731,12 +946,17 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.runtime.cancel(payload.get("jobId", "")))
                 elif parsed.path == "/api/runs/stop-all":
                     send_json(self, application.runtime.stop_all())
+                elif parsed.path == "/api/backend/shutdown":
+                    send_json(self, {"ok": True})
+                    threading.Thread(target=self.server.shutdown, daemon=True, name="backend-shutdown").start()
                 elif parsed.path == "/api/runs/queue/reorder":
                     send_json(self, application.runtime.reorder_queue(payload.get("jobIds") or [], payload.get("revision")))
                 elif parsed.path == "/api/runs/queue/remove":
                     send_json(self, application.runtime.remove_waiting(payload.get("jobId", "")))
                 elif parsed.path == "/api/runs/history/remove":
                     send_json(self, application.runtime.remove_history(payload.get("jobId", "")))
+                elif parsed.path == "/api/runs/history/clear":
+                    send_json(self, application.runtime.clear_history(require_idle=True))
                 elif parsed.path == "/api/runs/cleanup/retry":
                     send_json(self, application.runtime.retry_cleanup(payload.get("jobId", "")))
                 elif parsed.path == "/api/runs/retry":
@@ -763,6 +983,9 @@ def handler_class(application: WorkbenchApplication):
                     send_json(self, application.comparison_scans.cancel(payload.get("id", "")))
                 else:
                     send_json(self, {"error": "Unknown endpoint"}, 404)
+            except InputValidationError as exc:
+                application.diagnostics.record_app_error({"source": "backend", "message": str(exc), "path": parsed.path})
+                send_json(self, {"error": str(exc), "code": "input_validation", "validationErrors": exc.errors}, 400)
             except (WorkspaceError, ValueError, OSError, csv.Error, json.JSONDecodeError) as exc:
                 application.diagnostics.record_app_error({"source": "backend", "message": str(exc), "path": parsed.path})
                 send_json(self, {"error": str(exc)}, 400)

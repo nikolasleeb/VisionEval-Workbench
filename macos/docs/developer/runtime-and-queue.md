@@ -4,7 +4,7 @@
 
 A runtime profile records adapter, platform, architecture, image reference, immutable digest, VisionEval/R version, verification result, and verification time. It is not a connection to a permanent container.
 
-Apple Silicon uses Docker and executes a validated ARM64 immutable digest. Workbench 1.1.0 negotiates runtime API v1, supports the pinned RC6 legacy profile, and prefers official VisionEval `VE-40-RC7`. Verification checks Docker availability, architecture, image digest, OCI provenance, runtime API, `doctor`, upstream release, and complete household-ID alignment. The public package is `ghcr.io/nikolasleeb/visioneval-workbench-runtime`; `latest` exists only as a convenience alias and is never trusted for execution.
+Apple Silicon uses Docker and executes a validated ARM64 immutable digest. Workbench 2.0.0 negotiates runtime API v1, supports the pinned RC6 legacy profile, and prefers official VisionEval `VE-40-RC7`. Verification checks Docker availability, architecture, image digest, OCI provenance, runtime API, `doctor`, upstream release, and complete household-ID alignment. The public package is `ghcr.io/nikolasleeb/visioneval-workbench-runtime`; `latest` exists only as a convenience alias and is never trusted for execution.
 
 Advisory update discovery is separate from runtime verification. Each release attaches a validated `update-manifest.json` that maps a Workbench version and host architecture to one approved immutable runtime digest. A registry tag alone is never evidence of compatibility. The application also checks the official VisionEval and Workbench GitHub release feeds when the user explicitly enables automatic checks or selects **Check Now**. Remote failures must remain non-fatal.
 

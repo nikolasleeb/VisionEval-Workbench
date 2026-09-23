@@ -18,5 +18,4 @@ Virginia map visualization depends on an installed package that provides Virgini
 
 ## Runtime
 
-The Workbench runtime is an unofficial distribution based on official VisionEval VE-40-RC6 source plus a Workbench compatibility patch for composite household-ID alignment. It is verified before use but is not an official VisionEval release.
-
+The certified Windows runtime pair is official VisionEval VE-40-RC7 at commit `7852dc58fad460ff279f5eebf4dd55fe191470ad` with R 4.5.3 x64. The package version remains 4.0.0; Workbench identifies RC7 from `VECommit` in package metadata. Managed downloads are accepted only when their pinned SHA-256 values match.

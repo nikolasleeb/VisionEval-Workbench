@@ -1,4 +1,26 @@
-# VisionEval Workbench 1.1.0
+# VisionEval Workbench 2.0.0
+
+Version 2.0.0 brings a complete Hypercube workflow, improved scenario editing and validation, faster cached analysis, and platform-specific runtime setup to Apple Silicon macOS and Windows x64.
+
+## Version 2.0 downloads
+
+- **Apple Silicon macOS:** `VisionEval-Workbench-v2.0.0-macos-arm64.dmg` — Developer ID signed, notarized, and stapled. Requires Docker Desktop and the verified ARM64 VisionEval runtime.
+- **Windows 11 x64:** `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` — native VisionEval execution. Connect an existing compatible R and VE-40-RC7 installation or use the optional current-user runtime setup. The installer is **unsigned**; Windows SmartScreen may display an unknown-publisher warning.
+- **Asset packages:** `planrva-2.0.zip`, `virginia-mpo-regions-2.0.zip`, and `wppdc-2.0.zip` are installed separately through **Settings → Assets**.
+
+The [v2.0.0 release page](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0) lists SHA-256 checksums for every download. GitHub also supplies source archives for the release tag. The runtime index is published separately with the `runtime-VE-40-RC7` metadata release.
+
+## New in Version 2
+
+- **Hypercube:** build a bounded parameter matrix, preview and run its cases, monitor one compact batch with an estimated remaining time, and stop or retry that Hypercube without disturbing unrelated work.
+- **Analysis:** compare completed results in cached Response Matrices; use **Find All Changes** to rank outputs and scenarios across a Hypercube, inspect a variable's case ranking, and export up to three completed cases or the baseline as separate CSV ZIP packages.
+- **Scenario editing:** edit eligible categorical values, validate numeric ranges and whole-number counts, and edit linked share groups together. Batch Change validates all selected files before saving.
+- **Queues and recovery:** Standard and Hypercube work share a persistent queue. The Windows native runtime uses one execution slot; macOS can run verified Docker jobs in parallel when resources allow.
+- **Documentation:** current User Guide and What's New documents are available in **Settings → Documentation**, alongside a link to the VisionEval Workbench website.
+
+Standard runs keep their authoritative Datastores and can optionally retain full output CSV exports. Hypercube runs retain Datastores without persistent full output CSV trees. Compare and Hypercube Analysis use disposable caches built from the Datastores.
+
+## Earlier release notes: Version 1.1.0
 
 Version 1.1.0 adds the runtime compatibility contract and the official VisionEval VE-40-RC7 runtime for Apple Silicon and Intel Macs. Existing verified RC6 images remain supported as the rollback profile.
 

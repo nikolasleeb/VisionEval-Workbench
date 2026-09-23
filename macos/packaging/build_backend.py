@@ -16,6 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BIN_NAME = "visioneval-workbench-backend"
 STAGED_PUBLIC = ROOT / "build" / "staged-public"
+STAGED_DOCUMENTATION = ROOT / "build" / "staged-documentation"
 
 
 def stage_public(comparison_map_3d: bool, target_triple: str) -> Path:
@@ -43,6 +44,31 @@ def stage_public(comparison_map_3d: bool, target_triple: str) -> Path:
     return STAGED_PUBLIC
 
 
+def stage_documentation(source: Path) -> Path:
+    if STAGED_DOCUMENTATION.exists():
+        shutil.rmtree(STAGED_DOCUMENTATION)
+    manifest_path = source / "documentation.json"
+    metadata = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if int(metadata.get("schemaVersion", 1)) < 2:
+        shutil.copytree(source, STAGED_DOCUMENTATION)
+        return STAGED_DOCUMENTATION
+    documents = metadata.get("documents")
+    if not isinstance(documents, list) or not documents:
+        raise SystemExit("The documentation catalog has no documents")
+    STAGED_DOCUMENTATION.mkdir(parents=True)
+    shutil.copy2(manifest_path, STAGED_DOCUMENTATION / manifest_path.name)
+    for item in documents:
+        filename = str(item.get("filename", "")) if isinstance(item, dict) else ""
+        relative = Path(filename)
+        if not filename or relative.is_absolute() or len(relative.parts) != 1 or relative.suffix.lower() != ".pdf":
+            raise SystemExit(f"Unsafe documentation catalog filename: {filename}")
+        pdf = source / relative
+        if not pdf.is_file():
+            raise SystemExit(f"Documentation PDF does not exist: {pdf}")
+        shutil.copy2(pdf, STAGED_DOCUMENTATION / relative)
+    return STAGED_DOCUMENTATION
+
+
 def rust_host() -> str:
     output = subprocess.check_output(["rustc", "-Vv"], text=True)
     for line in output.splitlines():
@@ -60,7 +86,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--documentation-source",
-        default=os.environ.get("WORKBENCH_DOCUMENTATION_SOURCE", "docs/user"),
+        default=os.environ.get("WORKBENCH_DOCUMENTATION_SOURCE", "docs/user-macos"),
         help="Guide tree to bundle as docs/user (relative paths resolve from the repository root)",
     )
     parser.add_argument(
@@ -77,12 +103,13 @@ def main() -> None:
         raise SystemExit(f"Documentation source does not exist: {documentation_source}")
     target_triple = args.target_triple or rust_host()
     staged_public = stage_public(args.comparison_map_3d == "enabled", target_triple)
+    staged_documentation = stage_documentation(documentation_source)
     subprocess.run(
         [sys.executable, "-c", "import xlsxwriter, PyInstaller"], check=True
     )
     environment = os.environ.copy()
     environment["WORKBENCH_STAGED_PUBLIC"] = str(staged_public)
-    environment["WORKBENCH_DOCUMENTATION_SOURCE"] = str(documentation_source)
+    environment["WORKBENCH_DOCUMENTATION_SOURCE"] = str(staged_documentation)
     subprocess.run(
         [
             sys.executable,

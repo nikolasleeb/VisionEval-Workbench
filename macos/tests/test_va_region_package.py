@@ -13,6 +13,20 @@ validate_input_library_coverage = MODULE.validate_input_library_coverage
 
 
 class VirginiaRegionPackageTests(unittest.TestCase):
+    def test_package_builder_owns_plain_language_install_metadata(self):
+        source = SCRIPT.read_text(encoding="utf-8")
+        server = (SCRIPT.parents[1] / "backend" / "workbench" / "server.py").read_text(encoding="utf-8")
+        self.assertIn('PACKAGE_VERSION = "2.0"', source)
+        self.assertIn('"contentSourceVersion": content_source_version', source)
+        self.assertIn('"intendedUse": "Build supported Virginia MPO or custom regional model packages in Workbench."', source)
+        self.assertIn('"executionSupport": "Source data only; not supported for running Virginia as one statewide model."', source)
+        self.assertIn('"warnings": [', source)
+        self.assertIn("This package is not intended to run Virginia as one statewide model.", source)
+        self.assertIn('input_library.parent / "input-explanations"', source)
+        self.assertIn('"inputExplanations": input_explanations_component', source)
+        self.assertNotIn("It provides statewide source data for building supported MPO or custom regional packages.", server)
+        self.assertIn("This statewide source-data package does not include an execution-support notice.", server)
+
     def test_statewide_coverage_rejects_partial_input_library(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

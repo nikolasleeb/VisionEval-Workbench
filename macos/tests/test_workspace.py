@@ -2,6 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from backend.workbench.runtime import RuntimeManager
 from backend.workbench.copy_operations import CopyOperationManager
@@ -642,7 +643,7 @@ class WorkspaceTests(unittest.TestCase):
             source["id"], [variation["id"]], target_project_id=target["id"], include_results=True,
         )
         copied = result["variations"][0]
-        self.assertEqual(copied["name"], f"{variation['name']} Copy")
+        self.assertEqual(copied["name"], f"{variation['name']} (copy)")
         self.assertNotIn("hypercube", copied)
         copied_path, overlay = self.workspace.input_file("Plan", "bzone_network_design.csv", target["id"], copied["id"])
         self.assertTrue(overlay)
@@ -656,13 +657,21 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(source_variation["notes"]["bzone_network_design.csv"], "Copied file note")
         copied_record = next(item for item in self.workspace.catalog()["datastores"] if item["id"] in result["project"]["datastoreIds"])
         self.assertEqual(copied_record["variationId"], copied["id"])
+        self.assertEqual(copied_record["variationName"], copied["name"])
+        self.assertEqual(copied_record["label"], f"Existing target — {copied['name']}")
         self.assertNotEqual(Path(copied_record["path"]), result_root)
+
+        second = self.workspace.copy_variations(
+            source["id"], [variation["id"]], target_project_id=target["id"], include_results=False,
+        )
+        self.assertEqual(second["variations"][0]["name"], f"{variation['name']} (copy 2)")
 
         created = self.workspace.copy_variations(source["id"], [variation["id"]], new_project_name="Selected scenarios")
         self.assertTrue(created["createdProject"])
         self.assertEqual(created["project"]["template"]["fingerprint"], source["template"]["fingerprint"])
         self.assertEqual(created["project"]["baseline"], source["baseline"])
         self.assertNotIn("resultLinks", created["project"])
+        self.assertEqual(created["variations"][0]["name"], variation["name"])
         self.assertEqual(created["variations"][0]["scenarioNote"], "Copied policy")
         self.assertEqual(created["variations"][0]["notes"]["bzone_network_design.csv"], "Copied file note")
 
@@ -1051,6 +1060,57 @@ class WorkspaceTests(unittest.TestCase):
         fallback = self.workspace.review_project(project["id"])["scenarios"][0]["automaticSummary"]
         self.assertIn("1 value changed", fallback)
         self.assertIn("All Bzone (1)", fallback)
+
+    def test_review_validates_categorical_set_operations(self):
+        _, project = self.setup_project()
+        scenario = project["variations"][0]
+        library = self.workspace.input_library / "Plan"
+        write(library / "bzone_carsvc_availability.csv", "Geo,Year,CarSvcLevel\n101,2024,High\n101,2045,High\n")
+        self.workspace.save_overlay(
+            project["id"], scenario["id"], "bzone_carsvc_availability.csv",
+            "Geo,Year,CarSvcLevel\n101,2024,High\n101,2045,Low\n",
+            [{"columns": ["CarSvcLevel"], "operation": "set", "value": "Low", "valueType": "categorical", "year": "2045", "allLocations": True}],
+        )
+        file_review = self.workspace.review_project(project["id"])["scenarios"][0]["files"][0]
+        self.assertTrue(file_review["automaticSummaryDetails"]["validated"])
+        self.assertIn("CarSvcLevel: set to Low", file_review["automaticSummary"])
+
+    def test_review_validates_linked_share_set_operations(self):
+        _, project = self.setup_project()
+        scenario = project["variations"][0]
+        library = self.workspace.input_library / "Plan"
+        write(library / "shares.csv", "Geo,Year,ShareA,ShareB\n101,2045,0.5,0.5\n")
+        operation = {"columns": ["ShareA", "ShareB"], "operation": "set", "valueType": "share_group", "groupId": "shares", "groupValues": {"ShareA": "0.25", "ShareB": "0.75"}, "value": {"ShareA": "0.25", "ShareB": "0.75"}, "year": "2045", "allLocations": True}
+        self.workspace.save_overlay(project["id"], scenario["id"], "shares.csv", "Geo,Year,ShareA,ShareB\n101,2045,0.25,0.75\n", [operation])
+        review = self.workspace.review_project(project["id"])["scenarios"][0]["files"][0]
+        self.assertTrue(review["automaticSummaryDetails"]["validated"])
+        self.assertIn("set linked shares to", review["automaticSummary"])
+
+    def test_atomic_overlay_batch_rolls_back_every_file_on_commit_failure(self):
+        _, project = self.setup_project()
+        scenario = project["variations"][0]
+        library = self.workspace.input_library / "Plan"
+        write(library / "first.csv", "Geo,Year,Value\n101,2045,1\n")
+        write(library / "second.csv", "Geo,Year,Value\n101,2045,2\n")
+        real_replace = __import__("os").replace
+        calls = 0
+
+        def fail_second(source, target):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated commit failure")
+            return real_replace(source, target)
+
+        with patch("backend.workbench.workspace.os.replace", side_effect=fail_second):
+            with self.assertRaisesRegex(OSError, "simulated commit failure"):
+                self.workspace.save_overlays_atomic(project["id"], scenario["id"], [
+                    {"filename": "first.csv", "content": "Geo,Year,Value\n101,2045,3\n"},
+                    {"filename": "second.csv", "content": "Geo,Year,Value\n101,2045,4\n"},
+                ])
+        overlay_root = self.workspace.projects / project["id"] / "overlays" / scenario["id"]
+        self.assertFalse((overlay_root / "first.csv").exists())
+        self.assertFalse((overlay_root / "second.csv").exists())
 
     def test_review_rejects_structured_summary_with_wrong_location_metadata(self):
         _, project = self.setup_project()

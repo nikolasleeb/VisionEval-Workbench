@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "resources/examples/planrva-mm"
-VERSION = "2.2"
+VERSION = "2.0"
 
 
 def sha256(path: Path) -> str:
@@ -40,6 +40,10 @@ def main() -> None:
         shutil.copytree(SOURCE / "model-template", data / "model-template")
         shutil.copytree(SOURCE / "map-context", data / "map-context")
         shutil.copy2(SOURCE / "NOTICE.md", package_root / "NOTICE.md")
+        template_path = data / "model-template" / "workbench_template.json"
+        template = json.loads(template_path.read_text(encoding="utf-8"))
+        template["importedAt"] = f"package-release-{VERSION}"
+        template_path.write_text(json.dumps(template, indent=2) + "\n", encoding="utf-8")
         files = []
         for path in sorted(item for item in package_root.rglob("*") if item.is_file()):
             files.append({
@@ -52,8 +56,18 @@ def main() -> None:
             "type": "model-bundle",
             "id": source_manifest["id"],
             "name": "PlanRVA",
-            "version": source_manifest["version"],
-            "description": "PlanRVA multimodal VisionEval model template and matching InputLibrary.",
+            "version": VERSION,
+            "contentSourceVersion": source_manifest["version"],
+            "description": "A ready-to-run VisionEval model and matching inputs for the PlanRVA region.",
+            "compatibilitySummary": "VisionEval Workbench 2.0 on Apple Silicon Mac with a verified supported runtime.",
+            "intendedUse": "Create and run PlanRVA baseline, scenario, and Hypercube projects.",
+            "executionSupport": "Ready to run after Workbench verifies the supported VisionEval runtime.",
+            "capabilities": [
+                "Create PlanRVA projects and scenarios",
+                "Run standard and Hypercube analyses",
+                "Compare results with Virginia map context",
+            ],
+            "warnings": [],
             "inputLibrary": {
                 "id": source_manifest["inputLibrary"]["id"],
                 "name": "PlanRVA",
@@ -68,7 +82,11 @@ def main() -> None:
                 "id": "planrva-virginia-map-context",
                 "path": "data/map-context",
             },
-            "compatibility": source_manifest.get("compatibility", {}),
+            "compatibility": {
+                **source_manifest.get("compatibility", {}),
+                "minimumWorkbenchVersion": "2.0.0",
+                "testedWorkbenchVersion": "2.0.0",
+            },
             "provenance": source_manifest.get("provenance", {}),
             "files": files,
         }

@@ -2,7 +2,7 @@
 
 ## Supported version
 
-Security fixes are evaluated for the current 1.0.0 release. The Windows installer and macOS application are not code-signed with commercial developer certificates, and the macOS application is not notarized. Workbench should not be treated as a managed enterprise deployment.
+Security fixes are evaluated for the current 2.0.0 release. The distributed macOS application is Developer ID signed with the hardened runtime, notarized by Apple, and stapled. Source builds and locally modified packages do not inherit that trust. Workbench should not be treated as a managed enterprise deployment without an organization's own review and controls.
 
 ## Reporting
 

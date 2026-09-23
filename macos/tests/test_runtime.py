@@ -199,7 +199,15 @@ class RuntimeTests(unittest.TestCase):
     def test_apple_silicon_alias_matches_the_published_runtime_contract(self):
         self.assertEqual(
             ARM64_LOCAL_IMAGE,
-            "local/visioneval:1.0.0-arm64",
+            "local/visioneval:2.0.0-arm64",
+        )
+        self.assertEqual(
+            PINNED_ARM64_RUNTIME_DIGEST,
+            "sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791",
+        )
+        self.assertEqual(
+            PINNED_ARM64_RUNTIME_REFERENCE,
+            f"ghcr.io/nikolasleeb/visioneval-workbench-runtime@{PINNED_ARM64_RUNTIME_DIGEST}",
         )
 
     def test_managed_macos_install_pulls_pinned_digest_tags_and_verifies(self):
@@ -208,10 +216,10 @@ class RuntimeTests(unittest.TestCase):
                 self.calls.append(command)
                 if "image" in command and "inspect" in command and "{{json .Config.Labels}}" in command:
                     labels = {
-                        "com.visioneval.upstream.release": LEGACY_RUNTIME_PROFILE["visionEvalVersion"],
-                        "com.visioneval.upstream.revision": LEGACY_RUNTIME_PROFILE["visionEvalCommit"],
-                        "com.visioneval.workbench.compatibility-patch": COMPATIBILITY_PATCH,
-                        "com.visioneval.workbench.runtime-api": "0",
+                        "com.visioneval.upstream.release": CURRENT_RELEASE_TAG,
+                        "com.visioneval.upstream.revision": CURRENT_RELEASE_COMMIT,
+                        "com.visioneval.workbench.compatibility-patch": "none",
+                        "com.visioneval.workbench.runtime-api": "1",
                     }
                     return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
                 if "image" in command and "inspect" in command and "RepoDigests" in " ".join(command):
@@ -318,7 +326,7 @@ class RuntimeTests(unittest.TestCase):
         temporary.cleanup()
         runtime._write_queue_state_locked(1, None)
 
-    def test_first_batch_locks_mode_across_projects_until_backlog_drains(self):
+    def test_mixed_mode_batches_wait_fifo_and_keep_their_own_mode(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
             self.write_runnable_project(workspace, "project-one", "Project one")
@@ -327,20 +335,46 @@ class RuntimeTests(unittest.TestCase):
             validation = {"valid": True, "errors": [], "warnings": []}
             with patch.object(runtime, "validate_project", return_value=validation), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
                 first = runtime.create_batch("project-one", ["scenario"], False, "queued")
-                with self.assertRaisesRegex(WorkspaceError, "currently running in queued mode"):
-                    runtime.create_batch("project-two", ["scenario"], False, "parallel")
-                second = runtime.create_batch("project-two", ["scenario"], False, "queued")
+                second = runtime.create_batch("project-two", ["scenario"], False, "parallel")
 
             queue = runtime.queue()
             self.assertEqual(queue["modeLock"], "queued")
+            self.assertEqual(queue["activeBatchId"], first["id"])
             self.assertEqual(queue["maxActive"], 1)
             self.assertEqual([job["projectId"] for job in queue["jobs"]], ["project-one", "project-two"])
-            self.assertTrue(all(job["batchMode"] == "queued" for job in [*first["jobs"], *second["jobs"]]))
+            self.assertEqual(first["jobs"][0]["batchMode"], "queued")
+            self.assertEqual(second["jobs"][0]["batchMode"], "parallel")
 
-            for job in queue["jobs"]:
-                write_json(workspace.runs / job["id"] / "job.json", {**job, "state": "succeeded", "finishedAt": "2026-01-01T00:01:00Z"})
-            self.assertIsNone(runtime.queue()["modeLock"])
-            self.assertEqual(runtime.queue()["maxActive"], 2)
+            first_job = first["jobs"][0]
+            write_json(workspace.runs / first_job["id"] / "job.json", {**first_job, "state": "succeeded", "finishedAt": "2026-01-01T00:01:00Z"})
+            next_queue = runtime.queue()
+            self.assertEqual(next_queue["modeLock"], "parallel")
+            self.assertEqual(next_queue["activeBatchId"], second["id"])
+            self.assertEqual(next_queue["maxActive"], 2)
+
+    def test_retention_mode_is_frozen_when_jobs_are_queued(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            self.write_runnable_project(workspace, "standard", "Standard")
+            self.write_runnable_project(workspace, "hypercube", "Hypercube")
+            project_path = workspace.projects / "hypercube" / "project.json"
+            hypercube = json.loads(project_path.read_text(encoding="utf-8"))
+            hypercube["projectType"] = "hypercube"
+            hypercube["hypercubes"] = [{"id": "cube", "scenarioIds": ["scenario"], "axes": []}]
+            write_json(project_path, hypercube)
+            workspace.update_settings({"retainFullExports": False})
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            validation = {"valid": True, "errors": [], "warnings": []}
+            with patch.object(runtime, "validate_project", return_value=validation), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
+                standard = runtime.create_batch("standard", ["scenario"], False, "queued")
+            self.assertEqual(standard["jobs"][0]["resultRetentionMode"], "datastore_only")
+
+            write_json(workspace.runs / standard["jobs"][0]["id"] / "job.json", {**standard["jobs"][0], "state": "succeeded", "finishedAt": "2026-01-01T00:01:00Z"})
+            workspace.update_settings({"retainFullExports": True})
+            with patch.object(runtime, "validate_project", return_value=validation), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
+                cube = runtime.create_batch("hypercube", ["scenario"], False, "queued")
+            self.assertEqual(cube["jobs"][0]["resultRetentionMode"], "datastore_only")
+            self.assertEqual(json.loads((workspace.runs / standard["jobs"][0]["id"] / "job.json").read_text())["resultRetentionMode"], "datastore_only")
 
     def test_parallel_mode_lock_is_shared_by_projects_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
@@ -358,7 +392,7 @@ class RuntimeTests(unittest.TestCase):
             restarted = RuntimeManager(workspace, runner=FakeRunner())
             self.assertEqual(restarted.queue()["modeLock"], "parallel")
 
-    def test_simultaneous_conflicting_submissions_cannot_create_a_mixed_backlog(self):
+    def test_simultaneous_mixed_mode_submissions_create_two_atomic_batches(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
             self.write_runnable_project(workspace, "project-queued", "Queued project")
@@ -383,12 +417,14 @@ class RuntimeTests(unittest.TestCase):
                 for thread in threads: thread.start()
                 for thread in threads: thread.join()
 
-            self.assertEqual(len(results), 1)
-            self.assertEqual(len(errors), 1)
-            self.assertIn("currently running in", errors[0])
+            self.assertEqual(len(results), 2)
+            self.assertEqual(errors, [])
             queue = runtime.queue()
-            self.assertEqual(len(queue["jobs"]), 1)
-            self.assertEqual(queue["modeLock"], results[0]["mode"])
+            self.assertEqual(len(queue["jobs"]), 2)
+            self.assertEqual({job["batchMode"] for job in queue["jobs"]}, {"queued", "parallel"})
+            first_job = min(queue["jobs"], key=lambda item: item["queuePosition"])
+            self.assertEqual(queue["activeBatchId"], first_job["batchId"])
+            self.assertEqual(queue["modeLock"], first_job["batchMode"])
 
     def test_retry_preserves_original_mode_when_starting_a_new_backlog(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
@@ -666,6 +702,29 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(WorkspaceError):
                 runtime.remove_history("run-waiting")
 
+    def test_manual_history_clear_is_atomically_blocked_until_queue_is_idle(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            complete = workspace.runs / "run-complete"; complete.mkdir()
+            waiting = workspace.runs / "run-waiting"; waiting.mkdir()
+            write_json(complete / "job.json", {"id": "run-complete", "state": "succeeded"})
+            write_json(waiting / "job.json", {"id": "run-waiting", "state": "waiting", "queuePosition": 1})
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+
+            impact = runtime.history_clear_impact()
+            self.assertTrue(impact["blocked"])
+            self.assertEqual(impact["unfinishedJobs"], 1)
+            with self.assertRaisesRegex(WorkspaceError, "running and queued jobs finish"):
+                runtime.clear_history(require_idle=True)
+            self.assertTrue((complete / "job.json").is_file())
+
+            queued = json.loads((waiting / "job.json").read_text(encoding="utf-8"))
+            queued["state"] = "cancelled"
+            write_json(waiting / "job.json", queued)
+            result = runtime.clear_history(require_idle=True)
+            self.assertEqual(result["removedJobs"], 2)
+            self.assertTrue(result["resultsPreserved"])
+
     def test_stop_all_cancels_active_removes_waiting_and_preserves_completed_results(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
@@ -779,12 +838,12 @@ class RuntimeTests(unittest.TestCase):
         self.assertNotIn("exited with code", fields["message"])
         self.assertIn("exited with code 137", fields["technicalDetail"])
 
-    def test_exit_137_without_docker_oom_is_marked_as_suspected_memory_pressure(self):
+    def test_exit_137_without_docker_oom_is_marked_as_interrupted(self):
         failure = RuntimeManager._execution_failure(137, {"OOMKilled": False, "ExitCode": 137})
         fields = RuntimeManager._failure_fields(failure)
-        self.assertEqual(fields["failureKind"], "memory_suspected")
+        self.assertEqual(fields["failureKind"], "interrupted")
         self.assertFalse(fields["oomKilled"])
-        self.assertIn("most common cause", fields["message"])
+        self.assertIn("did not report an out-of-memory", fields["message"])
 
     def test_owned_container_state_is_inspected_then_removed(self):
         calls = []
@@ -805,6 +864,56 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(runtime._container_state(job)["OOMKilled"])
             self.assertTrue(runtime._remove_owned_container(job))
         self.assertIn(["/docker", "rm", "-f", "ve-run-owned"], calls)
+
+    def test_container_ownership_requires_current_execution_attempt(self):
+        def runner(command, **kwargs):
+            labels = {
+                "com.visioneval.workbench": "true",
+                "com.visioneval.job": "run-owned",
+                "com.visioneval.workspace": "workspace-one",
+                "com.visioneval.attempt": "attempt-one",
+            }
+            return subprocess.CompletedProcess(command, 0, json.dumps(labels), "")
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None), patch("backend.workbench.runtime.find_docker_executable", return_value="/docker"):
+            runtime = RuntimeManager(Workspace(directory), runner=runner)
+            runtime.workspace_id = "workspace-one"
+            self.assertTrue(runtime._container_owned({"id":"run-owned","containerName":"ve-run-owned","workspaceId":"workspace-one","executionAttempt":"attempt-one"}))
+            self.assertFalse(runtime._container_owned({"id":"run-owned","containerName":"ve-run-owned","workspaceId":"workspace-one","executionAttempt":"attempt-two"}))
+
+    def test_only_oldest_unfinished_batch_is_eligible(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            jobs = [
+                {"id":"run-a1","batchId":"batch-a","batchMode":"parallel","state":"waiting","queuePosition":1,"createdAt":"2026-01-01"},
+                {"id":"run-a2","batchId":"batch-a","batchMode":"parallel","state":"waiting","queuePosition":2,"createdAt":"2026-01-01"},
+                {"id":"run-b1","batchId":"batch-b","batchMode":"queued","state":"waiting","queuePosition":3,"createdAt":"2026-01-02"},
+            ]
+            for job in jobs:
+                run = workspace.runs / job["id"]
+                run.mkdir()
+                write_json(run / "job.json", job)
+            self.assertTrue(runtime._eligible_locked(jobs[0]))
+            self.assertTrue(runtime._eligible_locked(jobs[1]))
+            self.assertFalse(runtime._eligible_locked(jobs[2]))
+            self.assertEqual(runtime._mode_lock_locked(), "parallel")
+
+    def test_scoped_hypercube_stop_preserves_other_projects(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            workspace = Workspace(directory)
+            project_dir = workspace.projects / "cube"; project_dir.mkdir()
+            write_json(project_dir / "project.json", {"id":"cube","name":"Cube","projectType":"hypercube","variations":[],"runIds":[],"datastoreIds":[]})
+            other_dir = workspace.projects / "other"; other_dir.mkdir()
+            write_json(other_dir / "project.json", {"id":"other","name":"Other","projectType":"standard","variations":[],"runIds":[],"datastoreIds":[]})
+            for job_id, project_id, position in (("cube-waiting","cube",1),("other-waiting","other",2)):
+                run = workspace.runs / job_id; run.mkdir()
+                write_json(run / "job.json", {"id":job_id,"projectId":project_id,"state":"waiting","queuePosition":position,"modelPath":str(workspace.models/job_id),"logPath":str(run/"run.log")})
+                (run / "run.log").touch()
+            runtime = RuntimeManager(workspace, runner=FakeRunner())
+            result = runtime.stop_project("cube")
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse((workspace.runs / "cube-waiting").exists())
+            self.assertTrue((workspace.runs / "other-waiting").exists())
 
 
 if __name__ == "__main__":

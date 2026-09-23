@@ -102,8 +102,9 @@ class ComparisonService:
             raise WorkspaceError((result.stderr or result.stdout).strip() or f"Could not read {path.name}")
         return json.loads(result.stdout)
 
-    def _metadata(self, record: dict[str, Any]) -> dict[str, Any]:
-        return self._read_rda(str(Path(record["path"]) / "DatastoreListing.Rda"), True)
+    def _metadata(self, record: dict[str, Any], *, fresh: bool = False) -> dict[str, Any]:
+        path = str(Path(record["path"]) / "DatastoreListing.Rda")
+        return self._read_rda.__wrapped__(self, path, True) if fresh else self._read_rda(path, True)
 
     @staticmethod
     def _variable_files(root: Path) -> list[dict[str, str]]:
@@ -116,13 +117,20 @@ class ComparisonService:
                 items.append({"year": rel.parts[0], "table": rel.parts[1], "name": path.stem})
         return items
 
+    def _inventory(self, record: dict[str, Any]) -> dict[str, Any]:
+        root = Path(record["path"])
+        if self.cache:
+            return self.cache.output_inventory(root, lambda: self._metadata(record, fresh=True))
+        return {"items": self._variable_files(root), "metadata": self._metadata(record)}
+
     def variables(self, datastore_ids: list[str]) -> list[dict[str, Any]]:
         records = [self._record(item) for item in datastore_ids]
         by_key: dict[tuple[str, str], dict[str, set[str]]] = {}
+        inventories = {record["id"]: self._inventory(record) for record in records}
         for record in records:
-            for item in self._variable_files(Path(record["path"])):
+            for item in inventories[record["id"]]["items"]:
                 by_key.setdefault((item["table"], item["name"]), {}).setdefault(record["id"], set()).add(item["year"])
-        metadata = self._metadata(records[0]) if records else {}
+        metadata = inventories[records[0]["id"]].get("metadata", {}) if records else {}
         output = []
         for (table, name), per_record in sorted(by_key.items()):
             common = set.intersection(*(per_record.get(record["id"], set()) for record in records)) if records else set()
@@ -180,7 +188,7 @@ class ComparisonService:
     def geo_options(self, reference_id: str, table: str, year: str) -> dict[str, Any]:
         record, fields = self._record(reference_id), []
         root = Path(record["path"])
-        names = {item["name"] for item in self._variable_files(root) if item["year"] == year and item["table"] == table}
+        names = {item["name"] for item in self._inventory(record)["items"] if item["year"] == year and item["table"] == table}
         key_name = TABLE_KEYS.get(table)
         county = self._county_mapping(record)
         if county and ("Azone" in names or "Bzone" in names or table in {"Azone", "Bzone"}):
@@ -263,7 +271,7 @@ class ComparisonService:
         if not mapping:
             return set()
         allowed = {str(value).lower() for value in values}
-        names = {item["name"] for item in self._variable_files(root) if item["year"] == year and item["table"] == table}
+        names = {item["name"] for item in self._inventory(record)["items"] if item["year"] == year and item["table"] == table}
         location_field = "Azone" if "Azone" in names or table == "Azone" else "Bzone" if "Bzone" in names or table == "Bzone" else ""
         if not location_field:
             return set()
@@ -345,7 +353,13 @@ class ComparisonService:
                     bzone_to_marea[bzone] = marea
                     azone_to_marea[name.casefold()] = marea
                     azone_to_marea[azone] = marea
-                    names[marea] = marea.replace("__", " — ").replace("_", " ")
+                    normalized_marea = marea.casefold()
+                    if normalized_marea.endswith("__richmond_va"):
+                        names[marea] = "Richmond UZA"
+                    elif normalized_marea.endswith("__non_uza"):
+                        names[marea] = "Non-UZA"
+                    else:
+                        names[marea] = marea.replace("__", " — ").replace("_", " ")
         return {"azone": azone_ids, "bzone": bzone_ids, "marea": marea_ids, "bzoneToMarea": bzone_to_marea, "azoneToMarea": azone_to_marea, "names": names}
 
     def map_options(self, datastore_ids: list[str]) -> dict[str, Any]:
@@ -354,14 +368,17 @@ class ComparisonService:
             return {"variables": [], "message": "Load at least two datastore results to create a map."}
         reference = self._record(datastore_ids[0])
         geography = self._map_geography(reference)
-        root = Path(reference["path"])
+        inventory = self._inventory(reference)["items"]
+        names_by_table_year: dict[tuple[str, str], set[str]] = {}
+        for entry in inventory:
+            names_by_table_year.setdefault((entry["table"], entry["year"]), set()).add(entry["name"])
         output = []
         for item in variables:
             if item["name"] == TABLE_KEYS.get(item["table"]) or not self._map_numeric_type(item.get("type", "")):
                 continue
             levels = set()
             for year in item.get("years", []):
-                names = {entry["name"] for entry in self._variable_files(root) if entry["year"] == year and entry["table"] == item["table"]}
+                names = names_by_table_year.get((item["table"], year), set())
                 if item["table"] == "Azone" or "Azone" in names or item["table"] == "Bzone" or "Bzone" in names:
                     levels.add("county")
                 if item["table"] == "Bzone" or "Bzone" in names or (
@@ -394,6 +411,15 @@ class ComparisonService:
             "message": "" if output else "The loaded results do not contain numeric outputs with supported county/locality or Bzone identifiers.",
         }
 
+    def options(self, datastore_ids: list[str], view: str = "compare") -> dict[str, Any]:
+        view = str(view or "compare").strip().lower()
+        if view == "map":
+            payload = self.map_options(datastore_ids)
+        else:
+            variables = self.variables(datastore_ids)
+            payload = {"variables": variables, "message": "" if variables else "The selected results do not share comparable outputs."}
+        return {**payload, "view": view, "datastoreIds": list(datastore_ids)}
+
     def _map_source_signature(self, records: list[dict[str, Any]], year: str, table: str, variable: str, geography: str) -> list[Any]:
         signature = []
         for record in records:
@@ -418,7 +444,8 @@ class ComparisonService:
     def _aggregate_map_record(self, record: dict[str, Any], year: str, table: str, variable: str, geography: str, cancelled=None) -> dict[str, Any]:
         root = Path(record["path"])
         values = self._column(root, year, table, variable)
-        available = {item["name"] for item in self._variable_files(root) if item["year"] == year and item["table"] == table}
+        inventory_items = self._inventory(record)["items"]
+        available = {item["name"] for item in inventory_items if item["year"] == year and item["table"] == table}
         assignment = "direct"
         if geography == "bzone":
             field = "Bzone" if table == "Bzone" or "Bzone" in available else ""
@@ -431,7 +458,7 @@ class ComparisonService:
             locations = self._column(root, year, table, field)
         elif geography == "bzone" and table in {"Vehicle", "Worker"} and "HhId" in available:
             household_available = {
-                item["name"] for item in self._variable_files(root)
+                item["name"] for item in inventory_items
                 if item["year"] == year and item["table"] == "Household"
             }
             if not {"HhId", "Bzone"}.issubset(household_available):
@@ -617,8 +644,9 @@ class ComparisonService:
         if self.cache:
             for record in records:
                 root = Path(record["path"])
+                inventory_items = self._inventory(record)["items"]
                 available_by_table = {
-                    table: {entry["name"] for entry in self._variable_files(root)
+                    table: {entry["name"] for entry in inventory_items
                             if entry["year"] == year and entry["table"] == table}
                     for table in by_table
                 }
@@ -640,7 +668,7 @@ class ComparisonService:
             if geography == "bzone" and any(item["table"] in {"Vehicle", "Worker"} for item in variables):
                 for record in records:
                     root = Path(record["path"])
-                    available = {entry["name"] for entry in self._variable_files(root)
+                    available = {entry["name"] for entry in self._inventory(record)["items"]
                                  if entry["year"] == year and entry["table"] == "Household"}
                     names = [name for name in ("HhId", "Bzone") if name in available]
                     self.cache.ensure(root, year, "Household", names)

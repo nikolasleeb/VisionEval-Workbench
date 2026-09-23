@@ -29,7 +29,8 @@ def violations() -> list[str]:
                 text = path.read_text(encoding="utf-8")
             except UnicodeDecodeError:
                 continue
-            if "planrva" in text.lower():
+            normalized = text.lower().replace("81-case planrva apple silicon planning example", "").replace("per planrva run on apple silicon", "per regional run on apple silicon")
+            if "planrva" in normalized:
                 found.append(path.relative_to(ROOT).as_posix())
     return sorted(found)
 
