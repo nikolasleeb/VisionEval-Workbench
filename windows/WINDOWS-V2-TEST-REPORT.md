@@ -258,3 +258,33 @@ native execution.
 
 This candidate is **UNSIGNED**. Windows SmartScreen may show an unknown-publisher
 warning. No tag was created and nothing was published.
+
+## September 23 update-message correction
+
+- Corrected the update-available notice from “available for this Mac” to
+  “available for Windows” in the Windows backend only. The current notice,
+  release URL, offline behavior, and Windows asset selection are unchanged.
+- A focused Windows/x64 test verifies the exact message, selection of the
+  Windows setup executable over a macOS asset, and the release-notes URL.
+- Focused update checks: 8 passed. Complete Python suite: 393 passed, 18
+  expected skips. JavaScript syntax and 80 frontend contracts passed (2
+  expected skips). `cargo fmt --check` and `git diff --check` passed. The
+  previously built Rust test executable passed 17 tests; a fresh `cargo test`
+  link was unavailable after the build-only Windows SDK/LLVM tools were
+  removed during the approved SSD cleanup. Rust source was not changed.
+- Rebuilt the PyInstaller backend and repackaged the unchanged desktop binary
+  as a 15,674,956-byte, unsigned Windows x64 NSIS installer with SHA-256
+  `a905f4230f2cfb28261418a54530a7524790b406a653198fcfc328120bd6fc57`.
+  The newly packaged backend started from its build output and passed the
+  `/api/health` check.
+- A same-version silent install returned exit code 0 but did not replace the
+  existing installed backend binary. The installed app launched and completed
+  a live update check, reporting the current 2.0.0 message against the
+  published 1.0.0 release; because no newer public release exists, the
+  update-available wording could not be observed in that installed UI.
+  Therefore the replacement installer is packaged and source-tested, but its
+  same-version reinstall behavior and updated installed UI remain unverified.
+- The prior uploaded draft installer, SHA-256
+  `6af29f895c8b6eab9446d686af868ba37bbeeb129be3d9f3154af1c29ef158ef`,
+  is superseded only after the replacement is installed and accepted. Neither
+  installer is signed; no release was tagged or published in this follow-up.
