@@ -50,6 +50,23 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn(".package-preview-technical", styles)
         self.assertIn('manifest.get("compatibilitySummary", "Validated for this Workbench package format")', server)
 
+    def test_package_preview_does_not_wait_behind_settings_modal(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        workflow = source[source.index("async function installSelectedPackage"):source.index("function renderRegionBuilder")]
+        self.assertIn('const preview=await previewPackage(source)', workflow)
+        self.assertIn('settingsDialog.close()', workflow)
+        self.assertIn('await new Promise((resolve) => requestAnimationFrame(resolve))', workflow)
+        self.assertLess(workflow.index('settingsDialog.close()'), workflow.index("dialog.showModal()"))
+        self.assertIn('suspendedSettings && !$("settingsDialog").open', workflow)
+
+    def test_package_preview_has_a_bounded_validation_wait(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        helper = source[source.index("async function previewPackage"):source.index("async function waitForRuntimeInstallation")]
+        self.assertIn("new AbortController()", helper)
+        self.assertIn("120000", helper)
+        self.assertIn('signal: controller.signal', helper)
+        self.assertIn("Package validation did not finish within two minutes", helper)
+
     def test_opt_in_update_checking_is_wired(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")

@@ -656,6 +656,25 @@ function post(path, payload) {
   return request(path, { method: "POST", body: JSON.stringify(payload) });
 }
 
+async function previewPackage(source) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 120000);
+  try {
+    return await request("/api/packages/preview", {
+      method: "POST",
+      body: JSON.stringify({source}),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      throw new Error("Package validation did not finish within two minutes. Check that the package is on a responsive local or SSD drive, then try again.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function waitForRuntimeInstallation(operationId) {
   const deadline = Date.now() + (20 * 60 * 1000);
   let transientFailures = 0;
@@ -1044,18 +1063,26 @@ function openPackageSourceDialog(button, regionBuilder = false) {
 
 async function installSelectedPackage(command) {
   const button = state.packageInstallButton;
+  let suspendedSettings = false;
   try {
     $("packageSourceDialog").close();
     const source = await window.__TAURI_INTERNALS__.invoke(command);
     if (!source) return;
     setBusy(button, true, "Validating…");
-    const preview=await post('/api/packages/preview',{source});
+    const preview=await previewPackage(source);
     const warning=$('packagePreviewWarning');warning.hidden=!(preview.warnings||[]).length;warning.innerHTML=(preview.warnings||[]).map((item)=>`<strong>${escapeHtml(item)}</strong>`).join('<br>');
     $('packagePreviewName').textContent=`${preview.name}${preview.version?` ${preview.version}`:''}`;
     $('packagePreviewDescription').textContent=preview.description||'No package description was provided.';
     $('packagePreviewContents').textContent=`${preview.fileCount} files · ${humanBytes(preview.size)}`;
     const details=[['Type',preview.type],['Compatibility',preview.compatibility],['Source',preview.provenance],['Intended use',preview.intendedUse],['Execution support',preview.executionSupport],['Capabilities',(preview.capabilities||[]).join(', ')||'Not declared'],['File verification',preview.checksumStatus]];
     $('packagePreviewDetails').innerHTML=details.map(([label,value])=>`<dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd>`).join('');
+    setBusy(button, false);
+    const settingsDialog = $("settingsDialog");
+    if (settingsDialog?.open) {
+      settingsDialog.close();
+      suspendedSettings = true;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
     const approved=await new Promise((resolve)=>{const dialog=$('packagePreviewDialog');dialog.addEventListener('close',function done(){dialog.removeEventListener('close',done);resolve(dialog.returnValue==='install')});dialog.showModal()});
     if(!approved)return;
     setBusy(button, true, "Installing…");
@@ -1073,6 +1100,9 @@ async function installSelectedPackage(command) {
     notify(error.message || String(error), "error");
   } finally {
     setBusy(button, false);
+    if (suspendedSettings && !$("settingsDialog").open && !$("packagePreviewDialog").open) {
+      $("settingsDialog").showModal();
+    }
     state.packageInstallButton = null;
     state.packageInstallRegionBuilder = false;
   }

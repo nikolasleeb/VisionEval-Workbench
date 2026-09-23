@@ -12,7 +12,7 @@ Certified runtime: VisionEval `VE-40-RC7`
 
 | Gate | Result |
 | --- | --- |
-| Python suite | PASS — 387 tests, 18 dependency/integration skips |
+| Python suite | PASS — 389 tests, 18 dependency/integration skips |
 | JavaScript syntax and frontend contract/accessibility coverage | PASS |
 | Rust tests | PASS — 17 tests |
 | `cargo fmt --check` | PASS |
@@ -170,7 +170,7 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
   `https://sites.google.com/view/ve-workbench/home`. The desktop command accepts
   that string only by exact equality, while retaining the separate trusted GitHub
   update-link policy.
-- Final source gates: 387 Python tests passed with 18 expected
+- Final source gates: 389 Python tests passed with 18 expected
   dependency/integration skips; 77 frontend contract tests passed with 2 expected
   skips; 17 Rust tests passed; JavaScript syntax, Rust formatting, and
   `git diff --check` passed.
@@ -188,6 +188,27 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
 - After all automated and installed-app gates passed, the corrected unsigned
   installer was promoted from the temporary SSD build folder into the Windows
   release-candidate folder. It remains unpublished and untagged.
+
+## PlanRVA package-preview follow-up
+
+- Diagnosed an installed-app wait where the PlanRVA package validated in the
+  backend in under one second, but its review dialog could remain behind the
+  already-modal Settings window while the Assets button continued to say
+  `Validating…`.
+- Package validation now has a bounded two-minute wait with an actionable error.
+  Once validation succeeds, Settings is temporarily suspended, the package
+  review opens as the only foreground modal, and Settings is restored without
+  rerendering or losing its draft controls when review ends.
+- The Assets button leaves its validation state before review begins and changes
+  to `Installing…` only after the user approves installation.
+- Focused frontend contracts and the real PlanRVA package-preview test pass. The
+  complete Python suite passes 389 tests with 18 expected skips.
+- The rebuilt candidate installed per-user with exit code 0 while preserving the
+  desktop configuration and SSD workspace. Its installed backend previewed the
+  119-file PlanRVA 2.0 package in 552 ms and verified the package manifest.
+- This follow-up installer remains in its temporary SSD candidate folder pending
+  user confirmation that the review dialog is visible; it has not yet replaced
+  the promoted release-candidate installer.
 
 ## Expected warnings
 
