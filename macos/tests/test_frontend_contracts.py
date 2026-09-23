@@ -252,13 +252,17 @@ class FrontendContractTests(unittest.TestCase):
         self.assertNotIn("local/visioneval:ve-40-rc6-planrva-arm64", markup)
         self.assertIn("sha256:f6dba706e39bc403ad08c8fb27c2a8d69d74875de096475df3ac8311e1c13791", markup)
 
-    def test_macos_release_workflow_uses_version_two_runtime_index(self):
+    def test_macos_release_workflow_verifies_existing_notarized_dmg(self):
         workflow = (ROOT.parent / ".github" / "workflows" / "release-macos.yml").read_text(encoding="utf-8")
-        self.assertIn("release 2.0.0", workflow)
+        self.assertIn("Verify prebuilt Apple Silicon macOS 2.0.0 release", workflow)
         self.assertIn("gh release download v2.0.0", workflow)
         self.assertIn("VisionEval-Workbench-v2.0.0-macos-arm64.dmg", workflow)
-        self.assertNotIn("runtime-VE-40-RC7", workflow)
-        self.assertNotIn("VisionEval-Workbench-v1.1.0-macos-arm64.dmg", workflow)
+        self.assertIn("xcrun stapler validate", workflow)
+        self.assertIn("spctl --assess", workflow)
+        self.assertIn("codesign --verify --deep --strict", workflow)
+        self.assertNotIn("codesign --force", workflow)
+        self.assertNotIn("gh release upload", workflow)
+        self.assertNotIn("runtime-index.json", workflow)
 
     def test_macos_managed_runtime_install_and_platform_exclusive_guide_are_present(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
