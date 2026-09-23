@@ -1,3 +1,6 @@
 * text=auto
+*.pdf binary
+*.docx binary
+*.exe binary
 windows/resources/examples/planrva-mm/** -text
 macos/resources/examples/planrva-mm/** -text

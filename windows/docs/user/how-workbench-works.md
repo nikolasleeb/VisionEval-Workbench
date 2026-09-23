@@ -16,7 +16,7 @@ Regional packages are installed from **Settings > Assets**. They can provide mod
 
 ## Native runtime
 
-Workbench connects to an existing `VE_RUNTIME` working folder, its `VE_HOME` VisionEval package library, and a compatible `Rscript.exe`. Verification starts that R installation and reports what it finds; it does not download, update, patch, or replace the runtime. Windows jobs run one at a time through this verified native connection.
+Workbench connects to independently selected `VE_RUNTIME`, `VE_HOME`, and `Rscript.exe` paths. If no usable runtime exists, its no-admin managed installer can install the pinned R 4.5.3 and VisionEval RC7 pair for the current user. Validation rejects equal or nested runtime/home paths, including overlaps hidden by junctions or symbolic links. Windows jobs run one at a time through the verified native connection.
 
 ## Projects and scenarios
 

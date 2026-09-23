@@ -71,8 +71,42 @@ class ExploreTests(unittest.TestCase):
         types = self.service.input_column_types("azone_people.csv", ["Geo", "Year", "Population"])
         self.assertEqual(types["Population"], "integer")
         self.service.validate_input_rows("azone_people.csv", ["Geo", "Year", "Population"], [["A", "2045", "11"]])
-        with self.assertRaisesRegex(WorkspaceError, "whole numbers in Population"):
+        with self.assertRaisesRegex(WorkspaceError, "nonnegative whole number"):
             self.service.validate_input_rows("azone_people.csv", ["Geo", "Year", "Population"], [["A", "2045", "11.5"]])
+
+    def test_validation_catalog_enforces_ranges_groups_coordinates_and_legacy_values(self):
+        columns = ["Geo", "Year", "PropUrbanSFDU", "PropTownSFDU"]
+        current = [["101", "2045", "0.6", "0.4"]]
+        metadata = self.service.input_column_metadata("bzone_urban-town_du_proportions.csv", columns, current)
+        self.assertEqual(metadata["PropUrbanSFDU"]["maximum"], 1)
+        with self.assertRaisesRegex(WorkspaceError, "at most 1"):
+            self.service.validate_input_rows("bzone_urban-town_du_proportions.csv", columns, [["101", "2045", "0.8", "0.4"]], current, metadata)
+        coordinate_columns = ["Geo", "Latitude", "Longitude"]
+        coordinate_rows = [["101", "37.5", "-77.4"]]
+        coordinate_metadata = self.service.input_column_metadata("bzone_lat_lon.csv", coordinate_columns, coordinate_rows)
+        self.assertFalse(coordinate_metadata["Latitude"]["bulkEditable"])
+        with self.assertRaisesRegex(WorkspaceError, "maximum is 90"):
+            self.service.validate_input_rows("bzone_lat_lon.csv", coordinate_columns, [["101", "91", "-77.4"]], coordinate_rows, coordinate_metadata)
+
+    def test_level_paid_and_optional_blank_classification(self):
+        timeless = self.service.input_column_metadata("other_ops_effectiveness.csv", ["Level", "Effectiveness"], [["High", "0.2"], ["Low", "0.1"]])
+        self.assertEqual(timeless["Level"]["kind"], "protected")
+        self.assertTrue(timeless["Effectiveness"]["bulkEditable"])
+        paid = self.service.input_column_metadata("region_prop_externalities_paid.csv", ["Year", "PropClimateCostPaid"], [["2045", "0.25"]])
+        self.assertEqual(paid["PropClimateCostPaid"]["kind"], "numeric")
+        rail = self.service.input_column_metadata("marea_transit_fuel.csv", ["Geo", "Year", "RailPropDiesel", "RailPropGasoline"], [["metro", "2045", "", ""]])
+        self.assertTrue(rail["RailPropDiesel"]["bulkEditable"])
+
+    def test_categorical_metadata_and_operation_validation(self):
+        columns = ["Geo", "Year", "CarSvcLevel", "Description"]
+        rows = [["101", "2024", "High", "one"], ["102", "2045", "Low", "two"]]
+        metadata = self.service.input_column_metadata("bzone_carsvc_availability.csv", columns, rows)
+        self.assertEqual(metadata["CarSvcLevel"]["kind"], "categorical")
+        self.assertEqual(metadata["CarSvcLevel"]["options"], ["High", "Low"])
+        operation = {"columns": ["CarSvcLevel"], "operation": "set", "value": "Low", "valueType": "categorical"}
+        self.service.validate_categorical_operations(metadata, [operation])
+        with self.assertRaisesRegex(WorkspaceError, "existing value"):
+            self.service.validate_categorical_operations(metadata, [{**operation, "value": "Medium"}])
 
     def test_identifiers_are_unitless_and_unresolved_units_are_warned(self):
         conflicts = Path(self.temp.name) / "conflicts.json"

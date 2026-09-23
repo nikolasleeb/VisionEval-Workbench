@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
 use std::io::{self, Read};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::Mutex;
@@ -13,12 +13,15 @@ use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 
-const CONFIG_VERSION: u32 = 7;
+const CONFIG_VERSION: u32 = 9;
+const RUNTIME_PROFILE_CONFIGURATION_VERSION: u32 = 8;
 const LEGACY_RUNTIME_IMAGE: &str = "local/visioneval:3.1.1-arm64";
 const UNPATCHED_RC6_RUNTIME_IMAGE: &str = "local/visioneval:ve-40-rc6-arm64";
-const ARM64_RUNTIME_IMAGE: &str = "local/visioneval:1.0.0-arm64";
+#[cfg(any(not(target_os = "windows"), test))]
+const ARM64_RUNTIME_IMAGE: &str = "local/visioneval:2.0.0-arm64";
+#[cfg(target_os = "windows")]
 const AMD64_RUNTIME_IMAGE: &str = "local/visioneval:2.0.0-amd64";
-const ONBOARDING_VERSION: u32 = 1;
+const ONBOARDING_VERSION: u32 = 2;
 const WORKSPACE_FORMAT_VERSION: u32 = 2;
 const WORKSPACE_MARKER: &str = ".visioneval-workspace.json";
 const WORKSPACE_SETTINGS: &str = ".workbench/settings.json";
@@ -27,6 +30,7 @@ const WORKSPACE_SETTINGS: &str = ".workbench/settings.json";
 struct BackendState {
     child: Mutex<Option<Child>>,
     port: Mutex<Option<u16>>,
+    lifecycle: Mutex<()>,
     quit_requested: Mutex<bool>,
 }
 
@@ -173,6 +177,7 @@ impl Default for ComparisonPalettes {
 struct DesktopConfig {
     configuration_version: u32,
     onboarding_version: u32,
+    last_acknowledged_application_version: String,
     workspace_root: String,
     workspace_id: String,
     recent_workspaces: Vec<RecentWorkspace>,
@@ -197,6 +202,7 @@ impl Default for DesktopConfig {
         Self {
             configuration_version: CONFIG_VERSION,
             onboarding_version: 0,
+            last_acknowledged_application_version: String::new(),
             workspace_root: String::new(),
             workspace_id: String::new(),
             recent_workspaces: vec![],
@@ -223,6 +229,8 @@ struct DesktopState {
     platform: String,
     configuration_version: u32,
     onboarding_version: u32,
+    application_version: String,
+    upgrade_notice_pending: bool,
     configured: bool,
     workspace_valid: bool,
     workspace_status: String,
@@ -246,6 +254,52 @@ struct DesktopState {
     blocking_job_count: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PhysicalRect {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowLayoutMetrics {
+    client: PhysicalRect,
+    work_area: PhysicalRect,
+    visible_client: PhysicalRect,
+    scale_factor: f64,
+    maximized: bool,
+}
+
+const WORKBENCH_WEBSITE_URL: &str = "https://sites.google.com/view/ve-workbench/home";
+
+fn intersect_physical_rects(first: PhysicalRect, second: PhysicalRect) -> PhysicalRect {
+    let left = i64::from(first.x).max(i64::from(second.x));
+    let top = i64::from(first.y).max(i64::from(second.y));
+    let right = (i64::from(first.x) + i64::from(first.width))
+        .min(i64::from(second.x) + i64::from(second.width));
+    let bottom = (i64::from(first.y) + i64::from(first.height))
+        .min(i64::from(second.y) + i64::from(second.height));
+    PhysicalRect {
+        x: left.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        y: top.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        width: right.saturating_sub(left).max(0).min(i64::from(u32::MAX)) as u32,
+        height: bottom.saturating_sub(top).max(0).min(i64::from(u32::MAX)) as u32,
+    }
+}
+
+fn visible_client_rect(client: PhysicalRect, work_area: PhysicalRect) -> PhysicalRect {
+    let visible = intersect_physical_rects(client, work_area);
+    PhysicalRect {
+        x: visible.x.saturating_sub(client.x),
+        y: visible.y.saturating_sub(client.y),
+        width: visible.width,
+        height: visible.height,
+    }
+}
+
 fn default_notification_success_threshold_seconds() -> u64 {
     60
 }
@@ -255,6 +309,14 @@ fn default_notification_success_threshold_seconds() -> u64 {
 struct NotificationDelivery {
     shown: bool,
     reason: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PreferenceResetResult {
+    desktop: DesktopState,
+    restart_required: bool,
+    deferred: bool,
 }
 
 fn notification_suppression_reason(
@@ -377,11 +439,6 @@ fn display_workspace_path(path: &Path) -> String {
 }
 
 fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
-    let reveal_projects_label = if cfg!(target_os = "windows") {
-        "Show Projects in File Explorer"
-    } else {
-        "Show Projects in Finder"
-    };
     let app_menu = Submenu::with_id_and_items(
         app,
         "workbench-app",
@@ -394,7 +451,7 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &MenuItem::with_id(
                 app,
                 "show-workspace-in-finder",
-                reveal_projects_label,
+                "Show Projects in Finder",
                 true,
                 None::<&str>,
             )?,
@@ -469,6 +526,13 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
             &MenuItem::with_id(app, "view-create", "Create", true, Some("CmdOrCtrl+2"))?,
             &MenuItem::with_id(app, "view-run", "Run", true, Some("CmdOrCtrl+3"))?,
             &MenuItem::with_id(app, "view-compare", "Compare", true, Some("CmdOrCtrl+4"))?,
+            &MenuItem::with_id(
+                app,
+                "view-hypercube",
+                "Hypercube",
+                true,
+                Some("CmdOrCtrl+5"),
+            )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "zoom-in", "Zoom In", true, Some("CmdOrCtrl+="))?,
             &MenuItem::with_id(app, "zoom-out", "Zoom Out", true, Some("CmdOrCtrl+-"))?,
@@ -612,6 +676,20 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                 app,
                 "user-guide",
                 "VisionEval Workbench User Guide",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "whats-new",
+                "What's New in Version 2.0",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "workbench-website",
+                "VisionEval Workbench Website",
                 true,
                 None::<&str>,
             )?,
@@ -840,7 +918,7 @@ fn migrate_runtime_profiles(config: &mut DesktopConfig) -> bool {
                 || profile.image_reference.contains("\\.tools\\")
                 || profile.image_reference.contains("/.tools/"));
         if profile.adapter != supported_adapter
-            || config.configuration_version < CONFIG_VERSION
+            || config.configuration_version < RUNTIME_PROFILE_CONFIGURATION_VERSION
             || invalid_windows_native
         {
             profile.image_digest.clear();
@@ -863,12 +941,18 @@ fn migrate_runtime_profiles(config: &mut DesktopConfig) -> bool {
     changed
 }
 fn read_config(app: &AppHandle) -> DesktopConfig {
-    let mut config: DesktopConfig = config_path(app)
-        .ok()
+    let path = config_path(app).ok();
+    let config_existed = path.as_ref().is_some_and(|path| path.is_file());
+    let mut config: DesktopConfig = path
+        .as_ref()
         .and_then(|path| fs::read_to_string(path).ok())
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default();
     let mut changed = false;
+    if !config_existed {
+        config.last_acknowledged_application_version = env!("CARGO_PKG_VERSION").into();
+        changed = true;
+    }
     if config.configuration_version < 4 {
         config.auto_start_docker = true;
         changed = true;
@@ -885,13 +969,10 @@ fn read_config(app: &AppHandle) -> DesktopConfig {
         if profile.adapter != "docker" {
             continue;
         }
-        if matches!(
-            profile.image_reference.as_str(),
-            LEGACY_RUNTIME_IMAGE | UNPATCHED_RC6_RUNTIME_IMAGE
-        ) {
+        if runtime_image_needs_migration(&profile.image_reference) {
             profile.image_reference = default_runtime_image().into();
             profile.image_digest.clear();
-            profile.runtime_version = "Compatible VisionEval runtime / R 4.5.1".into();
+            profile.runtime_version = "Compatible VisionEval runtime / R 4.5.3".into();
             profile.verified = false;
             profile.verified_at.clear();
             profile.verification_message =
@@ -908,14 +989,29 @@ fn read_config(app: &AppHandle) -> DesktopConfig {
         changed = true;
     }
     #[cfg(not(target_os = "windows"))]
-    if config.resources.max_concurrent_runs != 2 {
-        config.resources.max_concurrent_runs = 2;
+    if !(1..=8).contains(&config.resources.max_concurrent_runs) {
+        config.resources.max_concurrent_runs = default_parallel();
         changed = true;
     }
     if changed {
         let _ = write_config(app, &config);
     }
     config
+}
+
+fn version_major(version: &str) -> u32 {
+    version
+        .split('.')
+        .next()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+}
+
+fn upgrade_notice_pending(config: &DesktopConfig) -> bool {
+    !config.workspace_root.trim().is_empty()
+        && config.onboarding_version >= ONBOARDING_VERSION
+        && version_major(&config.last_acknowledged_application_version)
+            < version_major(env!("CARGO_PKG_VERSION"))
 }
 fn write_config(app: &AppHandle, config: &DesktopConfig) -> Result<(), String> {
     let path = config_path(app)?;
@@ -926,6 +1022,13 @@ fn write_config(app: &AppHandle, config: &DesktopConfig) -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
     fs::rename(&temporary, &path).map_err(|error| error.to_string())
+}
+
+fn runtime_image_needs_migration(image_reference: &str) -> bool {
+    matches!(
+        image_reference,
+        LEGACY_RUNTIME_IMAGE | UNPATCHED_RC6_RUNTIME_IMAGE
+    )
 }
 
 fn is_legacy_workspace(path: &Path) -> bool {
@@ -1130,6 +1233,8 @@ fn desktop_state(app: AppHandle) -> DesktopState {
         },
         configuration_version: config.configuration_version,
         onboarding_version: config.onboarding_version,
+        application_version: env!("CARGO_PKG_VERSION").into(),
+        upgrade_notice_pending: upgrade_notice_pending(&config),
         configured,
         workspace_valid: status.is_ok(),
         workspace_status: status.unwrap_or_else(|error| error),
@@ -1340,7 +1445,7 @@ async fn save_dependency_export(
         return Err("Dependency export format must be svg, pdf, or html".into());
     }
     if template_id.trim().is_empty() {
-        return Err("Choose a model template before exporting dependencies".into());
+        return Err("Choose a Model package before exporting dependencies".into());
     }
     let suggested = dependency_export_filename(&format, &focus_id, &scope, &view);
     let downloads = app
@@ -1418,6 +1523,8 @@ fn backend_export_spec(export_kind: &str) -> Option<(&'static str, &'static str,
         "diagnostics-run" => Some(("/api/diagnostics/run", "zip", "ZIP archive")),
         "dashboard-pdf" => Some(("/api/comparison/export-dashboard-pdf", "pdf", "PDF")),
         "dashboard-csv" => Some(("/api/comparison/export-dashboard-csv", "csv", "CSV")),
+        "hypercube-analysis-csv" => Some(("/api/hypercube-analysis/export.csv", "csv", "CSV")),
+        "hypercube-case-zip" => Some(("/api/hypercube-exports/download", "zip", "ZIP archive")),
         _ => None,
     }
 }
@@ -1865,6 +1972,32 @@ fn trash_workspace(app: AppHandle, id: String, path: String) -> Result<(), Strin
 }
 
 #[tauri::command]
+fn factory_reset_workspace(app: AppHandle, confirmation: String) -> Result<String, String> {
+    if confirmation != "FACTORY RESET" {
+        return Err("Type FACTORY RESET to reset the current workspace".into());
+    }
+    let state = app.state::<BackendState>();
+    let mut config = read_config(&app);
+    let root = PathBuf::from(&config.workspace_root);
+    workspace_status(&root)?;
+    if has_nonterminal_jobs(&root) {
+        return Err("Finish or remove all active and waiting jobs before factory reset.".into());
+    }
+    if !workspace_is_safe_to_trash(&root) {
+        return Err("Workbench refused to reset that protected location.".into());
+    }
+    stop_backend(&state);
+    trash::delete(&root)
+        .map_err(|error| format!("The workspace could not be moved to Trash: {error}"))?;
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let id = initialize_workspace(&root)?;
+    remember_workspace(&mut config, &root, &id);
+    config.migration_recovery = None;
+    write_config(&app, &config)?;
+    Ok(root.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn reveal_workspace(app: AppHandle) -> Result<(), String> {
     let config = read_config(&app);
     workspace_status(Path::new(&config.workspace_root))?;
@@ -1890,31 +2023,92 @@ fn reveal_workspace_location(app: AppHandle, location: String) -> Result<(), Str
 }
 
 #[tauri::command]
-fn open_user_guide(app: AppHandle) -> Result<(), String> {
-    let config = read_config(&app);
-    workspace_status(Path::new(&config.workspace_root))?;
-    let resolved = resolve_user_guide_path(Path::new(&config.workspace_root))?;
-    reveal_path(&resolved).map_err(|error| format!("Could not open the user guide: {error}"))
+fn open_external_url(url: String) -> Result<(), String> {
+    if !is_trusted_external_url(&url) {
+        return Err("Workbench blocked an untrusted external link".into());
+    }
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("explorer.exe");
+        command.arg(&url);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg(&url);
+        command
+    };
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(&url);
+        command
+    };
+    command.spawn().map_err(|error| error.to_string())?;
+    Ok(())
 }
 
-fn resolve_user_guide_path(workspace_path: &Path) -> Result<PathBuf, String> {
+fn is_trusted_external_url(url: &str) -> bool {
+    !url.chars().any(char::is_whitespace)
+        && (url == WORKBENCH_WEBSITE_URL || url.starts_with("https://github.com/"))
+}
+
+#[tauri::command]
+fn open_documentation_document(app: AppHandle, document_id: String) -> Result<(), String> {
+    let config = read_config(&app);
+    workspace_status(Path::new(&config.workspace_root))?;
+    let resolved = resolve_documentation_path(Path::new(&config.workspace_root), &document_id)?;
+    open_in_preview(&resolved)
+        .map_err(|error| format!("Could not open the document in Preview: {error}"))
+}
+
+fn resolve_documentation_path(workspace_path: &Path, document_id: &str) -> Result<PathBuf, String> {
+    let filename = match document_id {
+        "user-guide" => "VisionEval-Workbench-2.0-Windows-User-Guide.pdf",
+        "whats-new" => "VisionEval-Workbench-2.0-Whats-New-Windows.pdf",
+        _ => return Err("Unknown documentation document".into()),
+    };
     let workspace = workspace_path
         .canonicalize()
         .map_err(|error| format!("Could not resolve the current workspace: {error}"))?;
-    let guide = workspace.join("Documentation").join("README.md");
+    let documentation = workspace.join("Documentation").join("Workbench User Guide");
+    let guide = documentation.join(filename);
     if !guide.is_file() {
         return Err(
-            "The Workbench User Guide is not installed. Restart Workbench to retry documentation setup."
+            "The documentation PDF is not installed. Restart Workbench to retry documentation setup."
                 .into(),
         );
     }
     let resolved = guide
         .canonicalize()
         .map_err(|error| format!("Could not resolve the user guide: {error}"))?;
-    if !resolved.starts_with(&workspace) {
-        return Err("The user guide path is outside the current workspace".into());
+    let allowed = documentation
+        .canonicalize()
+        .map_err(|error| format!("Could not resolve the documentation folder: {error}"))?;
+    if !resolved.starts_with(&allowed)
+        || resolved.extension().and_then(|value| value.to_str()) != Some("pdf")
+    {
+        return Err("The document path is outside the managed documentation folder".into());
     }
     Ok(resolved)
+}
+
+fn open_in_preview(path: &Path) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = Command::new("open");
+        command.arg("-a").arg("Preview").arg(path);
+        command
+    };
+    #[cfg(not(target_os = "macos"))]
+    let mut command = {
+        let mut command = Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+    command.spawn()?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -1946,6 +2140,7 @@ fn update_desktop_preferences(
     app: AppHandle,
     theme: String,
     default_run_mode: String,
+    max_concurrent_runs: u8,
     memory_limit_gb: Option<f64>,
     notifications_enabled: bool,
     notification_success_threshold_seconds: u64,
@@ -1959,6 +2154,9 @@ fn update_desktop_preferences(
     }
     if !matches!(default_run_mode.as_str(), "queued" | "parallel") {
         return Err("Unknown run mode".into());
+    }
+    if !(1..=8).contains(&max_concurrent_runs) {
+        return Err("Maximum concurrent runs must be between 1 and 8".into());
     }
     if memory_limit_gb.is_some_and(|value| value < 1.0 || value > 512.0) {
         return Err("Memory limit must be between 1 and 512 GB".into());
@@ -1998,7 +2196,7 @@ fn update_desktop_preferences(
     #[cfg(not(target_os = "windows"))]
     {
         config.resources.default_run_mode = default_run_mode;
-        config.resources.max_concurrent_runs = 2;
+        config.resources.max_concurrent_runs = max_concurrent_runs;
         config.resources.memory_limit_gb = memory_limit_gb;
     }
     config.notifications_enabled = notifications_enabled;
@@ -2026,6 +2224,70 @@ fn update_desktop_preferences(
         write_config(&app, &config)?;
     }
     Ok(desktop_state(app))
+}
+
+#[tauri::command]
+fn reset_preferences(app: AppHandle) -> Result<PreferenceResetResult, String> {
+    let mut config = read_config(&app);
+    let root = PathBuf::from(&config.workspace_root);
+    workspace_status(&root)?;
+    let blocking = has_nonterminal_jobs(&root);
+
+    let settings_path = root.join(WORKSPACE_SETTINGS);
+    let current: Value = fs::read_to_string(&settings_path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    let registrations = current
+        .get("assetRegistrations")
+        .cloned()
+        .unwrap_or_else(|| serde_json::json!([]));
+    let workspace_defaults = serde_json::json!({
+        "version": current.get("version").and_then(Value::as_u64).unwrap_or(1),
+        "defaultTemplateId": "",
+        "defaultInputLibraryId": "",
+        "defaultInputExplanationId": "",
+        "retainFullExports": true,
+        "checkVisionEvalUpdates": false,
+        "numericPrecision": {
+            "default": 2,
+            "singleFile": Value::Null,
+            "batch": Value::Null,
+            "output": Value::Null,
+            "percentage": Value::Null
+        },
+        "assetRegistrations": registrations
+    });
+    let temporary = settings_path.with_extension("json.preferences-reset.tmp");
+    fs::write(
+        &temporary,
+        serde_json::to_string_pretty(&workspace_defaults).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| format!("Could not prepare the default workspace settings: {error}"))?;
+    fs::rename(&temporary, &settings_path)
+        .map_err(|error| format!("Could not save the default workspace settings: {error}"))?;
+
+    reset_desktop_preference_fields(&mut config);
+    write_config(&app, &config)?;
+
+    Ok(PreferenceResetResult {
+        desktop: desktop_state(app),
+        restart_required: true,
+        deferred: blocking,
+    })
+}
+
+fn reset_desktop_preference_fields(config: &mut DesktopConfig) {
+    config.theme = default_appearance();
+    config.resources = ResourcePreferences::default();
+    config.notifications_enabled = false;
+    config.notification_success_threshold_seconds =
+        default_notification_success_threshold_seconds();
+    config.auto_start_docker = default_auto_start_docker();
+    config.notification_registration_sent = false;
+    config.comparison_palettes = ComparisonPalettes::default();
+    config.master_comparison_palette = ComparisonPalette::default();
+    config.use_master_comparison_palette = false;
 }
 
 #[tauri::command]
@@ -2089,6 +2351,42 @@ fn save_runtime_profile(
                 .into(),
         );
     }
+    #[cfg(target_os = "windows")]
+    {
+        let runtime = fs::canonicalize(&profile.ve_runtime_path)
+            .map_err(|error| format!("VE_RUNTIME could not be validated: {error}"))?;
+        let home = fs::canonicalize(&profile.ve_home_path)
+            .map_err(|error| format!("VE_HOME could not be validated: {error}"))?;
+        let rscript = fs::canonicalize(&profile.rscript_path)
+            .map_err(|error| format!("Rscript.exe could not be validated: {error}"))?;
+        let runtime_key = runtime.to_string_lossy().to_lowercase();
+        let home_key = home.to_string_lossy().to_lowercase();
+        let separator = std::path::MAIN_SEPARATOR;
+        let runtime_prefix = format!("{runtime_key}{separator}");
+        let home_prefix = format!("{home_key}{separator}");
+        if runtime_key == home_key
+            || runtime_key.starts_with(&home_prefix)
+            || home_key.starts_with(&runtime_prefix)
+        {
+            return Err(
+                "VE_RUNTIME and VE_HOME must be separate folders; neither can be inside the other."
+                    .into(),
+            );
+        }
+        if !rscript.is_file()
+            || rscript
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(str::to_lowercase)
+                != Some("rscript.exe".into())
+        {
+            return Err("Choose a valid Rscript.exe".into());
+        }
+        profile.ve_runtime_path = runtime.to_string_lossy().to_string();
+        profile.ve_home_path = home.to_string_lossy().to_string();
+        profile.rscript_path = rscript.to_string_lossy().to_string();
+        profile.image_reference = profile.ve_home_path.clone();
+    }
     #[cfg(not(target_os = "windows"))]
     if profile.adapter != "docker" || !profile.verified || profile.image_digest.is_empty() {
         return Err("Only a verified Docker runtime profile can be saved".into());
@@ -2114,6 +2412,13 @@ fn complete_onboarding(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn acknowledge_upgrade_notice(app: AppHandle) -> Result<(), String> {
+    let mut config = read_config(&app);
+    config.last_acknowledged_application_version = env!("CARGO_PKG_VERSION").into();
+    write_config(&app, &config)
+}
+
+#[tauri::command]
 fn get_theme(app: AppHandle) -> String {
     read_config(&app).theme
 }
@@ -2135,10 +2440,47 @@ fn free_port() -> Result<u16, String> {
         .port())
 }
 fn stop_backend(state: &BackendState) {
+    let port = state.port.lock().ok().and_then(|port| *port);
+    if let Some(port) = port {
+        let _ = ureq::post(&format!("http://127.0.0.1:{port}/api/backend/shutdown"))
+            .set("Content-Type", "application/json")
+            .timeout(Duration::from_secs(3))
+            .send_string("{}");
+    }
     if let Ok(mut child) = state.child.lock() {
         if let Some(mut running) = child.take() {
-            let _ = running.kill();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if running.try_wait().ok().flatten().is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            if running.try_wait().ok().flatten().is_none() {
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &running.id().to_string(), "/T", "/F"])
+                        .status();
+                }
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(-(running.id() as i32), libc::SIGTERM);
+                }
+                if running.try_wait().ok().flatten().is_none() {
+                    let _ = running.kill();
+                }
+            }
             let _ = running.wait();
+        }
+    }
+    if let Some(port) = port {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline {
+            if TcpStream::connect(("127.0.0.1", port)).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
         }
     }
     if let Ok(mut port) = state.port.lock() {
@@ -2163,8 +2505,7 @@ fn start_docker_desktop() -> Result<(), String> {
         Ok(())
     }
 }
-fn start_backend_blocking(app: AppHandle) -> Result<String, String> {
-    let state = app.state::<BackendState>();
+fn start_backend_locked(app: &AppHandle, state: &BackendState) -> Result<String, String> {
     if let Some(port) = *state.port.lock().map_err(|error| error.to_string())? {
         let url = format!("http://127.0.0.1:{port}");
         if ureq::get(&format!("{url}/api/health"))
@@ -2182,13 +2523,17 @@ fn start_backend_blocking(app: AppHandle) -> Result<String, String> {
     workspace_status(Path::new(&workspace_root))
         .map_err(|error| format!("Workspace recovery is required: {error}"))?;
     let port = free_port()?;
-    let mut executable = std::env::current_exe()
+    let executable = std::env::current_exe()
         .map_err(|error| error.to_string())?
         .parent()
         .ok_or("Could not find app executable folder")?
         .join("visioneval-workbench-backend");
     #[cfg(target_os = "windows")]
-    executable.set_extension("exe");
+    let executable = {
+        let mut path = executable;
+        path.set_extension("exe");
+        path
+    };
     let mut command = Command::new(&executable);
     command
         .env("PORT", port.to_string())
@@ -2224,6 +2569,10 @@ fn start_backend_blocking(app: AppHandle) -> Result<String, String> {
             "docker"
         },
     );
+    command.env(
+        "VISIONEVAL_MAX_CONCURRENT_RUNS",
+        config.resources.max_concurrent_runs.to_string(),
+    );
     let runtime_enabled = config.runtime_profiles.iter().any(|profile| {
         profile.id == config.active_runtime_profile_id
             && profile.adapter
@@ -2240,6 +2589,11 @@ fn start_backend_blocking(app: AppHandle) -> Result<String, String> {
     );
     if let Some(memory) = config.resources.memory_limit_gb {
         command.env("VISIONEVAL_MEMORY_GB", memory.to_string());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
     }
     let child = command
         .spawn()
@@ -2276,28 +2630,59 @@ fn start_backend_blocking(app: AppHandle) -> Result<String, String> {
 }
 #[tauri::command]
 async fn start_backend(app: AppHandle) -> Result<String, String> {
-    tauri::async_runtime::spawn_blocking(move || start_backend_blocking(app))
-        .await
-        .map_err(|error| format!("Workbench startup task failed: {error}"))?
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<BackendState>();
+        let _lifecycle = state.lifecycle.lock().map_err(|error| error.to_string())?;
+        start_backend_locked(&app, &state)
+    })
+    .await
+    .map_err(|error| format!("Workbench startup task failed: {error}"))?
 }
 #[tauri::command]
 async fn restart_backend(app: AppHandle) -> Result<String, String> {
-    let config = read_config(&app);
-    if !config.workspace_root.trim().is_empty()
-        && nonterminal_job_count(Path::new(&config.workspace_root)) > 0
-    {
-        return Err("Refresh is unavailable while runs are active or waiting.".into());
-    }
-    {
+    tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<BackendState>();
+        let _lifecycle = state.lifecycle.lock().map_err(|error| error.to_string())?;
         stop_backend(&state);
-    }
-    start_backend(app).await
+        start_backend_locked(&app, &state)
+    })
+    .await
+    .map_err(|error| format!("Workbench restart task failed: {error}"))?
 }
 
 #[tauri::command]
 fn renderer_smoke_mode() -> bool {
     std::env::var("WORKBENCH_RENDERER_SMOKE").as_deref() == Ok("1")
+}
+
+#[tauri::command]
+fn window_layout_metrics(window: tauri::WebviewWindow) -> Result<WindowLayoutMetrics, String> {
+    let position = window.inner_position().map_err(|error| error.to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "The current display could not be identified".to_string())?;
+    let work_area = monitor.work_area();
+    let client = PhysicalRect {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    };
+    let work_area = PhysicalRect {
+        x: work_area.position.x,
+        y: work_area.position.y,
+        width: work_area.size.width,
+        height: work_area.size.height,
+    };
+    Ok(WindowLayoutMetrics {
+        visible_client: visible_client_rect(client, work_area),
+        client,
+        work_area,
+        scale_factor: monitor.scale_factor(),
+        maximized: window.is_maximized().map_err(|error| error.to_string())?,
+    })
 }
 
 #[tauri::command]
@@ -2344,22 +2729,45 @@ fn main() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let action = match id {
-                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
+                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "view-hypercube" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "whats-new" | "workbench-website" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
                 _ => None,
             };
             if let (Some(action), Some(window)) = (action, app.get_webview_window("main")) {
                 if let Ok(value) = serde_json::to_string(action) { let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('visioneval-menu-action', {{ detail: {value} }}));")); }
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, reveal_workspace, reveal_workspace_location, open_user_guide, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
-        .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-            let already_quitting = window.try_state::<BackendState>().and_then(|state| state.quit_requested.lock().ok().map(|value| *value)).unwrap_or(false);
-            if !already_quitting {
-                api.prevent_close();
+        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, factory_reset_workspace, reset_preferences, reveal_workspace, reveal_workspace_location, open_external_url, open_documentation_document, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, acknowledge_upgrade_notice, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, window_layout_metrics, renderer_smoke_mode, report_renderer_smoke, complete_quit])
+        .on_window_event(|window, event| match event {
+            tauri::WindowEvent::Moved(_)
+            | tauri::WindowEvent::Resized(_)
+            | tauri::WindowEvent::ScaleFactorChanged { .. } => {
                 if let Some(webview) = window.app_handle().get_webview_window("main") {
-                    let _ = webview.eval("window.requestWorkbenchQuit && window.requestWorkbenchQuit();");
+                    let _ = webview.eval(
+                        "window.dispatchEvent(new Event('workbench-native-layout-change'));",
+                    );
                 }
             }
+            tauri::WindowEvent::CloseRequested { api, .. } => {
+                let already_quitting = window
+                    .try_state::<BackendState>()
+                    .and_then(|state| {
+                        state
+                            .quit_requested
+                            .lock()
+                            .ok()
+                            .map(|value| *value)
+                    })
+                    .unwrap_or(false);
+                if !already_quitting {
+                    api.prevent_close();
+                    if let Some(webview) = window.app_handle().get_webview_window("main") {
+                        let _ = webview.eval(
+                            "window.requestWorkbenchQuit && window.requestWorkbenchQuit();",
+                        );
+                    }
+                }
+            }
+            _ => {}
         })
         .run(tauri::generate_context!()).expect("error while running VisionEval Workbench");
 }
@@ -2367,6 +2775,131 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn visible_client_rect_accounts_for_taskbars_and_negative_monitors() {
+        let client = PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 40,
+                    y: 0,
+                    width: 1880,
+                    height: 1080
+                }
+            ),
+            PhysicalRect {
+                x: 40,
+                y: 0,
+                width: 1880,
+                height: 1080
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 40,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 40,
+                width: 1920,
+                height: 1040
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 0,
+                    width: 1880,
+                    height: 1080
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1880,
+                height: 1080
+            }
+        );
+        let negative_client = PhysicalRect {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            visible_client_rect(
+                negative_client,
+                PhysicalRect {
+                    x: -1920,
+                    y: 0,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040
+            }
+        );
+    }
+
+    #[test]
+    fn external_links_allow_only_the_exact_website_and_existing_github_links() {
+        assert!(is_trusted_external_url(WORKBENCH_WEBSITE_URL));
+        assert!(is_trusted_external_url(
+            "https://github.com/VisionEval/VisionEval/releases"
+        ));
+        for rejected in [
+            "http://sites.google.com/view/ve-workbench/home",
+            "https://sites.google.com/view/ve-workbench/home/",
+            "https://sites.google.com/view/ve-workbench/home?source=app",
+            "https://sites.google.com/view/ve-workbench/home#downloads",
+            "https://user@sites.google.com/view/ve-workbench/home",
+            "https://sites.google.com/view/ve-workbench/%68ome",
+            "https://sites.google.com/view/ve-workbench/home ",
+            "https://sites.google.com/view/ve-workbench-other/home",
+            "https://github.com.evil.example/project",
+        ] {
+            assert!(
+                !is_trusted_external_url(rejected),
+                "unexpectedly trusted {rejected}"
+            );
+        }
+    }
+
     #[test]
     fn notification_policy_applies_threshold_focus_and_force_rules() {
         assert_eq!(
@@ -2455,21 +2988,28 @@ mod tests {
         );
     }
     #[test]
-    fn user_guide_resolves_only_after_it_is_installed() {
+    fn documentation_resolves_only_allowlisted_installed_pdfs() {
         let root = std::env::temp_dir().join(stable_id("guide-test"));
-        fs::create_dir_all(root.join("Documentation")).unwrap();
-        assert!(resolve_user_guide_path(&root)
+        let guide_root = root.join("Documentation").join("Workbench User Guide");
+        fs::create_dir_all(&guide_root).unwrap();
+        assert!(resolve_documentation_path(&root, "user-guide")
             .unwrap_err()
             .contains("not installed"));
-        fs::write(root.join("Documentation").join("README.md"), "# Guide").unwrap();
-        let resolved = resolve_user_guide_path(&root).unwrap();
+        fs::write(
+            guide_root.join("VisionEval-Workbench-2.0-Windows-User-Guide.pdf"),
+            "%PDF-1.7",
+        )
+        .unwrap();
+        let resolved = resolve_documentation_path(&root, "user-guide").unwrap();
         assert_eq!(
             resolved,
             root.canonicalize()
                 .unwrap()
                 .join("Documentation")
-                .join("README.md")
+                .join("Workbench User Guide")
+                .join("VisionEval-Workbench-2.0-Windows-User-Guide.pdf")
         );
+        assert!(resolve_documentation_path(&root, "../private").is_err());
         fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -2485,6 +3025,20 @@ mod tests {
         assert!(!config.notification_registration_sent);
     }
     #[test]
+    fn version_two_upgrade_notice_is_only_pending_for_existing_completed_setups() {
+        let mut config = DesktopConfig::default();
+        assert!(!upgrade_notice_pending(&config));
+        config.workspace_root = "/tmp/workbench-test".into();
+        config.onboarding_version = ONBOARDING_VERSION;
+        assert!(upgrade_notice_pending(&config));
+        config.last_acknowledged_application_version = env!("CARGO_PKG_VERSION").into();
+        assert!(!upgrade_notice_pending(&config));
+        config.last_acknowledged_application_version = "1.1.0".into();
+        assert!(upgrade_notice_pending(&config));
+        config.onboarding_version = 0;
+        assert!(!upgrade_notice_pending(&config));
+    }
+    #[test]
     fn docker_auto_start_matches_platform() {
         let config: DesktopConfig = serde_json::from_str("{}").unwrap();
         assert_eq!(default_auto_start_docker(), !cfg!(target_os = "windows"));
@@ -2493,6 +3047,40 @@ mod tests {
             !cfg!(target_os = "windows")
         );
         assert_eq!(config.auto_start_docker, !cfg!(target_os = "windows"));
+    }
+    #[test]
+    fn preference_reset_preserves_workspace_and_runtime_identity() {
+        let mut config = DesktopConfig::default();
+        config.workspace_root = "/tmp/workbench-test".into();
+        config.workspace_id = "workspace-test".into();
+        config.onboarding_version = ONBOARDING_VERSION;
+        config.active_runtime_profile_id = "runtime-test".into();
+        config.runtime_profiles.push(RuntimeProfile {
+            id: "runtime-test".into(),
+            image_reference: ARM64_RUNTIME_IMAGE.into(),
+            verified: true,
+            ..RuntimeProfile::default()
+        });
+        config.theme = "dark".into();
+        config.resources.default_run_mode = "parallel".into();
+        config.resources.max_concurrent_runs = 8;
+        config.resources.memory_limit_gb = Some(48.0);
+        config.notifications_enabled = true;
+        config.auto_start_docker = false;
+
+        reset_desktop_preference_fields(&mut config);
+
+        assert_eq!(config.workspace_root, "/tmp/workbench-test");
+        assert_eq!(config.workspace_id, "workspace-test");
+        assert_eq!(config.onboarding_version, ONBOARDING_VERSION);
+        assert_eq!(config.active_runtime_profile_id, "runtime-test");
+        assert!(config.runtime_profiles[0].verified);
+        assert_eq!(config.theme, "light");
+        assert_eq!(config.resources.default_run_mode, "queued");
+        assert_eq!(config.resources.max_concurrent_runs, 2);
+        assert_eq!(config.resources.memory_limit_gb, None);
+        assert!(!config.notifications_enabled);
+        assert_eq!(config.auto_start_docker, default_auto_start_docker());
     }
     #[test]
     fn runtime_profile_migration_selects_the_platform_adapter() {
@@ -2532,6 +3120,45 @@ mod tests {
         assert!(!migrate_runtime_profiles(&mut config));
     }
     #[test]
+    fn notice_only_configuration_upgrade_keeps_verified_runtime_profile() {
+        let supported_adapter = if cfg!(target_os = "windows") {
+            "native"
+        } else {
+            "docker"
+        };
+        let mut config = DesktopConfig::default();
+        config.configuration_version = CONFIG_VERSION - 1;
+        config.active_runtime_profile_id = "runtime-profile".into();
+        config.runtime_profiles.push(RuntimeProfile {
+            id: "runtime-profile".into(),
+            adapter: supported_adapter.into(),
+            image_reference: default_runtime_image().into(),
+            image_digest: "sha256:verified".into(),
+            verified: true,
+            verified_at: "2026-09-19T00:00:00Z".into(),
+            ve_runtime_path: if cfg!(target_os = "windows") {
+                r"C:\VE".into()
+            } else {
+                String::new()
+            },
+            ve_home_path: if cfg!(target_os = "windows") {
+                r"C:\VisionEval".into()
+            } else {
+                String::new()
+            },
+            ..RuntimeProfile::default()
+        });
+        assert!(!migrate_runtime_profiles(&mut config));
+        assert!(config.runtime_profiles[0].verified);
+        assert_eq!(config.active_runtime_profile_id, "runtime-profile");
+    }
+    #[test]
+    fn current_apple_silicon_runtime_profile_is_not_treated_as_legacy() {
+        assert!(!runtime_image_needs_migration(ARM64_RUNTIME_IMAGE));
+        assert!(runtime_image_needs_migration(LEGACY_RUNTIME_IMAGE));
+        assert!(runtime_image_needs_migration(UNPATCHED_RC6_RUNTIME_IMAGE));
+    }
+    #[test]
     fn comparison_export_ids_are_restricted_to_generated_identifiers() {
         assert!(valid_export_operation_id(
             "comparison-export-change-summary-156fb9567c"
@@ -2549,6 +3176,10 @@ mod tests {
         assert_eq!(
             backend_export_spec("dashboard-pdf"),
             Some(("/api/comparison/export-dashboard-pdf", "pdf", "PDF"))
+        );
+        assert_eq!(
+            backend_export_spec("hypercube-case-zip"),
+            Some(("/api/hypercube-exports/download", "zip", "ZIP archive"))
         );
         assert_eq!(backend_export_spec("http://example.com/file"), None);
     }

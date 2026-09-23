@@ -73,7 +73,7 @@ class BundledAssetService:
         library_id = manifest.get("inputLibrary", {}).get("id", "PlanRVA MM")
         return {
             "id": PLANRVA_ASSET_ID,
-            "name": manifest.get("name", "PlanRVA MM Example"),
+            "name": manifest.get("name", "PlanRVA"),
             "available": self.manifest_path.is_file(),
             "inputLibraryInstalled": (self.workspace.input_library / library_id).is_dir(),
             "modelTemplateInstalled": (self.workspace.templates / template_id).is_dir(),
@@ -124,10 +124,15 @@ class BundledAssetService:
         write_json(self.workspace.settings_path, settings)
         self.workspace.record_asset_registration({
             "id": PLANRVA_ASSET_ID,
+            "type": "model-bundle",
             "version": manifest["version"],
             "manifestSha256": file_sha256(self.manifest_path),
             "installedAt": now_iso(),
             "automatic": automatic,
+            "assets": [
+                {"kind": "input-library", "id": library_id},
+                {"kind": "model-template", "id": template_id},
+            ],
         })
         result = {
             **self.status(),

@@ -1,4 +1,4 @@
-# PlanRVA MM example data notice
+# PlanRVA example data notice
 
 This bundled example contains the public PlanRVA VisionEval multimodal model and 52 scenario-input files: 51 CSV files plus `model_parameters.json`. It is included so VisionEval Workbench can be evaluated without first locating a separate model and InputLibrary.
 

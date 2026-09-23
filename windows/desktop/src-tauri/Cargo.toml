@@ -1,6 +1,6 @@
 [package]
 name = "visioneval-workbench"
-version = "1.0.0"
+version = "2.0.0"
 description = "Unified VisionEval scenario editor, runtime, and comparison desktop app"
 edition = "2021"
 
@@ -16,3 +16,9 @@ tauri-plugin-notification = "2"
 ureq = { version = "2", default-features = false }
 base64 = "0.22"
 trash = "5"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release.build-override]
+strip = false

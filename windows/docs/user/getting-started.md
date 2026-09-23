@@ -2,11 +2,11 @@
 
 ## First launch
 
-Choose where Workbench should keep its workspace. Use the suggested location or an empty recognizable folder separate from `VE_RUNTIME`. If a saved workspace is later moved or unavailable, Workbench asks you to locate it rather than creating a replacement.
+Choose where Workbench should keep its workspace. Use the suggested location or an empty recognizable folder separate from `VE_RUNTIME` and `VE_HOME`. An external SSD is supported when internal space is limited. If a saved workspace is later moved or unavailable, Workbench asks you to locate it rather than creating a replacement.
 
 ## Runtime setup
 
-Onboarding can connect the native runtime immediately or defer it. Follow [Connect VE_Runtime on Windows](setup.md) to select the `VE_RUNTIME` working folder, review the detected `VE_HOME` and `Rscript.exe`, and verify the connection.
+When no verified runtime is available, onboarding opens automatically. Follow [Connect VE_Runtime on Windows](setup.md) to detect or select the three independent paths, or choose **Install R 4.5.3 + VisionEval RC7** for a current-user installation. Administrator privileges are not required.
 
 Choose **Skip for now** if you only need to inspect inputs, edit projects, or view existing results. A verified connection is required before a run can start.
 

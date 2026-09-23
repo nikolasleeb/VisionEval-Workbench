@@ -27,4 +27,4 @@ Geo, Azone, Bzone, Czone, Marea, household, vehicle, and worker identifiers are 
 
 Projects record template and InputLibrary identities and fingerprints. Runs additionally record the project/scenario, app/runtime versions, image digest, timestamps, exit status, and result verification. Compare shows this provenance beside selectable results.
 
-An external baseline without matching provenance is labeled compatibility unverified. That warning does not necessarily mean the data is wrong; it means Workbench cannot prove that its assets/runtime match the project.
+An external baseline without matching provenance remains available as a read-only imported result, but cannot be selected as a project baseline because Workbench cannot prove that its assets match the project.

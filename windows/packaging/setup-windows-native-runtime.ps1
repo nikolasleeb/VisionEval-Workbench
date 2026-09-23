@@ -1,74 +1,120 @@
-param([string]$ToolsDirectory = (Join-Path (Split-Path $PSScriptRoot -Parent) ".tools"))
+param(
+    [string]$VeHome = (Join-Path $env:USERPROFILE "VE_Home"),
+    [string]$VeRuntime = (Join-Path $env:LOCALAPPDATA "VisionEval\VE_Runtime"),
+    [string]$DownloadDirectory = (Join-Path $env:LOCALAPPDATA "VisionEval\Workbench\downloads")
+)
 
 $ErrorActionPreference = "Stop"
-$projectRoot = Split-Path $PSScriptRoot -Parent
-$rVersion = "4.5.1"
-$releaseTag = "VE-40-RC6"
-$releaseCommit = "f7ef3389b5626daeba6c86eeda9d172a0f8cccc2"
-$patchId = "2026-08-03-composite-household-id-alignment"
-$runtimeArchiveName = "VE-Installer_WinLibrary-R4.5_2026-07-24.zip"
-$runtimeArchiveSha256 = "E07EEFA534F859DEA64941EB16929C5C0CC6876541C18D6C86673C3429A4730B"
-$rInstaller = Join-Path $ToolsDirectory "R-$rVersion-win.exe"
-$rRoot = Join-Path $ToolsDirectory "R-$rVersion"
-$rscript = Join-Path $rRoot "bin\Rscript.exe"
-$rExecutable = Join-Path $rRoot "bin\R.exe"
-$veRuntimeHome = Join-Path $ToolsDirectory "VisionEval"
-$veLibrary = Join-Path $veRuntimeHome "ve-lib\4.5"
-$sourceRoot = Join-Path $ToolsDirectory "VisionEval-4"
-$runtimeArchive = Join-Path $ToolsDirectory $runtimeArchiveName
+$rVersion = "4.5.3"
+$releaseTag = "VE-40-RC7"
+$releaseCommit = "7852dc58fad460ff279f5eebf4dd55fe191470ad"
+$rInstallerName = "R-$rVersion-win.exe"
+$rInstallerSha256 = "768AE31BB0B6056DEF5B1A9789A7DC49306BD037D69B0A99CDD90183AA0C1A31"
+$runtimeArchiveName = "VE-Installer_WinLibrary-R4.5_2026-09-07.zip"
+$runtimeArchiveSha256 = "01A3F58EE5EB0AB40113CC8835CA99AB1D060B89FF9B442B41C35CE93708155D"
 
-New-Item -ItemType Directory -Force -Path $ToolsDirectory | Out-Null
-if (-not (Test-Path -LiteralPath $rscript)) {
-    if (-not (Test-Path -LiteralPath $rInstaller)) {
-        Invoke-WebRequest "https://cran.r-project.org/bin/windows/base/old/$rVersion/R-$rVersion-win.exe" -OutFile $rInstaller
+function Get-CanonicalPath([string]$Path) {
+    $expanded = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Path))
+    if (Test-Path -LiteralPath $expanded) { $expanded = (Resolve-Path -LiteralPath $expanded).Path }
+    return $expanded.TrimEnd('\')
+}
+
+$VeHome = Get-CanonicalPath $VeHome
+$VeRuntime = Get-CanonicalPath $VeRuntime
+$homePrefix = "$($VeHome.ToLowerInvariant())\"
+$runtimePrefix = "$($VeRuntime.ToLowerInvariant())\"
+if ($VeHome.Equals($VeRuntime, [StringComparison]::OrdinalIgnoreCase) -or
+    $VeHome.ToLowerInvariant().StartsWith($runtimePrefix) -or
+    $VeRuntime.ToLowerInvariant().StartsWith($homePrefix)) {
+    throw "VE_HOME and VE_RUNTIME must be separate folders; neither can be inside the other."
+}
+
+$rRoot = Join-Path $env:LOCALAPPDATA "Programs\R\R-$rVersion"
+$rscript = @(
+    (Join-Path $rRoot "bin\Rscript.exe"),
+    (Join-Path $env:ProgramFiles "R\R-$rVersion\bin\Rscript.exe"),
+    (Join-Path $env:ProgramFiles "R\R-$rVersion\bin\x64\Rscript.exe")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+if (-not $rscript) { $rscript = Join-Path $rRoot "bin\Rscript.exe" }
+$rInstaller = Join-Path $DownloadDirectory $rInstallerName
+$runtimeArchive = Join-Path $DownloadDirectory $runtimeArchiveName
+$extractRoot = Join-Path $DownloadDirectory "VE-RC7-extracted"
+
+New-Item -ItemType Directory -Force -Path $DownloadDirectory | Out-Null
+$library = $null
+$stagedLibrary = $null
+$previousLibrary = $null
+$activatedLibrary = $false
+try {
+    if (-not (Test-Path -LiteralPath $rscript)) {
+        Invoke-WebRequest "https://cran.r-project.org/bin/windows/base/old/$rVersion/$rInstallerName" -OutFile $rInstaller
+        if ((Get-FileHash $rInstaller -Algorithm SHA256).Hash -ne $rInstallerSha256) {
+            throw "The R installer checksum does not match the certified manifest."
+        }
+        $arguments = "/CURRENTUSER /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$rRoot`""
+        $installed = Start-Process $rInstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
+        if ($installed.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $rscript)) {
+            throw "R $rVersion installation failed."
+        }
     }
-    $arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=`"$rRoot`""
-    $installed = Start-Process $rInstaller -ArgumentList $arguments -Wait -PassThru -WindowStyle Hidden
-    if ($installed.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $rscript)) { throw "R $rVersion installation failed." }
-}
-if (-not (Test-Path -LiteralPath (Join-Path $veLibrary "VEStart"))) {
-    if (-not (Test-Path -LiteralPath $runtimeArchive)) {
-        Invoke-WebRequest "https://github.com/VisionEval/VisionEval-4/releases/download/$releaseTag/$runtimeArchiveName" -OutFile $runtimeArchive
+
+    Invoke-WebRequest "https://github.com/VisionEval/VisionEval-4/releases/download/$releaseTag/$runtimeArchiveName" -OutFile $runtimeArchive
+    if ((Get-FileHash $runtimeArchive -Algorithm SHA256).Hash -ne $runtimeArchiveSha256) {
+        throw "The VisionEval runtime archive checksum does not match the certified manifest."
     }
-    if ((Get-FileHash $runtimeArchive -Algorithm SHA256).Hash -ne $runtimeArchiveSha256) { throw "The VisionEval runtime archive checksum does not match." }
-    New-Item -ItemType Directory -Force -Path $veLibrary | Out-Null
-    tar -xf $runtimeArchive -C $veLibrary
-}
-if (-not (Test-Path -LiteralPath (Join-Path $sourceRoot ".git"))) {
-    git clone --depth 1 --branch $releaseTag https://github.com/VisionEval/VisionEval-4.git $sourceRoot
-}
-if ((git -C $sourceRoot rev-parse HEAD).Trim() -ne $releaseCommit) { throw "VisionEval source is not the pinned RC6 commit." }
+    Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Expand-Archive -LiteralPath $runtimeArchive -DestinationPath $extractRoot
+    $veStart = Get-ChildItem -LiteralPath $extractRoot -Filter DESCRIPTION -Recurse -File |
+        Where-Object { $_.Directory.Name -eq "VEStart" } |
+        Select-Object -First 1
+    if (-not $veStart) { throw "The VisionEval archive does not contain VEStart." }
+    $packageRoot = $veStart.Directory.Parent.FullName
+    $libraryParent = Join-Path $VeHome "ve-lib"
+    $library = Join-Path $libraryParent "4.5"
+    $stagedLibrary = Join-Path $libraryParent (".4.5.installing-" + [guid]::NewGuid().ToString("N"))
+    $previousLibrary = Join-Path $libraryParent (".4.5.previous-" + [guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $libraryParent, $stagedLibrary, $VeRuntime, (Join-Path $VeRuntime "models") | Out-Null
+    Copy-Item -Path (Join-Path $packageRoot "*") -Destination $stagedLibrary -Recurse -Force
+    if (Test-Path -LiteralPath $library) { Move-Item -LiteralPath $library -Destination $previousLibrary }
+    Move-Item -LiteralPath $stagedLibrary -Destination $library
+    $activatedLibrary = $true
 
-$installedPatch = & $rscript --vanilla -e ".libPaths(c('$($veLibrary.Replace('\','/'))',.libPaths())); value<-packageDescription('VETravelDemandMM')[['VEAlignmentPatch']]; cat(if(is.null(value)) '' else value)" 2>$null
-if ($installedPatch -ne $patchId) {
-    & $rscript --vanilla (Join-Path $projectRoot "runtime\scripts\apply-household-id-prediction-ordering-patch.R") $sourceRoot
-    if ($LASTEXITCODE -ne 0) { throw "The household-ID prediction-ordering compatibility patch could not be applied." }
-    New-Item -ItemType Directory -Force -Path (Join-Path $sourceRoot "sources\optional\VETravelDemandMM\data") | Out-Null
-    & $rExecutable CMD INSTALL --no-multiarch "--library=$veLibrary" (Join-Path $sourceRoot "sources\optional\VETravelDemandMM")
-    if ($LASTEXITCODE -ne 0) { throw "The patched VETravelDemandMM package could not be installed." }
-}
-
-@"
+    $homeUnix = $VeHome.Replace('\', '/')
+    $runtimeUnix = $VeRuntime.Replace('\', '/')
+    $environment = "VE_HOME=`"$homeUnix`"`nVE_RUNTIME=`"$runtimeUnix`""
+    $environment | Set-Content -Encoding utf8 (Join-Path $VeRuntime ".Renviron")
+    $environment | Set-Content -Encoding utf8 (Join-Path $VeHome ".Renviron")
+    @"
+ve.home <- Sys.getenv("VE_HOME")
+ve.runtime <- Sys.getenv("VE_RUNTIME")
+.libPaths(c(file.path(ve.home, "ve-lib", "4.5"), .libPaths()))
+suppressPackageStartupMessages(library(VEStart))
+startVisionEval(ve.home=ve.home, ve.runtime=ve.runtime, overwrite=FALSE)
+"@ | Set-Content -Encoding utf8 (Join-Path $VeRuntime ".Rprofile")
+    "R version $rVersion" | Set-Content -Encoding utf8 (Join-Path $VeRuntime "r.version")
+    @"
 repository=https://github.com/VisionEval/VisionEval-4
 tag=$releaseTag
 commit=$releaseCommit
 r_version=$rVersion
-distribution=unofficial-workbench-native-runtime
-compatibility_patch=$patchId
-compatibility_patch_status=unofficial
-compatibility_patch_target=VETravelDemandMM::DoPredictions
-"@ | Set-Content -Encoding utf8 (Join-Path $veRuntimeHome "WORKBENCH-RELEASE")
-Set-Content -Encoding utf8 (Join-Path $veRuntimeHome "VisionEval.R") 'library(VEStart); startVisionEval(ve.home=getwd(), ve.runtime=Sys.getenv("VE_RUNTIME", getwd()), overwrite=FALSE)'
-$renvironPath = $veRuntimeHome.Replace('\', '/')
-@"
-VE_RUNTIME="$renvironPath"
-VE_HOME="$renvironPath"
-"@ | Set-Content -Encoding utf8 (Join-Path $veRuntimeHome ".Renviron")
-
-[Environment]::SetEnvironmentVariable("VISIONEVAL_RUNTIME_ADAPTER", "native", "User")
-[Environment]::SetEnvironmentVariable("VISIONEVAL_RUNTIME", $veRuntimeHome, "User")
-[Environment]::SetEnvironmentVariable("VE_RUNTIME", $veRuntimeHome, "User")
-[Environment]::SetEnvironmentVariable("VISIONEVAL_HOME", $veRuntimeHome, "User")
-[Environment]::SetEnvironmentVariable("VE_HOME", $veRuntimeHome, "User")
-[Environment]::SetEnvironmentVariable("RSCRIPT", $rscript, "User")
-Write-Host "Native VisionEval $releaseTag is ready at $veRuntimeHome. Restart Workbench to use it."
+distribution=official-visioneval-windows-library
+compatibility_patch=none
+"@ | Set-Content -Encoding utf8 (Join-Path $VeHome "WORKBENCH-RELEASE")
+    if (Test-Path -LiteralPath $previousLibrary) { Remove-Item -LiteralPath $previousLibrary -Recurse -Force }
+    Write-Host "VisionEval $releaseTag is ready."
+    Write-Host "VE_HOME=$VeHome"
+    Write-Host "VE_RUNTIME=$VeRuntime"
+    Write-Host "Rscript=$rscript"
+} catch {
+    if ($previousLibrary -and (Test-Path -LiteralPath $previousLibrary)) {
+        if ($library -and (Test-Path -LiteralPath $library)) { Remove-Item -LiteralPath $library -Recurse -Force }
+        Move-Item -LiteralPath $previousLibrary -Destination $library
+    } elseif ($activatedLibrary -and $library -and (Test-Path -LiteralPath $library)) {
+        Remove-Item -LiteralPath $library -Recurse -Force
+    }
+    throw
+} finally {
+    if ($stagedLibrary -and (Test-Path -LiteralPath $stagedLibrary)) { Remove-Item -LiteralPath $stagedLibrary -Recurse -Force }
+    Remove-Item -LiteralPath $rInstaller, $runtimeArchive -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+}

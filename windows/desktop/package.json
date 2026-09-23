@@ -1,10 +1,10 @@
 {
   "name": "visioneval-workbench-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "build:backend": "bash ../packaging/build-backend.sh",
+    "build:backend": "python ../packaging/build_backend.py --target-triple x86_64-pc-windows-msvc",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build"
   },

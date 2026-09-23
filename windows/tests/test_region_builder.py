@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.workbench.region_builder import DEFAULT_FAMPO_ID, RegionBuilderService, custom_region_identity
-from backend.workbench.region_packages import RegionPackageService, file_sha256
+from backend.workbench.region_builder import DEFAULT_FAMPO_ID, RegionBuilderService, region_code_from_name
+from backend.workbench.region_packages import RegionPackageService, file_sha256, package_manifest_type, package_root
 from backend.workbench.workspace import Workspace, WorkspaceError, read_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,17 +144,114 @@ def install_va_package(root: Path, workspace: Workspace, *, spatial: bool = Fals
     return packages, "virginia-test", "package:virginia-test"
 
 
+class UnpackedPackageTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def make_installable_package(self, root: Path) -> Path:
+        write(root / "data" / "input-library" / "library.csv", "Geo,Year,Value\n1,2024,1\n")
+        write(root / "data" / "regions.json", "{}\n")
+        write(root / "data" / "crosswalk.json", "{}\n")
+        write(root / "SOURCES.md", "# Sources\n")
+        files = []
+        for path in sorted(item for item in root.rglob("*") if item.is_file()):
+            files.append({"path": path.relative_to(root).as_posix(), "size": path.stat().st_size, "sha256": file_sha256(path)})
+        manifest = {
+            "schemaVersion": 1,
+            "type": "region-builder",
+            "id": "folder-test",
+            "name": "Folder test",
+            "version": "1.0.0",
+            "coverage": "Fixture",
+            "sourcesDocument": "SOURCES.md",
+            "inputLibrary": {"path": "data/input-library", "requiredFiles": []},
+            "builder": {"kind": "mpo-bzone-crosswalk", "regionsPath": "data/regions.json", "crosswalkPath": "data/crosswalk.json"},
+            "files": files,
+        }
+        write(root / "workbench-package.json", json.dumps(manifest))
+        return root
+
+    def test_accepts_manifest_at_selected_root(self):
+        write(self.root / "workbench-package.json", json.dumps({"type": "region-builder"}))
+        self.assertEqual(package_root(self.root), self.root.resolve())
+        self.assertEqual(package_manifest_type(self.root), "region-builder")
+
+    def test_accepts_one_download_wrapper_folder(self):
+        wrapper = self.root / "virginia-package-main"
+        write(wrapper / "workbench-package.json", json.dumps({"type": "region-builder"}))
+        self.assertEqual(package_root(self.root), wrapper.resolve())
+
+    def test_installs_from_one_download_wrapper_folder(self):
+        wrapper = self.make_installable_package(self.root / "virginia-package-main")
+        self.assertEqual(package_root(self.root), wrapper.resolve())
+        service = RegionPackageService(Workspace(self.root / "workspace"))
+        installed = service.install(self.root)
+        self.assertEqual(installed["id"], "folder-test")
+        self.assertTrue((service.workspace.region_packages / "folder-test" / "data" / "regions.json").is_file())
+
+    def test_rejects_folder_checksum_failure(self):
+        package = self.make_installable_package(self.root / "package")
+        write(package / "data" / "regions.json", '{"changed": true}\n')
+        with self.assertRaisesRegex(WorkspaceError, "size does not match|checksum does not match"):
+            RegionPackageService(Workspace(self.root / "workspace")).install(package)
+
+    def test_rejects_inventory_symlink_that_escapes_folder(self):
+        package = self.make_installable_package(self.root / "package")
+        outside = self.root / "outside.json"
+        write(outside, "{}\n")
+        target = package / "data" / "regions.json"
+        target.unlink()
+        try:
+            target.symlink_to(outside)
+        except OSError as exc:
+            self.skipTest(f"Symbolic links require Windows Developer Mode or elevation: {exc}")
+        with self.assertRaisesRegex(WorkspaceError, "unsafe file path"):
+            RegionPackageService(Workspace(self.root / "workspace")).install(package)
+
+    def test_rejects_missing_ambiguous_and_deep_manifests(self):
+        with self.assertRaisesRegex(WorkspaceError, "exactly one"):
+            package_root(self.root)
+        write(self.root / "one" / "workbench-package.json", "{}")
+        write(self.root / "two" / "workbench-package.json", "{}")
+        with self.assertRaisesRegex(WorkspaceError, "exactly one"):
+            package_root(self.root)
+        shutil.rmtree(self.root / "two")
+        deep = self.root / "one" / "nested"
+        (deep).mkdir()
+        shutil.move(self.root / "one" / "workbench-package.json", deep / "workbench-package.json")
+        with self.assertRaisesRegex(WorkspaceError, "root or in one wrapper"):
+            package_root(self.root)
+
+    def test_rejects_symlinked_manifest(self):
+        outside = self.root.parent / f"{self.root.name}-manifest.json"
+        write(outside, json.dumps({"type": "region-builder"}))
+        try:
+            try:
+                (self.root / "workbench-package.json").symlink_to(outside)
+            except OSError as exc:
+                self.skipTest(f"Symbolic links require Windows Developer Mode or elevation: {exc}")
+            with self.assertRaisesRegex(WorkspaceError, "unsafe|exactly one|root or in one wrapper"):
+                package_root(self.root)
+        finally:
+            outside.unlink(missing_ok=True)
+
+
 class RegionBuilderTests(unittest.TestCase):
-    def test_custom_region_identity_requires_deliberate_name_and_code(self):
-        self.assertIsNone(custom_region_identity({"geographyMode": "official"}))
-        with self.assertRaisesRegex(WorkspaceError, "Region name is required"):
-            custom_region_identity({"geographyMode": "custom", "regionName": "", "regionCode": "custom"})
-        with self.assertRaisesRegex(WorkspaceError, "Custom region code is required"):
-            custom_region_identity({"geographyMode": "custom", "regionName": "Custom", "regionCode": ""})
-        self.assertEqual(
-            custom_region_identity({"geographyMode": "custom", "regionName": "My Region", "regionCode": "my-region"}),
-            ("My Region", "my_region"),
-        )
+    def test_state_boundary_dissolves_adjacent_polygon_edges(self):
+        square = lambda x0, x1: [[[x0, 0], [x1, 0], [x1, 1], [x0, 1], [x0, 0]]]
+        azones = {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": square(0, 1)}},
+            {"type": "Feature", "properties": {}, "geometry": {"type": "Polygon", "coordinates": square(1, 2)}},
+        ]}
+        boundary = RegionBuilderService._derived_state_boundary(azones)
+        segments = boundary["geometry"]["coordinates"]
+        self.assertTrue(segments)
+        self.assertFalse(any(first[0] == second[0] == 1 for first, second in segments))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -202,6 +299,19 @@ class RegionBuilderTests(unittest.TestCase):
         self.assertTrue(self.workspace.validate_template(template)["valid"])
         manifest = read_json(template / "region_builder_manifest.json", {})
         self.assertEqual(manifest["selection"]["bzones"], ["101"])
+
+    def test_region_code_is_derived_from_the_visible_name(self):
+        self.assertEqual(region_code_from_name("  Hénrico   County: Study Area!  "), "henrico_county_study_area")
+        self.assertEqual(region_code_from_name("地域計画"), region_code_from_name("地域計画"))
+        self.assertRegex(region_code_from_name("地域計画"), r"^region_[0-9a-f]{12}$")
+        result = self.service.build({
+            "sourceTemplateId": self.template["id"],
+            "regionName": "Henrico County Study Area",
+            "stateAbbr": "VA",
+            "selectedBzones": ["101"],
+        })
+        template = self.workspace.templates / result["modelTemplate"]["id"]
+        self.assertIn("Region: henrico_county_study_area", (template / "visioneval.cnf").read_text(encoding="utf-8"))
 
     def test_unmatched_bzone_is_rejected(self):
         with self.assertRaisesRegex(WorkspaceError, "not in defs/geo.csv"):
@@ -276,8 +386,6 @@ class RegionBuilderTests(unittest.TestCase):
             "sourceLibraryId": source_id,
             "regionId": DEFAULT_FAMPO_ID,
             "geographyMode": "custom",
-            "regionName": "Custom Fredericksburg Region",
-            "regionCode": "custom_fredericksburg",
             "selectedBzones": ["511770001001", "511790001001"],
         })
         self.assertEqual(preview["selection"]["method"], "custom-bzone-selection")
@@ -294,8 +402,6 @@ class RegionBuilderTests(unittest.TestCase):
             "sourceLibraryId": source_id,
             "regionId": DEFAULT_FAMPO_ID,
             "geographyMode": "custom",
-            "regionName": "Accomack Test Region",
-            "regionCode": "accomack_test",
             "selectedBzones": ["510010001001"],
         })
         self.assertEqual(preview["selection"]["method"], "custom-bzone-selection")
@@ -383,7 +489,7 @@ class RegionBuilderTests(unittest.TestCase):
     def test_spatial_crosswalk_rejects_a_mismatched_input_library(self):
         packages, package_id, source_id = install_va_package(self.root, self.workspace, spatial=True, missing_bzone=True)
         service = RegionBuilderService(self.workspace, self.root, packages)
-        with self.assertRaisesRegex(WorkspaceError, "absent from this InputLibrary"):
+        with self.assertRaisesRegex(WorkspaceError, "absent from this Input Library"):
             service.preview({"packageId": package_id, "sourceLibraryId": source_id, "regionId": DEFAULT_FAMPO_ID})
 
     def test_fampo_preview_resolves_whole_jurisdiction_membership(self):
@@ -438,6 +544,32 @@ class RegionBuilderTests(unittest.TestCase):
         self.assertEqual(manifest["selection"]["method"], "official-boundary-bzone-crosswalk")
         self.assertEqual(manifest["selection"]["boundary"]["sources"]["mpo"]["provider"], "Virginia Department of Transportation")
         self.assertEqual(manifest["selection"]["boundary"]["boundaryCount"], 2)
+
+    def test_model_bundle_installed_scope_has_a_clean_read_only_name(self):
+        service = RegionBuilderService(self.workspace, self.root)
+        source = {"id": "planrva-mm", "name": "PlanRVA", "coverage": "PlanRVA"}
+        scope = {
+            "template": {"name": "PlanRVA MM"},
+            "azoneByFips": {"51001": "Alpha County", "51003": "Beta County"},
+            "bzones": {"510010001001", "510030001001"},
+            "regionCode": "planrva",
+            "state": "VA",
+        }
+        with patch.object(service, "_model_bundle_source", return_value=source), patch.object(service, "_model_scope", return_value=scope):
+            result = service.regions("planrva-mm")
+        region = result["regions"][0]
+        self.assertEqual(region["name"], "PlanRVA installed scope")
+        self.assertEqual(region["shortName"], "PlanRVA")
+        self.assertEqual(region["defaultRegionName"], "PlanRVA Subregion")
+        self.assertEqual(region["selectedCount"], 2)
+
+    def test_model_bundle_preview_and_build_require_custom_geography(self):
+        service = RegionBuilderService(self.workspace, self.root)
+        with patch.object(service, "_model_bundle_source", return_value={"id": "planrva-mm"}):
+            with self.assertRaisesRegex(WorkspaceError, "Build your own region"):
+                service.preview({"packageId": "planrva-mm", "geographyMode": "official"})
+            with self.assertRaisesRegex(WorkspaceError, "Build your own region"):
+                service.build({"packageId": "planrva-mm", "geographyMode": "official"})
 
 
 if __name__ == "__main__":

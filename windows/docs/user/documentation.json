@@ -1,6 +1,26 @@
 {
-  "schemaVersion": 1,
-  "documentationVersion": "1.0.0-windows",
-  "title": "VisionEval Workbench User Guide",
-  "entrypoint": "README.md"
+  "schemaVersion": 2,
+  "documentationVersion": "2.0.0-windows-rev3",
+  "title": "VisionEval Workbench 2.0 Documentation",
+  "entrypoint": "VisionEval-Workbench-2.0-Windows-User-Guide.pdf",
+  "documents": [
+    {
+      "id": "user-guide",
+      "title": "VisionEval Workbench 2.0 Windows User Guide",
+      "description": "The complete Windows reference for Explore, Create, Run, Compare, Hypercube analysis and export, settings, storage, and troubleshooting.",
+      "filename": "VisionEval-Workbench-2.0-Windows-User-Guide.pdf",
+      "format": "pdf",
+      "pageCount": 20,
+      "version": "2.0"
+    },
+    {
+      "id": "whats-new",
+      "title": "What Is New in VisionEval Workbench 2.0 for Windows",
+      "description": "A concise overview of the Windows-native 2.0 workflow and its serialized Hypercube runtime.",
+      "filename": "VisionEval-Workbench-2.0-Whats-New-Windows.pdf",
+      "format": "pdf",
+      "pageCount": 1,
+      "version": "2.0"
+    }
+  ]
 }
