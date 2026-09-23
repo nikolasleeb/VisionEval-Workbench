@@ -1,135 +1,49 @@
-name: Publish Apple Silicon macOS assets for release 2.0.0
+name: Verify prebuilt Apple Silicon macOS 2.0.0 release
 
+# The 2.0.0 DMG was built, Developer-ID signed, notarized, and stapled on the
+# release Mac. Do not rebuild or re-sign it on a GitHub runner: that would
+# produce a different, unnotarized binary from the verified release artifact.
 on:
   workflow_dispatch:
-    inputs:
-      approved_publication:
-        description: Build verified Apple Silicon assets and publish them to v2.0.0
-        required: true
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
-
-concurrency:
-  group: workbench-release-2.0.0-macos-arm64
-  cancel-in-progress: false
+  contents: read
 
 jobs:
-  macos-arm64:
-    if: inputs.approved_publication == true
+  verify-macos-arm64:
     runs-on: macos-15
-    timeout-minutes: 120
-    defaults:
-      run:
-        working-directory: macos
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DMG_NAME: VisionEval-Workbench-v2.0.0-macos-arm64.dmg
+      DMG_SHA256: dba9c6cbe6c01917142abac912f292d84700fdb71924639967f3f58b0e190c65
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-          cache-dependency-path: macos/packaging/requirements-backend.txt
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: macos/desktop/package-lock.json
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - run: python3 -m pip install -r packaging/requirements-backend.txt
-      - run: npm ci
-        working-directory: macos/desktop
-      - name: Validate pinned Apple Silicon source
-        run: |
-          git fetch origin main
-          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
-          test "$(uname -m)" = "arm64"
-          test "$(python3 -c 'import json; print(json.load(open("desktop/src-tauri/tauri.conf.json"))["version"])')" = "2.0.0"
-          python3 packaging/build_bundled_assets.py --check
-          python3 packaging/build_user_guide.py --check
-          python3 packaging/check_documentation.py
-          python3 packaging/check_renderer_assets.py
-          python3 -m unittest discover -s tests
-          node --check public/app.js
-          node tests/polygon-labels.test.js
-          node tests/extrusion-borders.test.js
-          python3 packaging/build_backend.py --comparison-map-3d enabled --documentation-source docs/user-macos
-          cargo fmt --check --manifest-path desktop/src-tauri/Cargo.toml
-          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target aarch64-apple-darwin
-      - name: Build ARM64 application
-        env:
-          WORKBENCH_DOCUMENTATION_SOURCE: docs/user-macos
-          WORKBENCH_COMPARISON_MAP_3D: enabled
-        run: npm run tauri:build -- --target aarch64-apple-darwin --bundles app
-        working-directory: macos/desktop
-      - name: Verify, sign, and package Apple Silicon DMG
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download the existing release candidate
         run: |
           mkdir -p release-assets
-          gh release download v2.0.0 --repo "${{ github.repository }}" --pattern runtime-index.json --dir release-assets
-          python3 packaging/build_update_manifest.py --runtime-index release-assets/runtime-index.json --output release-assets/update-manifest.json
-          SOURCE_APP="$(find desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos -name 'VisionEval Workbench.app' -type d -print -quit)"
-          test -n "$SOURCE_APP"
-          APP_EXECUTABLE="$SOURCE_APP/Contents/MacOS/visioneval-workbench"
-          SIDECAR="$(find "$SOURCE_APP/Contents" -type f -name 'visioneval-workbench-backend*' -print -quit)"
+          gh release download v2.0.0 --repo "${{ github.repository }}" --pattern "$DMG_NAME" --dir release-assets
+      - name: Verify checksum, notarization, signature, and architecture
+        run: |
+          set -euo pipefail
+          DMG="release-assets/$DMG_NAME"
+          test "$(shasum -a 256 "$DMG" | awk '{print $1}')" = "$DMG_SHA256"
+          xcrun stapler validate "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose=4 "$DMG"
+          MOUNT_ROOT="$(mktemp -d)"
+          trap 'hdiutil detach "$MOUNT_ROOT" >/dev/null 2>&1 || true; rmdir "$MOUNT_ROOT"' EXIT
+          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" "$DMG"
+          APP="$MOUNT_ROOT/VisionEval Workbench.app"
+          test -d "$APP"
+          test -L "$MOUNT_ROOT/Applications"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          spctl --assess --type execute --verbose=4 "$APP"
+          xcrun stapler validate "$APP"
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep 'Authority=Developer ID Application: Nikolas Lee-Bishop (R5T9LB7RHK)'
+          codesign -dv --verbose=4 "$APP" 2>&1 | grep 'flags=.*runtime'
+          APP_EXECUTABLE="$APP/Contents/MacOS/visioneval-workbench"
+          SIDECAR="$(find "$APP/Contents" -type f -name 'visioneval-workbench-backend*' -print -quit)"
           test -n "$SIDECAR"
           file "$APP_EXECUTABLE" | grep arm64
           file "$SIDECAR" | grep arm64
           if file "$APP_EXECUTABLE" "$SIDECAR" | grep -q x86_64; then exit 1; fi
-          codesign --force --deep --sign - "$SOURCE_APP"
-          codesign --verify --deep --strict --verbose=2 "$SOURCE_APP"
-          DMG_ROOT="$(mktemp -d)"
-          ditto "$SOURCE_APP" "$DMG_ROOT/VisionEval Workbench.app"
-          ln -s /Applications "$DMG_ROOT/Applications"
-          hdiutil create -volname "VisionEval Workbench 2.0.0 Apple Silicon" -srcfolder "$DMG_ROOT" -ov -format UDZO release-assets/VisionEval-Workbench-v2.0.0-macos-arm64.dmg
-          MOUNT_ROOT="$(mktemp -d)"
-          hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT_ROOT" release-assets/VisionEval-Workbench-v2.0.0-macos-arm64.dmg
-          test -d "$MOUNT_ROOT/VisionEval Workbench.app"
-          test -L "$MOUNT_ROOT/Applications"
-          codesign --verify --deep --strict "$MOUNT_ROOT/VisionEval Workbench.app"
-          file "$MOUNT_ROOT/VisionEval Workbench.app/Contents/MacOS/visioneval-workbench" | grep arm64
-          hdiutil detach "$MOUNT_ROOT"
-      - name: Package exact Apple Silicon source snapshot
-        run: |
-          mkdir -p staging/VisionEval-Workbench-v2.0.0-macos-source
-          rsync -a --exclude node_modules --exclude target --exclude build --exclude dist --exclude release-assets --exclude staging --exclude __pycache__ --exclude '*.pyc' --exclude .DS_Store ./ staging/VisionEval-Workbench-v2.0.0-macos-source/
-          ditto -c -k --keepParent staging/VisionEval-Workbench-v2.0.0-macos-source release-assets/VisionEval-Workbench-v2.0.0-macos-source.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos-arm64-release
-          path: |
-            macos/release-assets/VisionEval-Workbench-v2.0.0-macos-arm64.dmg
-            macos/release-assets/VisionEval-Workbench-v2.0.0-macos-source.zip
-            macos/release-assets/update-manifest.json
-          if-no-files-found: error
-
-  attach-to-release:
-    if: inputs.approved_publication == true
-    needs: macos-arm64
-    runs-on: ubuntu-latest
-    env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: macos-arm64-release
-          path: release-assets
-      - name: Verify Apple Silicon release assets
-        run: |
-          test -f release-assets/VisionEval-Workbench-v2.0.0-macos-arm64.dmg
-          test -f release-assets/VisionEval-Workbench-v2.0.0-macos-source.zip
-          test -f release-assets/update-manifest.json
-      - name: Replace only Apple Silicon assets and refresh release notes
-        run: |
-          if gh release view v2.0.0 --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload v2.0.0 release-assets/* --repo "${{ github.repository }}" --clobber
-          else
-            gh release create v2.0.0 release-assets/* --repo "${{ github.repository }}" --title "VisionEval Workbench 2.0.0" --notes-file RELEASE_NOTES.md --draft
-          fi
