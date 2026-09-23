@@ -8,7 +8,7 @@ Version 2.0.0 brings a complete Hypercube workflow, improved scenario editing an
 - **Windows 11 x64:** `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` — native VisionEval execution. Connect an existing compatible R and VE-40-RC7 installation or use the optional current-user runtime setup. The installer is **unsigned**; Windows SmartScreen may display an unknown-publisher warning.
 - **Asset packages:** `planrva-2.0.zip`, `virginia-mpo-regions-2.0.zip`, and `wppdc-2.0.zip` are installed separately through **Settings → Assets**.
 
-The [v2.0.0 release page](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0) lists SHA-256 checksums for every download. GitHub also supplies source archives for the release tag. The runtime index is published separately with the `runtime-VE-40-RC7` metadata release.
+Download the installers and optional packages from the [v2.0.0 release page](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0). GitHub also supplies source archives for the release tag. The runtime index is published separately with the `runtime-VE-40-RC7` metadata release.
 
 ## New in Version 2
 
