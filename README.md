@@ -2,6 +2,15 @@
 
 VisionEval Workbench is an unofficial desktop application that brings the main steps of a VisionEval project into one place. It helps planners and analysts inspect model inputs, create scenarios, run models, and compare completed results without manually editing prepared model folders.
 
+## Get Version 2.0
+
+| Computer | Download | Runtime |
+|---|---|---|
+| Apple Silicon Mac | [Download the macOS installer (DMG)](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/VisionEval-Workbench-v2.0.0-macos-arm64.dmg) | Docker Desktop and the verified ARM64 Workbench runtime |
+| Windows 11 x64 | [Download the Windows installer (EXE)](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/VisionEval-Workbench-v2.0.0-windows-x64-setup.exe) | Native VisionEval VE-40-RC7, existing or installed through Workbench setup |
+
+See the [Version 2.0 release page](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0) for what's new and the optional regional packages. Version 2.0 does not include an Intel Mac installer. The Windows installer is unsigned, so Windows SmartScreen may show an unknown-publisher warning; the macOS app is Developer ID signed and notarized.
+
 ## Why it was created
 
 VisionEval is powerful, but a complete workflow normally involves many folders, CSV files, scripts, runtime settings, and result files. Workbench was created to make that process easier to understand and repeat. It keeps the application, your workspace, regional packages, model runs, and results separate so the original source files are not changed.
@@ -16,20 +25,15 @@ VisionEval is powerful, but a complete workflow normally involves many folders, 
 
 ## Supported editions
 
-| Edition | Supported system | Installer | VisionEval runtime |
-|---|---|---|---|
-| Windows | Windows 11 x64 | `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` | Existing native VisionEval VE-40-RC7 and compatible R, or the optional current-user runtime setup |
-| Apple Silicon Mac | macOS 12 or newer | `VisionEval-Workbench-v2.0.0-macos-arm64.dmg` | Docker Desktop with the verified ARM64 Workbench runtime |
-
-Version 2.0 does not include an Intel Mac installer. Earlier Intel releases remain available in [past releases](https://github.com/nikolasleeb/VisionEval-Workbench/releases).
+The current release supports Windows 11 x64 and Apple Silicon Macs running macOS 12 or newer. Earlier Intel releases remain available in [past releases](https://github.com/nikolasleeb/VisionEval-Workbench/releases).
 
 The editions are maintained separately because their runtime setup and operating-system integration differ. Their source code is available in the [`windows`](windows), [`macos`](macos), and [`intel`](intel) folders.
 
 ## Download and install
 
-Go to the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
+Use the direct installer links above, or browse the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
 
-- **Windows:** download `VisionEval-Workbench-v2.0.0-windows-x64-setup.exe` and run the installer. Workbench can connect to an existing native runtime or offer the verified current-user R 4.5.3 and VisionEval VE-40-RC7 setup. The installer is unsigned, so Windows SmartScreen may show an unknown-publisher warning. Verify its SHA-256 in the release notes before deciding whether to run it.
+- **Windows:** run the installer. Workbench can connect to an existing native runtime or offer the verified current-user R 4.5.3 and VisionEval VE-40-RC7 setup. The installer is unsigned, so Windows SmartScreen may show an unknown-publisher warning. Download it only from this official release and review the publisher warning before proceeding.
 - **Apple Silicon Mac:** download `VisionEval-Workbench-v2.0.0-macos-arm64.dmg`, open it, and drag **VisionEval Workbench** to **Applications**. The app is Developer ID signed and Apple notarized. Install Docker Desktop for Apple silicon and follow the runtime setup in Workbench.
 
 The v2.0 tag includes the complete Mac and Windows source. GitHub provides source ZIP and TAR archives automatically.
@@ -38,9 +42,9 @@ The v2.0 tag includes the complete Mac and Windows source. GitHub provides sourc
 
 The release includes three optional platform-neutral packages:
 
-- `planrva-2.0.zip` provides the PlanRVA model template and matching InputLibrary.
-- `virginia-mpo-regions-2.0.zip` provides Virginia MPO regional data and Region Builder support.
-- `wppdc-2.0.zip` provides the WPPDC regional package.
+- [PlanRVA package](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/planrva-2.0.zip) provides the model template and matching InputLibrary.
+- [Virginia MPO regions package](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/virginia-mpo-regions-2.0.zip) provides regional data and Region Builder support.
+- [WPPDC package](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/wppdc-2.0.zip) provides the WPPDC regional package.
 
 Do not unzip these packages. In Workbench, open **Settings → Assets**, choose the downloaded ZIP, review its information, and install it into your workspace.
 
