@@ -72,6 +72,33 @@ class UpdateCheckTests(unittest.TestCase):
         self.assertIn("updateChecks", stored)
         self.assertNotIn("checkVisionEvalUpdates", stored)
 
+    def test_windows_update_uses_windows_message_and_installer(self):
+        installer_url = (
+            "https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/"
+            "v2.0.1/VisionEval-Workbench-v2.0.1-windows-x64-setup.exe"
+        )
+        release = {
+            "tag_name": "v2.0.1", "draft": False, "prerelease": False,
+            "html_url": "https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.1",
+            "assets": [
+                {"name": "VisionEval-Workbench-v2.0.1-macos-arm64.dmg", "browser_download_url": self.download_url},
+                {"name": "VisionEval-Workbench-v2.0.1-windows-x64-setup.exe", "browser_download_url": installer_url},
+            ],
+        }
+        with patch("backend.workbench.update_checks._platform_name", return_value="windows"), patch(
+            "backend.workbench.update_checks._architecture", return_value="x86_64"
+        ):
+            service = UpdateCheckService(
+                self.workspace, "2.0.0", "VE-40-RC7", lambda: "", "native",
+                http_get=lambda _url: [release],
+            )
+        result = service.check(force=True, sources=["workbench"])["statuses"]["workbench"]
+        self.assertEqual(result["status"], "update_available")
+        self.assertEqual(result["message"], "VisionEval Workbench 2.0.1 is available for Windows.")
+        self.assertNotIn("Mac", result["message"])
+        self.assertEqual(result["url"], installer_url)
+        self.assertEqual(result["releaseNotesUrl"], release["html_url"])
+
     def test_missing_runtime_is_reported_as_install_required(self):
         releases, manifest, vision = self.responses()
         def fetch(url):

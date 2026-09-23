@@ -258,3 +258,38 @@ native execution.
 
 This candidate is **UNSIGNED**. Windows SmartScreen may show an unknown-publisher
 warning. No tag was created and nothing was published.
+
+## September 23 update-message correction
+
+- Corrected the update-available notice from “available for this Mac” to
+  “available for Windows” in the Windows backend only. The current notice,
+  release URL, offline behavior, and Windows asset selection are unchanged.
+- A focused Windows/x64 test verifies the exact message, selection of the
+  Windows setup executable over a macOS asset, and the release-notes URL.
+- Focused update checks: 8 passed. Complete Python suite: 393 passed, 18
+  expected skips. JavaScript syntax and 80 frontend contracts passed (2
+  expected skips). `cargo fmt --check` and `git diff --check` passed. The
+  previously built Rust test executable passed 17 tests; a fresh `cargo test`
+  link was unavailable after the build-only Windows SDK/LLVM tools were
+  removed during the approved SSD cleanup. Rust source was not changed.
+- Rebuilt the PyInstaller backend and repackaged the unchanged desktop binary
+  as a 15,674,956-byte, unsigned Windows x64 NSIS installer with SHA-256
+  `a905f4230f2cfb28261418a54530a7524790b406a653198fcfc328120bd6fc57`.
+  The newly packaged backend started from its build output and passed the
+  `/api/health` check.
+- An initial same-version silent install without `/UPDATE` returned exit code 0
+  but left the old installed backend in place. Reinstalling after Workbench was
+  closed with `/S /UPDATE` succeeded; the installed backend SHA-256 matched the
+  newly built PyInstaller sidecar exactly
+  (`8ab4680ec1d5ae48e27611fc91e1b02a5c699f12a9ebdf86f2d6fcd3a53a4a8a`).
+  The pre-reinstall app completed a live update check, reporting the current
+  2.0.0 message against the published 1.0.0 release. No newer public release
+  exists to display the corrected update-available sentence in the installed
+  UI; that path is covered by the new focused test. At the user's request, the
+  reinstalled app was not launched again for further UI smoke testing.
+- The prior uploaded draft installer, SHA-256
+  `6af29f895c8b6eab9446d686af868ba37bbeeb129be3d9f3154af1c29ef158ef`,
+  is superseded by the corrected SSD release candidate and preserved separately
+  for rollback. Neither installer is signed; no release was tagged or published
+  in this follow-up. The uploaded draft asset still requires replacement by
+  Mac Codex before publication.

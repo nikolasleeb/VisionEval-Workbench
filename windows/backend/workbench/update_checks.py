@@ -237,7 +237,7 @@ class UpdateCheckService:
             installed=self.app_version, available=available or self.app_version,
             url=str(asset.get("browser_download_url") or release.get("html_url") or ""),
             release_notes_url=str(release.get("html_url") or ""),
-            message=(f"VisionEval Workbench {available} is available for this Mac." if update else "VisionEval Workbench is up to date."),
+            message=(f"VisionEval Workbench {available} is available for Windows." if update else "VisionEval Workbench is up to date."),
         )
 
     def _check_visioneval(self) -> dict[str, Any]:
