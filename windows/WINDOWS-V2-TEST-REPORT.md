@@ -277,14 +277,19 @@ warning. No tag was created and nothing was published.
   `a905f4230f2cfb28261418a54530a7524790b406a653198fcfc328120bd6fc57`.
   The newly packaged backend started from its build output and passed the
   `/api/health` check.
-- A same-version silent install returned exit code 0 but did not replace the
-  existing installed backend binary. The installed app launched and completed
-  a live update check, reporting the current 2.0.0 message against the
-  published 1.0.0 release; because no newer public release exists, the
-  update-available wording could not be observed in that installed UI.
-  Therefore the replacement installer is packaged and source-tested, but its
-  same-version reinstall behavior and updated installed UI remain unverified.
+- An initial same-version silent install without `/UPDATE` returned exit code 0
+  but left the old installed backend in place. Reinstalling after Workbench was
+  closed with `/S /UPDATE` succeeded; the installed backend SHA-256 matched the
+  newly built PyInstaller sidecar exactly
+  (`8ab4680ec1d5ae48e27611fc91e1b02a5c699f12a9ebdf86f2d6fcd3a53a4a8a`).
+  The pre-reinstall app completed a live update check, reporting the current
+  2.0.0 message against the published 1.0.0 release. No newer public release
+  exists to display the corrected update-available sentence in the installed
+  UI; that path is covered by the new focused test. At the user's request, the
+  reinstalled app was not launched again for further UI smoke testing.
 - The prior uploaded draft installer, SHA-256
   `6af29f895c8b6eab9446d686af868ba37bbeeb129be3d9f3154af1c29ef158ef`,
-  is superseded only after the replacement is installed and accepted. Neither
-  installer is signed; no release was tagged or published in this follow-up.
+  is superseded by the corrected SSD release candidate and preserved separately
+  for rollback. Neither installer is signed; no release was tagged or published
+  in this follow-up. The uploaded draft asset still requires replacement by
+  Mac Codex before publication.
