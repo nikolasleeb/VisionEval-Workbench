@@ -77,6 +77,25 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(runtime.adapter, "native")
             self.assertEqual(runtime.max_active_runs, 1)
 
+    def test_native_identity_is_stable_and_changes_with_installed_files(self):
+        with tempfile.TemporaryDirectory() as directory, patch("backend.workbench.runtime.platform.system", return_value="Windows"), patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
+            root = Path(directory)
+            runtime = RuntimeManager(Workspace(root / "workspace"), runner=FakeRunner())
+            home, ve_runtime, rscript = root / "VE_Home", root / "VE_Runtime", root / "Rscript.exe"
+            description = home / "ve-lib" / "4.5" / "VEStart" / "DESCRIPTION"
+            description.parent.mkdir(parents=True)
+            description.write_text(f"Package: VEStart\nVersion: 4.0.0\nVECommit: {RC7_RELEASE_COMMIT}\n", encoding="utf-8")
+            ve_runtime.mkdir()
+            rscript.write_bytes(b"Rscript fixture")
+            runtime.native_home, runtime.native_runtime, runtime.rscript = home, ve_runtime, str(rscript)
+            first = runtime.image_digest()
+            self.assertTrue(first.startswith("native:sha256:"))
+            self.assertEqual(first, runtime.image_digest())
+            rscript.write_bytes(b"changed Rscript fixture")
+            self.assertNotEqual(first, runtime.image_digest())
+            description.write_text("Package: VEStart\nVECommit: incorrect\n", encoding="utf-8")
+            self.assertEqual(runtime.image_digest(), "")
+
     def test_native_discovery_reads_separate_runtime_home_and_r_version(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -768,7 +787,7 @@ class RuntimeTests(unittest.TestCase):
                 "runIds": [],
             })
             runtime = RuntimeManager(workspace, runner=FakeRunner())
-            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value="sha256:fixture"), patch.object(workspace, "current_result", side_effect=lambda _project, variation_id, _digest: {"id": "baseline"} if variation_id == "baseline" else None):
+            with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value="sha256:fixture"), patch.object(workspace, "current_result", side_effect=lambda _project, variation_id, _digest, _home: {"id": "baseline"} if variation_id == "baseline" else None):
                 batch = runtime.create_batch(project_id, ["variation-two", "variation-four"], False, "parallel")
 
             self.assertEqual([job["variationId"] for job in batch["jobs"]], ["variation-two", "variation-four"])

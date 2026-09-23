@@ -60,6 +60,31 @@ def physical_memory_bytes() -> int:
         return 0
 
 
+def available_memory_bytes() -> int:
+    """Return current available RAM on Windows for advisory resource estimates."""
+    if os.name != "nt":
+        return 0
+    try:
+        import ctypes
+
+        class MemoryStatus(ctypes.Structure):
+            _fields_ = [
+                ("length", ctypes.c_ulong), ("memory_load", ctypes.c_ulong),
+                ("total_physical", ctypes.c_ulonglong), ("available_physical", ctypes.c_ulonglong),
+                ("total_page_file", ctypes.c_ulonglong), ("available_page_file", ctypes.c_ulonglong),
+                ("total_virtual", ctypes.c_ulonglong), ("available_virtual", ctypes.c_ulonglong),
+                ("available_extended_virtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatus()
+        status.length = ctypes.sizeof(status)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.available_physical)
+    except (AttributeError, OSError, ValueError):
+        pass
+    return 0
+
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -497,6 +522,7 @@ class Workspace:
             "workspaceTotalBytes": disk.total,
             "workspaceSafetyReserveBytes": max(10 * 1024 ** 3, int(disk.total * 0.20)),
             "physicalMemoryBytes": memory,
+            "availableMemoryBytes": available_memory_bytes(),
             "limitedMemoryAdvisory": bool(memory and memory < 16 * 1024 ** 3),
             "limitedMemoryThresholdBytes": 16 * 1024 ** 3,
             "categories": categories,
@@ -1238,8 +1264,42 @@ class Workspace:
         job = read_json(self.runs / run_id / "job.json", {})
         return str(job.get("imageDigest", ""))
 
+    def _verified_legacy_native_result(
+        self, project: dict[str, Any], record: dict[str, Any], recorded_input: str,
+        runtime_digest: str, native_home: str | Path | None,
+    ) -> bool:
+        """Recognize pre-identity native results only when their run evidence agrees."""
+        if not runtime_digest.startswith("native:sha256:") or not native_home:
+            return False
+        run_id = str(record.get("runId", ""))
+        if not run_id:
+            return False
+        job = read_json(self.runs / run_id / "job.json", {})
+        if (job.get("id") != run_id or job.get("state") != "succeeded"
+                or job.get("verification") != "verified"
+                or job.get("datastoreId") != record.get("id")
+                or job.get("projectId") != project.get("id")
+                or job.get("inputStateFingerprint") != recorded_input):
+            return False
+        if (job.get("templateFingerprint") != project.get("template", {}).get("fingerprint")
+                or job.get("inputLibraryFingerprint") != project.get("inputLibrary", {}).get("fingerprint")):
+            return False
+        try:
+            home = Path(str(native_home)).resolve()
+            job_home = Path(str(job.get("image") or "")).resolve()
+            result = Path(str(record.get("path") or "")).resolve()
+            job_result = Path(str(job.get("resultPath") or "")).resolve()
+            if (home != job_home or result != job_result
+                    or not (result / "DatastoreListing.Rda").is_file()):
+                return False
+        except (OSError, ValueError):
+            return False
+        legacy_execution = self.execution_fingerprint(recorded_input, "")
+        return str(record.get("executionFingerprint") or legacy_execution) == legacy_execution
+
     def result_reuse_status(
         self, project: dict[str, Any], record: dict[str, Any], variation_id: str, runtime_digest: str,
+        native_home: str | Path | None = None,
     ) -> str:
         if record.get("verification") != "verified":
             return "unproven"
@@ -1250,6 +1310,10 @@ class Workspace:
         if recorded_input != current_input:
             return "previous"
         recorded_runtime = self._record_runtime_digest(record)
+        if not recorded_runtime and self._verified_legacy_native_result(
+            project, record, recorded_input, runtime_digest, native_home,
+        ):
+            return "current"
         if not recorded_runtime or not runtime_digest or recorded_runtime != runtime_digest:
             return "runtime_differs"
         recorded_execution = str(record.get("executionFingerprint", ""))
@@ -1258,17 +1322,18 @@ class Workspace:
 
     def current_result(
         self, project: dict[str, Any], variation_id: str, runtime_digest: str,
+        native_home: str | Path | None = None,
     ) -> dict[str, Any] | None:
         candidates = []
         for record, link in self._completed_result_records(project):
             linked_variation = str((link or {}).get("variationId") or record.get("variationId", ""))
             role = str((link or {}).get("role") or record.get("role", ""))
             matches = role == "baseline" if variation_id == "baseline" else linked_variation == variation_id
-            if matches and self.result_reuse_status(project, record, variation_id, runtime_digest) == "current":
+            if matches and self.result_reuse_status(project, record, variation_id, runtime_digest, native_home) == "current":
                 candidates.append(record)
         return max(candidates, key=lambda item: str(item.get("completedAt", "")), default=None)
 
-    def result_statuses(self, project: dict[str, Any], runtime_digest: str) -> dict[str, Any]:
+    def result_statuses(self, project: dict[str, Any], runtime_digest: str, native_home: str | Path | None = None) -> dict[str, Any]:
         catalog = {item.get("id"): item for item in self.catalog().get("datastores", [])}
         results: dict[str, list[dict[str, Any]]] = {}
         links = {item.get("datastoreId"): item for item in project.get("resultLinks", [])}
@@ -1280,7 +1345,7 @@ class Workspace:
             variation_id = str((link or {}).get("variationId") or record.get("variationId", ""))
             role = str((link or {}).get("role") or record.get("role", ""))
             key = "baseline" if role == "baseline" else variation_id
-            status = self.result_reuse_status(project, record, key, runtime_digest)
+            status = self.result_reuse_status(project, record, key, runtime_digest, native_home)
             results.setdefault(key, []).append({"datastoreId": datastore_id, "status": status})
         return results
 

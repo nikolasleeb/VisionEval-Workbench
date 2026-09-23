@@ -310,7 +310,7 @@ class WorkbenchApplication:
             try:
                 _, current = self.workspace.project(str(project.get("id", "")))
                 project.update(current)
-                project["resultStatuses"] = self.workspace.result_statuses(current, runtime_digest)
+                project["resultStatuses"] = self.workspace.result_statuses(current, runtime_digest, self.runtime.native_home)
                 for variation in project.get("variations", []):
                     statuses = project["resultStatuses"].get(variation.get("id", ""), [])
                     variation["resultStatus"] = "current" if any(item.get("status") == "current" for item in statuses) else (statuses[0].get("status") if statuses else "missing")
@@ -344,6 +344,18 @@ class WorkbenchApplication:
             "assetCatalog": self.asset_catalog,
             "bundledAssets": {"planrva": self.bundled_assets.status()},
             "documentation": self.documentation_status,
+        }
+
+    def hypercube_run_status(self, project_id: str) -> dict:
+        _, project = self.workspace.project(project_id)
+        if project.get("projectType") != "hypercube":
+            raise WorkspaceError("Choose a Hypercube project")
+        digest = self.runtime.image_digest()
+        return {
+            "projectId": project_id,
+            "jobs": self.runtime.list_jobs(project_id),
+            "resultStatuses": self.workspace.result_statuses(project, digest, self.runtime.native_home),
+            "runtimeDigest": digest,
         }
 
 def json_body(handler: SimpleHTTPRequestHandler) -> dict:
@@ -576,6 +588,8 @@ def handler_class(application: WorkbenchApplication):
                     send_bytes(self, application.hypercube_analysis.csv_bytes(analysis), "text/csv; charset=utf-8", "visioneval_hypercube_analysis.csv")
                 elif parsed.path == "/api/jobs":
                     send_json(self, {"jobs": application.runtime.list_jobs(first(query, "projectId"))})
+                elif parsed.path == "/api/hypercube-run/status":
+                    send_json(self, application.hypercube_run_status(first(query, "projectId")))
                 elif parsed.path == "/api/runs/history/impact":
                     send_json(self, application.runtime.history_clear_impact())
                 elif parsed.path == "/api/operations/active":

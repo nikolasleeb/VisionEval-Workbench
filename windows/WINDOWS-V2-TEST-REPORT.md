@@ -210,6 +210,45 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
   tested unsigned installer was promoted to the Windows release-candidate folder;
   it remains unpublished and untagged.
 
+## Hypercube tracking, resources, logs, and documentation follow-up
+
+- The seven-case PlanRVA Hypercube completed without intervention. Baseline and
+  all six cases remain `succeeded` and `verified`; no case was rerun for this fix.
+- Native RC7 runtime identity now uses a stable fingerprint of the validated R
+  executable, `VE_HOME`, `VE_RUNTIME`, and package DESCRIPTION metadata. The
+  installed backend reconciled all seven older blank-digest results as `current`
+  only after matching their successful jobs, Datastores, input fingerprints,
+  runtime home, and package provenance. The Hypercube tracker displayed seven
+  successful and zero missing, with **Run Missing** disabled.
+- The installed Hypercube Run card displayed seven of seven complete, a stable
+  elapsed duration, one native slot, and no estimated time remaining. Each case
+  and the outside Run history agreed on success. Selecting a case showed its log
+  inside a bounded, internally scrolling pane; selecting it again cleared the
+  pane. No log extended into the next card.
+- The installed 81-case planning example used nine comparable completed runs
+  from this computer: 81 serialized waves, approximately 22.3 hours, and about
+  23.2 GB of retained Datastores. It reported 8.2 GB installed RAM, current
+  available/in-use RAM, and 404.2 GB free in the SSD workspace; low RAM remained
+  advisory. These are planning estimates, not guarantees for other models.
+- Windows Documentation now offers only **Read in Workbench**. Both bundled PDFs
+  were present; What's New rendered in the installed reader without the former
+  unsigned-candidate warning. The stale system-viewer sentence was removed and
+  checked after the final per-user reinstall. Settings and the Hypercube warning
+  retained visible taskbar clearance.
+- Final automated gates: 392 Python tests with 22 expected skips; 80 frontend
+  contract tests with two expected skips; 17 Rust tests; JavaScript syntax,
+  `cargo fmt --check`, documentation verification, and `git diff --check` passed.
+  The live transition cadence was not re-smoked by launching another model;
+  single-flight polling and local timer ticks are covered by frontend contracts.
+- The final SSD-built installer is unsigned, 15,675,593 bytes, and has SHA-256
+  `6af29f895c8b6eab9446d686af868ba37bbeeb129be3d9f3154af1c29ef158ef`.
+  Its installed desktop and backend executable hashes match the built files.
+  Archive inspection confirmed the revised frontend, validation catalog, and
+  both Windows PDFs; binary scans found no private paths, Datastore, credentials,
+  or Docker payload. Tauri again returned Windows file-mapping error 1224 after
+  NSIS wrote the installer; the installer passed hash, current-user install,
+  launch, backend recovery, and UI checks.
+
 ## Expected warnings
 
 Windows R still emits `C.UTF-8` locale warnings. The official RC7 Windows library

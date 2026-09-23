@@ -237,7 +237,7 @@ class DocumentationSourceTests(unittest.TestCase):
         )
         self.assertEqual(tauri["version"], "2.0.0")
         self.assertEqual(package["version"], "2.0.0")
-        self.assertEqual(windows["documentationVersion"], "2.0.0-windows-rev2")
+        self.assertEqual(windows["documentationVersion"], "2.0.0-windows-rev3")
         self.assertEqual(windows["schemaVersion"], 2)
         self.assertEqual([item["id"] for item in windows["documents"]], ["user-guide", "whats-new"])
         self.assertEqual(windows_manifest["runtimeAdapter"], "native-ve-runtime")

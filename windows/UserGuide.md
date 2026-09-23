@@ -511,7 +511,7 @@ Review shows the immutable generated definition, axes and values, case count, ye
 
 Choose the project rather than dozens of individual scenarios. **Run Missing** queues only a missing baseline and missing cases. **Retry Failed** queues only failed work. Successful work is not routinely rerun. The batch card reports totals, progress, elapsed time, estimated remaining time, waves, and the single active native slot. Completed elapsed time is frozen at the latest terminal job instead of continuing to advance. **Stop This Hypercube** removes its waiting jobs and stops its owned active R process tree without disturbing unrelated batches. Normal Run history shows one compact Hypercube card; detailed case logs remain here. A completion notification is sent for the project rather than for every case.
 
-A 9 × 9 matrix creates 81 cases, 81 serialized execution waves, and takes about 15 hours under the current planning assumption. A future verified container or cloud execution engine could support parallel cases, but parallel execution is not available in Windows 2.0 and is not promised for a particular release.
+A 9 × 9 matrix creates 81 cases and 81 serialized execution waves. Workbench estimates elapsed time and retained storage from comparable completed runs on this computer when available; early estimates are provisional. It also shows installed and currently available RAM and free space on the selected workspace drive. A future verified container or cloud execution engine could support parallel cases, but parallel execution is not available in Windows 2.0 and is not promised for a particular release.
 
 New Hypercube runs retain the authoritative Datastore and skip the optional full CSV export tree.
 

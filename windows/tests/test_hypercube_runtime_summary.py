@@ -21,11 +21,11 @@ def elapsed(payload):
 
 
 class HypercubeRuntimeSummaryTests(unittest.TestCase):
-    def test_uses_planning_fallback_until_three_successes(self):
+    def test_uses_first_completed_case_as_provisional_estimate(self):
         result = estimate({"successfulDurationsMs": [5 * 60_000, 7 * 60_000], "waitingCount": 4, "concurrency": 2})
-        self.assertFalse(result["measured"])
-        self.assertEqual(result["perRunMs"], 11 * 60_000)
-        self.assertEqual(result["remainingMs"], 22 * 60_000)
+        self.assertTrue(result["measured"])
+        self.assertEqual(result["perRunMs"], 6 * 60_000)
+        self.assertEqual(result["remainingMs"], 12 * 60_000)
 
     def test_uses_observed_median_and_limits_history_to_25_cases(self):
         result = estimate({"successfulDurationsMs": [10 * 60_000] * 25 + [60 * 60_000], "waitingCount": 3, "concurrency": 2})

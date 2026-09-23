@@ -1224,7 +1224,7 @@ class RuntimeManager:
             "hostArchitecture": platform.machine(), "supported": platform.system() == "Windows",
             "image": str(home or ""), "imagePresent": present, "adapter": "native",
             "veRuntime": str(runtime or ""), "veHome": str(home or ""),
-            "imageDigest": "", "digestMatches": True,
+            "imageDigest": self.image_digest(), "digestMatches": True,
             "imageReleaseTag": provenance["releaseTag"], "imageRevision": provenance["revision"],
             "imageCompatibilityPatch": "", "provenanceMatches": provenance["releaseTag"] == RC7_RELEASE_TAG,
             "releaseCheck": self.release_status(), "dockerMemoryBytes": 0, "memoryLimitGb": self.memory_limit_gb,
@@ -1589,7 +1589,27 @@ class RuntimeManager:
 
     def image_digest(self) -> str:
         if self.adapter == "native":
-            return ""
+            home, runtime = self.native_home, self.native_runtime
+            rscript = Path(self.rscript) if self.rscript else None
+            if not home or not runtime or not rscript or not rscript.is_file():
+                return ""
+            if native_runtime_provenance(home)["revision"] != RC7_RELEASE_COMMIT:
+                return ""
+            descriptions = sorted(home.glob("ve-lib/*/*/DESCRIPTION"))
+            if not descriptions:
+                return ""
+            digest = hashlib.sha256()
+            for value in (home.resolve(), runtime.resolve(), rscript.resolve(), platform.machine().lower()):
+                digest.update(str(value).casefold().encode("utf-8"))
+                digest.update(b"\0")
+            digest.update(RC7_RELEASE_COMMIT.encode("ascii"))
+            with rscript.open("rb") as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(block)
+            for description in descriptions:
+                digest.update(str(description.relative_to(home)).casefold().encode("utf-8"))
+                digest.update(description.read_bytes())
+            return f"native:sha256:{digest.hexdigest()}"
         executable = find_docker_executable()
         if not executable:
             return ""
@@ -1711,7 +1731,7 @@ class RuntimeManager:
         return {
             "ok": True, "adapter": "native", "platform": platform.system().lower(), "architecture": platform.machine(),
             "image": str(self.native_home), "veHome": str(self.native_home), "veRuntime": str(self.native_runtime),
-            "rscript": self.rscript or find_rscript_executable(), "digest": "",
+            "rscript": self.rscript or find_rscript_executable(), "digest": self.image_digest(),
             "runtimeVersion": f"VisionEval {RC7_RELEASE_TAG} / R {runtime_info.get('rVersion', 'unknown')}",
             **runtime_info,
             "releaseTag": RC7_RELEASE_TAG, "revision": provenance["revision"],
@@ -1868,14 +1888,14 @@ class RuntimeManager:
             raise WorkspaceError("Project is not runnable: " + "; ".join(validation["errors"]))
         _, project = self.workspace.project(project_id)
         image_digest = self.image_digest()
-        if not include_baseline and not self.workspace.current_result(project, "baseline", image_digest):
+        if not include_baseline and not self.workspace.current_result(project, "baseline", image_digest, self.native_home):
             raise WorkspaceError("Run the baseline first for this exact model package and Input Library")
         available = {item["id"]: item for item in project["variations"]}
         selected = []
         reused_results = []
         force = {str(item) for item in (force_rerun_ids or [])}
         if include_baseline:
-            reusable = None if "baseline" in force else self.workspace.current_result(project, "baseline", image_digest)
+            reusable = None if "baseline" in force else self.workspace.current_result(project, "baseline", image_digest, self.native_home)
             if reusable:
                 reused_results.append({"variationId": "baseline", "datastoreId": reusable["id"]})
             else:
@@ -1883,7 +1903,7 @@ class RuntimeManager:
         for variation_id in variation_ids:
             if variation_id not in available:
                 raise WorkspaceError("Unknown project variation")
-            reusable = None if variation_id in force else self.workspace.current_result(project, variation_id, image_digest)
+            reusable = None if variation_id in force else self.workspace.current_result(project, variation_id, image_digest, self.native_home)
             if reusable:
                 reused_results.append({"variationId": variation_id, "datastoreId": reusable["id"]})
             else:

@@ -323,6 +323,10 @@ const state = {
   draggedJobId: "",
   stopAllPending: false,
   hypercubeStopPendingProject: "",
+  hypercubeLogSelectedJob: "",
+  hypercubeLogOffset: 0,
+  hypercubeLogLoading: false,
+  hypercubeStatusPolling: false,
   desktop: null,
   onboardingShown: false,
   upgradeNoticeShown: false,
@@ -3534,18 +3538,18 @@ async function hypercubeResourcePlan(project) {
 }
 function hypercubeResourceEstimateMarkup({caseCount,concurrency,project,plan,illustrative=false}) {
   const count=Math.max(1,Number(caseCount)||1),waves=count;
-  const elapsed=illustrative?"about 15 hours":approximateDuration(waves*plan.medianRuntimeMs);
-  const retainedBytes=plan.perResultBytes*count,disk=illustrative?"about 26 GB":`about ${humanBytes(retainedBytes)}`,memory=Number(plan.system?.physicalMemoryBytes||0),free=Number(plan.system?.workspaceFreeBytes||0),reserve=Number(plan.system?.workspaceSafetyReserveBytes||0);
-  const runtimeSource=illustrative?"Planning figure based on roughly 11 minutes per regional run, executed one at a time.":plan.runtimeSamples?`Based on ${plan.runtimeSamples.toLocaleString()} comparable completed run${plan.runtimeSamples===1?"":"s"}.`:"Planning estimate based on roughly 11 minutes per regional run; actual native runtime varies by computer.";
-  const storageSource=illustrative?"Planning figure based on roughly 318 MB per retained Datastore.":plan.storageSource==="measured"?`Based on ${plan.storageSamples.toLocaleString()} comparable retained result${plan.storageSamples===1?"":"s"}.`:"Planning estimate based on roughly 318 MB per retained Datastore.";
+  const elapsed=approximateDuration(waves*plan.medianRuntimeMs);
+  const retainedBytes=plan.perResultBytes*count,disk=`about ${humanBytes(retainedBytes)}`,memory=Number(plan.system?.physicalMemoryBytes||0),availableMemory=Number(plan.system?.availableMemoryBytes||0),free=Number(plan.system?.workspaceFreeBytes||0),reserve=Number(plan.system?.workspaceSafetyReserveBytes||0);
+  const runtimeSource=plan.runtimeSamples?`Provisional estimate based on ${plan.runtimeSamples.toLocaleString()} comparable completed run${plan.runtimeSamples===1?"":"s"} on this computer; individual cases may vary.`:"Provisional 11-minute-per-case estimate until a comparable run completes on this computer.";
+  const storageSource=plan.storageSource==="measured"?`Based on ${plan.storageSamples.toLocaleString()} comparable retained result${plan.storageSamples===1?"":"s"} on this computer.`:"Planning estimate based on roughly 318 MB per retained Datastore.";
   const warnings=[];if(count>100)warnings.push("Large Hypercubes can take a long time because Windows runs one case at a time.");if(memory&&memory<16*1024**3)warnings.push(`This computer has ${humanBytes(memory)} of RAM. Use a small matrix and close memory-intensive applications; Hypercube use is still allowed.`);if(free&&retainedBytes+reserve>free)warnings.push(`The workspace has ${humanBytes(free)} free, below the estimated retained results plus the ${humanBytes(reserve)} safety reserve. Free space or move the workspace before running.`);
-  return `<div class="hypercube-resource-heading"><strong>${illustrative?"81-case Windows planning example":"Resource estimate"}</strong>${illustrative?"":`<span>${count.toLocaleString()} complete run${count===1?"":"s"}</span>`}</div><div class="hypercube-resource-grid"><div><small>Execution</small><strong>${waves.toLocaleString()} serialized wave${waves===1?"":"s"}</strong><span>${escapeHtml(elapsed)}</span></div><div><small>Native runtime</small><strong>One active slot</strong><span>Standard and Hypercube batches share the workspace FIFO queue</span></div><div><small>Retained disk</small><strong>${escapeHtml(disk)}</strong><span>Datastores only · no optional full CSV trees</span></div>${memory?`<div><small>This computer</small><strong>${escapeHtml(humanBytes(memory))} RAM</strong><span>${memory<16*1024**3?'Limited-resource guidance applies':'Suitable for serialized Hypercubes'}</span></div>`:''}${free?`<div><small>Workspace free</small><strong>${escapeHtml(humanBytes(free))}</strong><span title="${escapeHtml(plan.system?.workspacePath||'')}">${escapeHtml(plan.system?.workspacePath||'Selected workspace')}</span></div>`:''}</div><p class="muted">${escapeHtml(runtimeSource)} ${escapeHtml(storageSource)}</p><p class="hypercube-parallel-guidance"><span>Windows 2.0 safely executes one case at a time. A future verified container or cloud runtime may support parallel cases.</span></p>${warnings.map((warning)=>`<p class="hypercube-resource-warning">${escapeHtml(warning)}</p>`).join('')}`;
+  return `<div class="hypercube-resource-heading"><strong>${illustrative?"81-case example using this computer":"Resource estimate"}</strong>${illustrative?"":`<span>${count.toLocaleString()} complete run${count===1?"":"s"}</span>`}</div><div class="hypercube-resource-grid"><div><small>Execution</small><strong>${waves.toLocaleString()} serialized wave${waves===1?"":"s"}</strong><span>${escapeHtml(elapsed)}</span></div><div><small>Native runtime</small><strong>One active slot</strong><span>Standard and Hypercube batches share the workspace FIFO queue</span></div><div><small>Retained disk</small><strong>${escapeHtml(disk)}</strong><span>Datastores only · no optional full CSV trees</span></div>${memory?`<div><small>This computer</small><strong>${escapeHtml(humanBytes(memory))} RAM</strong><span>${availableMemory?`${escapeHtml(humanBytes(Math.max(0,memory-availableMemory)))} in use · ${escapeHtml(humanBytes(availableMemory))} available · `:''}${memory<16*1024**3?'Limited-resource guidance applies':'Suitable for serialized Hypercubes'}</span></div>`:''}${free?`<div><small>Workspace free</small><strong>${escapeHtml(humanBytes(free))}</strong><span title="${escapeHtml(plan.system?.workspacePath||'')}">${escapeHtml(plan.system?.workspacePath||'Selected workspace')}</span></div>`:''}</div><p class="muted">${escapeHtml(runtimeSource)} ${escapeHtml(storageSource)} Available RAM changes while other applications run and is not a per-case memory requirement.</p><p class="hypercube-parallel-guidance"><span>Windows 2.0 safely executes one case at a time. A future verified container or cloud runtime may support parallel cases.</span></p>${warnings.map((warning)=>`<p class="hypercube-resource-warning">${escapeHtml(warning)}</p>`).join('')}`;
 }
 async function renderHypercubeSafetyEstimate() {
   const target=$("hypercubeSafetyEstimate");if(!target)return;
-  let system={};try{system=await loadHypercubeResourceReport()}catch(_error){}
-  const plan={medianRuntimeMs:11*60*1000,runtimeSamples:0,perResultBytes:318*1000*1000,storageSamples:0,storageSource:"planning",system};
-  target.innerHTML=hypercubeResourceEstimateMarkup({caseCount:81,concurrency:4,project:null,plan,illustrative:true});bindHypercubeResourceLinks(target);
+  const project=hypercubePlanningProject();
+  let plan;try{plan=await hypercubeResourcePlan(project)}catch(_error){plan={medianRuntimeMs:11*60*1000,runtimeSamples:0,perResultBytes:318*1000*1000,storageSamples:0,storageSource:"planning",system:{}}}
+  target.innerHTML=hypercubeResourceEstimateMarkup({caseCount:81,concurrency:1,project,plan,illustrative:true});bindHypercubeResourceLinks(target);
 }
 function bindHypercubeResourceLinks(container) {
   container?.querySelectorAll("[data-open-hypercube-resources]").forEach((button)=>button.addEventListener("click",()=>{if($("hypercubeSafetyDialog")?.open)$("hypercubeSafetyDialog").close("back");openSettings("settingsResources")}));
@@ -6251,14 +6255,8 @@ async function loadDocumentationCatalog(){
   try{
     documentationCatalog=await request("/api/documentation/catalog");
     const documents=documentationCatalog.documents||[];
-    library.innerHTML=documents.length?documents.map(document=>`<article class="documentation-card" role="listitem"><div><span class="documentation-card-kind">PDF · Version ${escapeHtml(document.version)}</span><h4>${escapeHtml(document.title)}</h4><p>${escapeHtml(document.description)}</p><small>${Number(document.pageCount)||0} ${Number(document.pageCount)===1?"page":"pages"}</small></div><div class="documentation-card-actions"><button type="button" data-read-document="${escapeHtml(document.id)}">Read in Workbench</button><button type="button" class="secondary" data-preview-document="${escapeHtml(document.id)}">Open in Preview</button></div></article>`).join(""):'<p class="muted">No documents are installed.</p>';
+    library.innerHTML=documents.length?documents.map(document=>`<article class="documentation-card" role="listitem"><div><span class="documentation-card-kind">PDF · Version ${escapeHtml(document.version)}</span><h4>${escapeHtml(document.title)}</h4><p>${escapeHtml(document.description)}</p><small>${Number(document.pageCount)||0} ${Number(document.pageCount)===1?"page":"pages"}</small></div><div class="documentation-card-actions"><button type="button" data-read-document="${escapeHtml(document.id)}">Read in Workbench</button></div></article>`).join(""):'<p class="muted">No documents are installed.</p>';
   }catch(error){library.innerHTML=`<div class="notice error-notice"><strong>Documentation is unavailable.</strong><p>${escapeHtml(error.message||String(error))}</p></div>`}
-}
-async function openDocumentationInPreview(documentId){
-  if(!documentationById(documentId))throw new Error("That document is not available.");
-  const invoke=window.__TAURI_INTERNALS__?.invoke;
-  if(invoke)return invoke("open_documentation_document",{documentId});
-  window.open(`/api/documentation/document?id=${encodeURIComponent(documentId)}`,"_blank","noopener");
 }
 async function loadDocumentationPdfModule(){
   if(!documentationPdfModule){
@@ -6284,7 +6282,7 @@ async function renderDocumentationPdf({resetScroll=false}={}){
   status.hidden=true;pages.scrollTop=Math.min(priorScroll,Math.max(0,pages.scrollHeight-pages.clientHeight));
 }
 function setDocumentationZoom(next){documentationZoom=Math.max(.65,Math.min(1.75,next));renderDocumentationPdf().catch(showDocumentationReaderError)}
-function showDocumentationReaderError(error){const status=$("documentationReaderStatus");status.hidden=false;status.className="documentation-reader-status error-notice";status.innerHTML=`<strong>The document could not be displayed.</strong><p>${escapeHtml(error.message||String(error))}</p><p>You can still try Open in Preview.</p>`}
+function showDocumentationReaderError(error){const status=$("documentationReaderStatus");status.hidden=false;status.className="documentation-reader-status error-notice";status.innerHTML=`<strong>The document could not be displayed.</strong><p>${escapeHtml(error.message||String(error))}</p>`}
 async function openDocumentationReader(documentId,trigger=document.activeElement){
   if(!documentationCatalog)await loadDocumentationCatalog();
   const document=documentationById(documentId);if(!document)throw new Error("That document is not available.");
@@ -6405,12 +6403,11 @@ $("automaticUpdateChecks").addEventListener("change",updateCheckControls);
 $("checkUpdatesNow").addEventListener("click",checkUpdatesNow);
 $("updateStatusList").addEventListener("click",event=>{const link=event.target.closest("[data-update-url]");if(link)return openUpdateUrl(link.dataset.updateUrl);const install=event.target.closest("[data-install-runtime-update]");if(install)return installRuntimeUpdate(install);const restore=event.target.closest("[data-restore-runtime]");if(restore)return restorePreviousRuntime(restore)});
 $('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);
-$('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),preview=event.target.closest('[data-preview-document]'),website=event.target.closest('#openWorkbenchWebsite');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(preview)openDocumentationInPreview(preview.dataset.previewDocument).catch(error=>notify(error.message||String(error),'error'));if(website)openWorkbenchWebsite()});
+$('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),website=event.target.closest('#openWorkbenchWebsite');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(website)openWorkbenchWebsite()});
 $('documentationReaderClose').addEventListener('click',closeDocumentationReader);
 $('documentationReaderZoomOut').addEventListener('click',()=>setDocumentationZoom(documentationZoom-.15));
 $('documentationReaderFit').addEventListener('click',()=>setDocumentationZoom(1));
 $('documentationReaderZoomIn').addEventListener('click',()=>setDocumentationZoom(documentationZoom+.15));
-$('documentationReaderPreview').addEventListener('click',()=>openDocumentationInPreview($('documentationReaderDialog').dataset.documentId).catch(error=>notify(error.message||String(error),'error')));
 $('documentationReaderDialog').addEventListener('close',()=>{documentationRenderToken+=1;documentationPdf?.destroy?.();documentationPdf=null;$('documentationReaderPages').replaceChildren();const target=documentationReaderReturnFocus;documentationReaderReturnFocus=null;if(target?.isConnected)requestAnimationFrame(()=>target.focus())});
 let documentationResizeTimer;window.addEventListener('resize',()=>{if(!$('documentationReaderDialog').open||!documentationPdf)return;clearTimeout(documentationResizeTimer);documentationResizeTimer=setTimeout(()=>renderDocumentationPdf().catch(showDocumentationReaderError),180)});
 async function loadStorageReport(){try{const report=await request("/api/storage");$("storageReport").innerHTML=metric("Workspace",humanBytes(report.workspaceBytes))+metric("Model runs",humanBytes(report.categories.models))+metric("Datastores",humanBytes(report.runs.reduce((sum,item)=>sum+item.datastoreBytes,0)))+metric("Full CSV exports",humanBytes(report.runs.reduce((sum,item)=>sum+item.exportBytes,0)))+metric("Comparison cache",`${humanBytes(report.comparisonCache?.bytes||0)} · ${report.comparisonCache?.entries||0} tables`);}catch(error){$("storageReport").innerHTML=`<p class="muted">${escapeHtml(error.message)}</p>`}}
@@ -7523,13 +7520,12 @@ function hypercubeEtaEstimate(project,plan=hypercubeRunPlan(project)){
   const stopping=currentJobs.filter(({job})=>job?.state==='stopping');
   const waiting=currentJobs.filter(({job})=>job?.state==='waiting');
   const representative=active[0]?.job||waiting[0]?.job||stopping[0]?.job;
-  const configured=Math.max(1,Number(state.desktop?.resources?.maxConcurrentRuns||state.data?.queue?.maxActive||1));
-  const slotCount=Math.max(1,Math.min(plan.entries.length,representative?.batchMode==='queued'?1:configured));
+  const slotCount=1;
   const otherBatchActive=(state.data?.jobs||[]).some((job)=>job.projectId!==project?.id&&activeJobStates.has(job.state)),queuedBehind=!active.length&&!stopping.length&&waiting.length>0&&otherBatchActive;
   const estimate=WorkbenchHypercubeSummary.estimateEta({successfulDurationsMs:samples,activeElapsedMs:active.filter(({job})=>job.state!=='preparing').map(({job})=>jobRuntimeMilliseconds(job)),preparingCount:active.filter(({job})=>job.state==='preparing').length,stoppingCount:stopping.length,waitingCount:waiting.length,concurrency:slotCount,queuedBehind});
-  const {remainingMs,perRunMs,measured}=estimate,source=measured?`measured median of ${estimate.sampleCount} recent compatible completed case${estimate.sampleCount===1?'':'s'}`:'11-minute Apple Silicon planning value';
+  const {remainingMs,perRunMs,measured}=estimate,source=measured?`${estimate.sampleCount<3?'provisional result from':'measured median of'} ${estimate.sampleCount} recent compatible completed case${estimate.sampleCount===1?'':'s'} on this computer`:'provisional 11-minute-per-case estimate until a comparable run completes';
   const duration=remainingMs?approximateDuration(remainingMs):'',complete=plan.entries.every((entry)=>entry.status==='successful'),idleIncomplete=!remainingMs&&!complete;
-  return{remainingMs,perRunMs,samples:estimate.sampleCount,measured,source,slotCount,activeCount:active.length+stopping.length,waitingCount:waiting.length,queuedBehind,shortLabel:remainingMs?queuedBehind?`~${duration.replace(/^about /,'')} after start`:`~${duration.replace(/^about /,'')} left`:idleIncomplete?'Not running':'Complete',detail:remainingMs?queuedBehind?`Approx. ${duration.replace(/^about /,'')} of runtime after starting · ${source}`:`Approx. ${duration.replace(/^about /,'')} remaining · ${source}`:idleIncomplete?'No Hypercube cases are currently running or queued.':'All generated cases are complete.'};
+  return{remainingMs,perRunMs,samples:estimate.sampleCount,measured,source,slotCount,activeCount:active.length+stopping.length,waitingCount:waiting.length,queuedBehind,shortLabel:remainingMs?queuedBehind?`~${formatDuration(remainingMs)} after start`:`~${formatDuration(remainingMs)} left`:idleIncomplete?'Not running':'Complete',detail:remainingMs?queuedBehind?`Approx. ${duration.replace(/^about /,'')} of runtime after starting · ${source}`:`Approx. ${duration.replace(/^about /,'')} remaining · ${source}`:idleIncomplete?'No Hypercube cases are currently running or queued.':'All generated cases are complete.'};
 }
 
 function hypercubeRunAggregate(project){
@@ -7549,14 +7545,100 @@ function hypercubeRunAggregate(project){
 }
 
 function openHypercubeRunProject(projectId){
+  if(state.hypercubeProjectId!==projectId){state.hypercubeLogSelectedJob='';state.hypercubeLogOffset=0;$('hypercubeRunLogTitle').textContent='Select a case to inspect its log';$('hypercubeRunLog').textContent='No case selected.';}
   state.hypercubeProjectId=projectId;
   if(!openHypercubeArea('hypercubeRunPage'))return;
   fillHypercubeWorkflowSelect($('hypercubeRunProject'),true);
   selectedOption($('hypercubeRunProject'),projectId);
   renderHypercubeRun();
 }
-function renderHypercubeRun(){const id=fillHypercubeWorkflowSelect($('hypercubeRunProject'),true),project=hypercubeWorkflowProjects().find((item)=>item.id===id),target=$('hypercubeRunCounts'),stopButton=$('stopHypercubeRuns');if(!project){target.innerHTML='';setButtonAvailability(stopButton,false,'Choose a Hypercube project first.');renderRunHistoryActions();return;}const plan=hypercubeRunPlan(project),counts=plan.counts,eta=hypercubeEtaEstimate(project,plan);target.innerHTML=['successful','missing','failed','waiting','running'].map((key)=>metric(key[0].toUpperCase()+key.slice(1),counts[key]||0)).join('');$('runMissingHypercube').disabled=!(counts.missing);$('retryFailedHypercube').disabled=!(counts.failed);const total=plan.entries.length,done=counts.successful||0,stoppable=(counts.waiting||0)+(counts.preparing||0)+(counts.running||0)+(counts.exporting||0),active=stoppable+(counts.stopping||0),stopping=state.hypercubeStopPendingProject===project.id;stopButton.textContent=stopping?'Stopping Hypercube…':'Stop This Hypercube';setButtonAvailability(stopButton,Boolean(stoppable)&&!stopping,stopping||(!stoppable&&(counts.stopping||0))?'This Hypercube is already stopping.':'This Hypercube has no active or waiting runs.');const concurrency=1,waves=total,runtime=WorkbenchHypercubeSummary.elapsedRuntime({jobs:plan.jobs}),elapsed=runtime.started?formatDuration(runtime.elapsedMs):'Not started';$('hypercubeBatchCard').className='panel';$('hypercubeBatchCard').innerHTML=`<div class="section-title"><div><h3>${escapeHtml(project.name)}</h3><p>${done} of ${total} complete${active?` · ${active} active or queued`:''}</p></div><span class="pill">${Math.round(done/Math.max(1,total)*100)}%</span></div><div class="metric-grid">${metric('Queued cases',waves)}${metric('Elapsed',elapsed)}${metric('Native slots',concurrency)}${metric('Estimated remaining',eta.remainingMs?approximateDuration(eta.remainingMs):eta.shortLabel)} ${metric('Status',active?'Processing':done===total?'Complete':'Ready')}</div><p class="hypercube-eta-source" role="status" aria-live="polite">${escapeHtml(eta.queuedBehind?`${eta.detail}. This Hypercube is queued behind another active batch.`:eta.detail)}</p><p class="hypercube-parallel-guidance"><span>Windows runs one VisionEval case at a time through the installed native runtime. Results retain Datastores only; Hypercube runs do not generate the optional full CSV tree.</span></p><progress max="${total}" value="${done}"></progress>`;$('hypercubeRunCases').innerHTML=plan.entries.map((item)=>`<button type="button" class="hypercube-case-row" data-hypercube-run-job="${escapeHtml(item.jobId)}" ${item.jobId?'':'disabled'}><span>${escapeHtml(item.name)}</span><span class="pill">${escapeHtml(item.status)}</span></button>`).join('');const history=plan.jobs;$('hypercubeRunHistory').className='run-history-scroll'+(history.length?'':' empty-state');$('hypercubeRunHistory').innerHTML=history.length?history.map((job)=>`<button class="job-card" type="button" data-hypercube-history-job="${escapeHtml(job.id)}"><strong>${escapeHtml(jobDisplayName(job))}</strong><span>${escapeHtml(job.state)} · ${escapeHtml(jobRuntime(job))}</span></button>`).join(''):'No Hypercube jobs.';document.querySelectorAll('[data-hypercube-run-job],[data-hypercube-history-job]').forEach((button)=>button.addEventListener('click',()=>showHypercubeJobLog(button.dataset.hypercubeRunJob||button.dataset.hypercubeHistoryJob)));renderRunHistoryActions();}
-async function showHypercubeJobLog(jobId){if(!jobId)return;const job=(state.data?.jobs||[]).find((item)=>item.id===jobId);$('hypercubeRunLogTitle').textContent=job?`${jobDisplayName(job)} · ${job.state}`:'Run log';$('hypercubeRunLog').textContent='Loading log…';try{const chunk=await request(`/api/run-log?id=${encodeURIComponent(jobId)}&offset=0`);$('hypercubeRunLog').textContent=chunk.text||'No log output was recorded.';}catch(error){$('hypercubeRunLog').textContent=error.message;}}
+function renderHypercubeRun(){
+  const id=fillHypercubeWorkflowSelect($('hypercubeRunProject'),true),project=hypercubeWorkflowProjects().find((item)=>item.id===id),target=$('hypercubeRunCounts'),stopButton=$('stopHypercubeRuns');
+  if(!project){target.innerHTML='';setButtonAvailability(stopButton,false,'Choose a Hypercube project first.');renderRunHistoryActions();return;}
+  const plan=hypercubeRunPlan(project),counts=plan.counts,eta=hypercubeEtaEstimate(project,plan);
+  target.innerHTML=['successful','missing','failed','waiting','running'].map((key)=>metric(key[0].toUpperCase()+key.slice(1),counts[key]||0)).join('');
+  $('runMissingHypercube').disabled=!(counts.missing);$('retryFailedHypercube').disabled=!(counts.failed);
+  const total=plan.entries.length,done=counts.successful||0,queued=counts.waiting||0,stoppable=queued+(counts.preparing||0)+(counts.running||0)+(counts.exporting||0),active=stoppable+(counts.stopping||0),stopping=state.hypercubeStopPendingProject===project.id;
+  stopButton.textContent=stopping?'Stopping Hypercube…':'Stop This Hypercube';setButtonAvailability(stopButton,Boolean(stoppable)&&!stopping,stopping||(!stoppable&&(counts.stopping||0))?'This Hypercube is already stopping.':'This Hypercube has no active or waiting runs.');
+  const runtime=WorkbenchHypercubeSummary.elapsedRuntime({jobs:plan.jobs}),elapsed=runtime.started?formatDuration(runtime.elapsedMs):'Not started';
+  $('hypercubeBatchCard').className='panel';
+  $('hypercubeBatchCard').innerHTML=`<div class="section-title"><div><h3>${escapeHtml(project.name)}</h3><p>${done} of ${total} complete${active?` · ${active} active or queued`:''}</p></div><span class="pill">${Math.round(done/Math.max(1,total)*100)}%</span></div><div class="metric-grid">${metric('Queued cases',queued)}${metric('Elapsed',elapsed)}${metric('Native slots',1)}${metric('Estimated remaining',eta.shortLabel)} ${metric('Status',active?'Processing':done===total?'Complete':'Ready')}</div><p class="hypercube-eta-source" role="status" aria-live="polite">${escapeHtml(eta.queuedBehind?`${eta.detail}. This Hypercube is queued behind another active batch.`:eta.detail)}</p><p class="hypercube-parallel-guidance"><span>Windows runs one VisionEval case at a time through the installed native runtime. Results retain Datastores only; Hypercube runs do not generate the optional full CSV tree.</span></p><progress max="${total}" value="${done}"></progress>`;
+  $('hypercubeRunCases').innerHTML=plan.entries.map((item)=>`<button type="button" class="hypercube-case-row" data-hypercube-run-job="${escapeHtml(item.jobId)}" aria-pressed="${item.jobId===state.hypercubeLogSelectedJob}" ${item.jobId?'':'disabled'}><span>${escapeHtml(item.name)}</span><span class="pill">${escapeHtml(item.status)}</span></button>`).join('');
+  const history=plan.jobs;$('hypercubeRunHistory').className='run-history-scroll'+(history.length?'':' empty-state');
+  $('hypercubeRunHistory').innerHTML=history.length?history.map((job)=>`<button class="job-card" type="button" data-hypercube-history-job="${escapeHtml(job.id)}" aria-pressed="${job.id===state.hypercubeLogSelectedJob}"><strong>${escapeHtml(jobDisplayName(job))}</strong><span>${escapeHtml(job.state)} · ${escapeHtml(jobRuntime(job))}</span></button>`).join(''):'No Hypercube jobs.';
+  document.querySelectorAll('[data-hypercube-run-job],[data-hypercube-history-job]').forEach((button)=>button.addEventListener('click',()=>showHypercubeJobLog(button.dataset.hypercubeRunJob||button.dataset.hypercubeHistoryJob)));
+  const selected=(state.data?.jobs||[]).find((job)=>job.id===state.hypercubeLogSelectedJob);
+  if(selected)$('hypercubeRunLogTitle').textContent=`${jobDisplayName(selected)} · ${selected.state}`;
+  renderRunHistoryActions();
+}
+function showHypercubeJobLog(jobId){
+  if(!jobId)return;
+  if(state.hypercubeLogSelectedJob===jobId){
+    state.hypercubeLogSelectedJob='';state.hypercubeLogOffset=0;
+    $('hypercubeRunLogTitle').textContent='Select a case to inspect its log';$('hypercubeRunLog').textContent='No case selected.';
+  }else{
+    state.hypercubeLogSelectedJob=jobId;state.hypercubeLogOffset=0;
+    $('hypercubeRunLog').textContent='Loading log…';pollSelectedHypercubeLog();
+  }
+  renderHypercubeRun();
+}
+async function pollSelectedHypercubeLog(){
+  const jobId=state.hypercubeLogSelectedJob;if(!jobId||state.hypercubeLogLoading)return;
+  state.hypercubeLogLoading=true;
+  try{
+    const offset=state.hypercubeLogOffset,chunk=await request(`/api/run-log?id=${encodeURIComponent(jobId)}&offset=${offset}`);
+    if(state.hypercubeLogSelectedJob!==jobId)return;
+    const log=$('hypercubeRunLog'),follow=log.scrollHeight-log.scrollTop-log.clientHeight<28;
+    if(offset===0)log.textContent='';
+    if(chunk.text)log.textContent=(log.textContent+chunk.text).slice(-200000);
+    else if(!log.textContent)log.textContent='No log output was recorded.';
+    state.hypercubeLogOffset=chunk.offset;
+    if(follow)log.scrollTop=log.scrollHeight;
+    if(chunk.job)$('hypercubeRunLogTitle').textContent=`${jobDisplayName(chunk.job)} · ${chunk.job.state}`;
+  }catch(error){if(state.hypercubeLogSelectedJob===jobId&&state.hypercubeLogOffset===0)$('hypercubeRunLog').textContent=error.message;}
+  finally{state.hypercubeLogLoading=false;}
+}
+async function pollHypercubeRunStatus(){
+  if(state.hypercubeStatusPolling||!state.data)return;
+  const inRun=$('runPage').classList.contains('active'),inHypercube=$('hypercubePage').classList.contains('active')&&state.activeHypercubeSubpage==='hypercubeRunPage';
+  if(!inRun&&!inHypercube)return;
+  const projects=hypercubeWorkflowProjects().filter((project)=>
+    (state.data.jobs||[]).some((job)=>job.projectId===project.id)||
+    (inHypercube&&$('hypercubeRunProject').value===project.id));
+  if(!projects.length)return;
+  state.hypercubeStatusPolling=true;
+  try{
+    const updates=await Promise.all(projects.map((project)=>request(`/api/hypercube-run/status?projectId=${encodeURIComponent(project.id)}`)));
+    for(const update of updates){
+      const project=(state.data.projects||[]).find((item)=>item.id===update.projectId);
+      if(!project)continue;
+      project.resultStatuses=update.resultStatuses;
+      state.data.jobs=(state.data.jobs||[]).filter((job)=>job.projectId!==update.projectId).concat(update.jobs||[]);
+    }
+    observeJobStates(state.data.jobs||[]);
+    renderJobs();
+    if(inHypercube)renderHypercubeRun();
+    if(inHypercube)await pollSelectedHypercubeLog();
+  }catch(_error){/* A later poll reconnects without interrupting the run. */}
+  finally{state.hypercubeStatusPolling=false;}
+}
+function tickHypercubeClocks(){
+  if(!state.data)return;
+  for(const project of hypercubeWorkflowProjects()){
+    const plan=hypercubeRunPlan(project),eta=hypercubeEtaEstimate(project,plan);
+    const card=document.querySelector(`[data-open-hypercube-run="${CSS.escape(project.id)}"]`);
+    if(card){
+      const runtime=card.querySelector('.job-runtime'),detail=card.querySelectorAll('small');
+      if(runtime)runtime.textContent=eta.shortLabel;
+      if(detail.length>1)detail[1].textContent=`${(plan.counts.successful||0)} of ${plan.entries.length} complete · ${eta.detail}`;
+    }
+    if(!$('hypercubePage').classList.contains('active')||state.activeHypercubeSubpage!=='hypercubeRunPage'||$('hypercubeRunProject').value!==project.id)continue;
+    const metrics=$('hypercubeBatchCard').querySelectorAll('.metric-grid .metric strong');
+    const elapsed=WorkbenchHypercubeSummary.elapsedRuntime({jobs:plan.jobs});
+    if(metrics[1])metrics[1].textContent=elapsed.started?formatDuration(elapsed.elapsedMs):'Not started';
+    if(metrics[3])metrics[3].textContent=eta.shortLabel;
+  }
+}
 async function confirmHypercubeDiskPlan(project,kind){
   const runPlan=hypercubeRunPlan(project),count=kind==='failed'?(runPlan.counts.failed||0):(runPlan.counts.missing||0);if(!count)return true;
   try{const plan=await hypercubeResourcePlan(project),free=Number(plan.system?.workspaceFreeBytes||0),reserve=Number(plan.system?.workspaceSafetyReserveBytes||0),needed=plan.perResultBytes*count;if(free&&needed+reserve>free)return confirmWorkbench(`This ${count}-case run may retain about ${humanBytes(needed)}. The workspace has ${humanBytes(free)} free, which is below that estimate plus the ${humanBytes(reserve)} safety reserve.\n\nYou can continue, but the workspace may run out of space.`,{title:'Limited workspace space',confirmLabel:'Run Anyway',cancelLabel:'Go Back'});}catch(_error){}
@@ -7616,7 +7698,7 @@ document.querySelectorAll(".primary-tab[data-page]").forEach((button) => button.
 document.querySelectorAll(".subtab[data-subpage]").forEach((button) => button.addEventListener("click", () => switchSubpage(button.dataset.subpage)));
 document.querySelectorAll('[data-hypercube-subpage]').forEach((button)=>button.addEventListener('click',()=>switchHypercubeSubpage(button.dataset.hypercubeSubpage)));
 $('hypercubeReviewProject')?.addEventListener('change',renderHypercubeWorkflowReview);
-$('hypercubeRunProject')?.addEventListener('change',renderHypercubeRun);
+$('hypercubeRunProject')?.addEventListener('change',()=>{state.hypercubeLogSelectedJob='';state.hypercubeLogOffset=0;$('hypercubeRunLogTitle').textContent='Select a case to inspect its log';$('hypercubeRunLog').textContent='No case selected.';renderHypercubeRun()});
 $('runMissingHypercube')?.addEventListener('click',()=>startHypercubePlannedRun('missing'));
 $('retryFailedHypercube')?.addEventListener('click',()=>startHypercubePlannedRun('failed'));
 $('stopHypercubeRuns')?.addEventListener('click',stopSelectedHypercube);
@@ -7693,7 +7775,8 @@ async function pollAutomaticUpdateStatus(attempt=0){
 }
 refreshState({ quiet: true }).then(()=>{const message=sessionStorage.getItem("visioneval-settings-reset-message");if(message){sessionStorage.removeItem("visioneval-settings-reset-message");notify(message,"success")}pollAutomaticUpdateStatus();pollActiveOperationBadge()});
 setInterval(() => {
-  if ($("runPage").classList.contains("active") && !state.selectedJob) refreshState({ quiet: true });
-  if ($("hypercubePage").classList.contains("active") && state.activeHypercubeSubpage==='hypercubeRunPage') refreshState({quiet:true}).then(renderHypercubeRun);
+  if ($("runPage").classList.contains("active") && !state.selectedJob && (state.data?.jobs||[]).some((job)=>!isHypercubeProject((state.data?.projects||[]).find((item)=>item.id===job.projectId))&&!terminalJobStates.has(job.state))) refreshState({ quiet: true });
 }, 5000);
+setInterval(pollHypercubeRunStatus,2000);
+setInterval(tickHypercubeClocks,1000);
 setInterval(() => { if ($("runPage").classList.contains("active")) pollBackgroundJobLogs(); }, 1800);

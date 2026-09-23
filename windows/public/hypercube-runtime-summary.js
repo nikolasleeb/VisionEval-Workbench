@@ -13,7 +13,7 @@
   }
 
   function estimateEta({successfulDurationsMs=[],activeElapsedMs=[],preparingCount=0,stoppingCount=0,waitingCount=0,concurrency=1,queuedBehind=false,fallbackRuntimeMs=FALLBACK_RUNTIME_MS}={}){
-    const samples=successfulDurationsMs.filter((value)=>Number.isFinite(value)&&value>0).slice(0,25),measured=samples.length>=3;
+    const samples=successfulDurationsMs.filter((value)=>Number.isFinite(value)&&value>0).slice(0,25),measured=samples.length>0;
     const perRunMs=measured?median(samples):fallbackRuntimeMs,slots=Math.max(1,Math.floor(Number(concurrency)||1)),loads=Array.from({length:slots},()=>0);
     const assign=(milliseconds)=>{let index=0;for(let candidate=1;candidate<loads.length;candidate+=1)if(loads[candidate]<loads[index])index=candidate;loads[index]+=milliseconds;};
     activeElapsedMs.forEach((elapsed)=>assign(Math.max(60*1000,perRunMs-(Number.isFinite(elapsed)?Math.max(0,elapsed):0))));

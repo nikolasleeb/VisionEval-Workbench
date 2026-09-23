@@ -868,8 +868,8 @@ dialog::backdrop { background: #05070abf; backdrop-filter: blur(3px); }
 .batch-editor-grid > label > select { width: 100%; min-width: 0; height: 40px; min-height: 40px; }
 .batch-locations { grid-column: 1 / 11; }
 .batch-editor-grid #batchCompatibility { grid-column: 1 / 8; min-height: 40px; display: flex; align-items: center; }
-.batch-edit-actions { grid-column: 8 / 11; display:grid; grid-template-columns:minmax(0, .75fr) minmax(0, 1.5fr); gap:8px; }
-.batch-edit-actions button { width:100%; }
+.batch-edit-actions { grid-column: 8 / 11; display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }
+.batch-edit-actions button { flex:1 0 max-content; width:auto; white-space:normal; }
 .saved-scope-summary { padding:9px 11px; border:1px solid var(--line-soft); border-radius:8px; background:var(--surface-2); font-size:12px; line-height:1.45; }
 .saved-scope-summary[hidden] { display:none; }
 #batchSavedScopeSummary { grid-column:1 / 11; }
@@ -1341,7 +1341,7 @@ kbd { padding: 2px 6px; margin-left: 5px; border: 1px solid color-mix(in srgb, c
 .analysis-lock-wrapper.locked{position:relative}.analysis-lock-wrapper.locked:focus-visible{outline:3px solid var(--blue);outline-offset:4px;border-radius:8px}.analysis-lock-wrapper.locked:after{content:"Selections are locked while analysis is processing.";display:block;margin-top:10px;color:var(--muted);font-size:12px}
 .hypercube-result-stage{position:relative;min-height:100px}.hypercube-updating-overlay{position:absolute;inset:0;z-index:3;display:flex;gap:10px;align-items:flex-start;justify-content:flex-end;padding:14px;background:linear-gradient(180deg,color-mix(in srgb,var(--surface) 70%,transparent),transparent 35%);color:var(--label);font-weight:700;pointer-events:none}.hypercube-updating-overlay[hidden]{display:none}
 .hypercube-run-summary progress,.hypercubeBatchCard progress{width:100%}.hypercube-virtual-cases{max-height:420px;overflow:auto;display:grid;gap:6px;margin-top:12px}.hypercube-case-row{display:flex;justify-content:space-between;text-align:left;background:var(--surface-subtle);color:var(--text);border:1px solid var(--line)}.run-history-scroll{height:clamp(260px,45vh,560px);overflow:auto;overscroll-behavior:contain;display:grid;gap:8px}.run-history-scroll .job-card{display:flex;justify-content:space-between;text-align:left}
-.hypercube-case-log-layout{display:grid;grid-template-columns:minmax(260px,.85fr) minmax(360px,1.15fr);gap:14px;margin-top:12px}.hypercube-case-log-layout .hypercube-virtual-cases{margin-top:0}.hypercube-case-log-layout .run-log{min-height:300px;max-height:420px}
+.hypercube-case-log-layout{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:14px;margin-top:12px;min-width:0}.hypercube-case-log-layout>*,.hypercube-case-monitor{min-width:0;min-height:0}.hypercube-case-log-layout .hypercube-virtual-cases{margin-top:0}.hypercube-case-log-layout .run-log{box-sizing:border-box;display:block;width:100%;max-width:100%;height:clamp(240px,40vh,420px);min-height:0;overflow:auto;white-space:pre;overscroll-behavior:contain}
 .run-layout #runHistoryPanel #jobList{max-height:clamp(360px,58vh,700px);overflow:auto;overscroll-behavior:contain;padding-right:4px}
 .package-preview-description{margin:0;font-size:16px;line-height:1.5;color:var(--text)}
 .package-preview-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface-muted);color:var(--muted)}

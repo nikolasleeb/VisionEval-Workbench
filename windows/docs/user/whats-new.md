@@ -31,7 +31,3 @@ VisionEval Workbench 2.0 brings the complete bounded Hypercube workflow to Windo
 - Active R process trees are stopped with Windows-native cleanup before partial files are removed.
 - The Windows edition is native-only: it does not require or activate Docker. The optional managed installer changes only the selected current-user R, `VE_HOME`, and `VE_RUNTIME` locations after explicit approval.
 - Hypercubes are safe on laptops. Systems below 16 GB of RAM receive advisory guidance, while low workspace capacity produces a confirmation warning rather than an automatic block.
-
-## Unsigned release candidate
-
-This local candidate is not Authenticode-signed. Windows may show a SmartScreen or unknown-publisher warning. Publisher identity has not been verified; do not disable SmartScreen globally.

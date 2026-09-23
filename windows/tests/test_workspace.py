@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from backend.workbench.runtime import RuntimeManager
 from backend.workbench.copy_operations import CopyOperationManager
-from backend.workbench.workspace import Workspace, WorkspaceError, read_json
+from backend.workbench.workspace import Workspace, WorkspaceError, read_json, write_json
 
 
 def write(path: Path, text: str) -> None:
@@ -1412,6 +1412,37 @@ class WorkspaceTests(unittest.TestCase):
         })
         _, current = self.workspace.project(project["id"])
         self.assertEqual(self.workspace.result_reuse_status(current, record, scenario["id"], runtime_digest), "current")
+
+    def test_verified_native_result_without_old_digest_is_reused_without_csv(self):
+        _, project = self.setup_project()
+        run_id = "run-native-legacy"
+        home = self.workspace.root / "VE_Home"
+        home.mkdir()
+        result = self.workspace.models / run_id / "results" / "Datastore"
+        write(result / "DatastoreListing.Rda", "fixture")
+        fingerprint = self.workspace.scenario_input_fingerprint(project, "baseline")
+        record = self.workspace.register_datastore({
+            "id": "native-legacy-result", "path": str(result), "projectId": project["id"],
+            "variationId": "", "role": "baseline", "verification": "verified", "runId": run_id,
+            "inputStateFingerprint": fingerprint, "runtimeImageDigest": "",
+            "executionFingerprint": self.workspace.execution_fingerprint(fingerprint, ""),
+        })
+        write_json(self.workspace.runs / run_id / "job.json", {
+            "id": run_id, "state": "succeeded", "verification": "verified",
+            "datastoreId": record["id"], "projectId": project["id"], "image": str(home),
+            "resultPath": str(result), "inputStateFingerprint": fingerprint,
+            "templateFingerprint": project["template"]["fingerprint"],
+            "inputLibraryFingerprint": project["inputLibrary"]["fingerprint"],
+        })
+        _, current = self.workspace.project(project["id"])
+        digest = "native:sha256:" + "a" * 64
+        self.assertEqual(self.workspace.result_reuse_status(current, record, "baseline", digest, home), "current")
+        self.assertEqual(self.workspace.current_result(current, "baseline", digest, home)["id"], record["id"])
+        other_home = self.workspace.root / "different-home"
+        other_home.mkdir()
+        self.assertEqual(self.workspace.result_reuse_status(current, record, "baseline", digest, other_home), "runtime_differs")
+        (result / "DatastoreListing.Rda").unlink()
+        self.assertEqual(self.workspace.result_reuse_status(current, record, "baseline", digest, home), "runtime_differs")
 
     def test_project_validation_checks_years_and_geography(self):
         _, project = self.setup_project()

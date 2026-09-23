@@ -267,7 +267,7 @@ class HypercubeAnalysisService:
             state = str(job.get("state", ""))
             if state in ACTIVE_RUN_STATES or state == "waiting":
                 return state
-            if self.workspace.current_result(project, variation_id, image_digest):
+            if self.workspace.current_result(project, variation_id, image_digest, getattr(self.comparison.runtime, "native_home", None)):
                 return "successful"
             if state in {"failed", "cleanup_failed"}:
                 return "failed"
