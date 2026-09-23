@@ -254,7 +254,7 @@ struct DesktopState {
     blocking_job_count: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PhysicalRect {
     x: i32,
@@ -268,8 +268,36 @@ struct PhysicalRect {
 struct WindowLayoutMetrics {
     client: PhysicalRect,
     work_area: PhysicalRect,
+    visible_client: PhysicalRect,
     scale_factor: f64,
     maximized: bool,
+}
+
+const WORKBENCH_WEBSITE_URL: &str = "https://sites.google.com/view/ve-workbench/home";
+
+fn intersect_physical_rects(first: PhysicalRect, second: PhysicalRect) -> PhysicalRect {
+    let left = i64::from(first.x).max(i64::from(second.x));
+    let top = i64::from(first.y).max(i64::from(second.y));
+    let right = (i64::from(first.x) + i64::from(first.width))
+        .min(i64::from(second.x) + i64::from(second.width));
+    let bottom = (i64::from(first.y) + i64::from(first.height))
+        .min(i64::from(second.y) + i64::from(second.height));
+    PhysicalRect {
+        x: left.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        y: top.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        width: right.saturating_sub(left).max(0).min(i64::from(u32::MAX)) as u32,
+        height: bottom.saturating_sub(top).max(0).min(i64::from(u32::MAX)) as u32,
+    }
+}
+
+fn visible_client_rect(client: PhysicalRect, work_area: PhysicalRect) -> PhysicalRect {
+    let visible = intersect_physical_rects(client, work_area);
+    PhysicalRect {
+        x: visible.x.saturating_sub(client.x),
+        y: visible.y.saturating_sub(client.y),
+        width: visible.width,
+        height: visible.height,
+    }
 }
 
 fn default_notification_success_threshold_seconds() -> u64 {
@@ -655,6 +683,13 @@ fn workbench_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
                 app,
                 "whats-new",
                 "What's New in Version 2.0",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "workbench-website",
+                "VisionEval Workbench Website",
                 true,
                 None::<&str>,
             )?,
@@ -1989,8 +2024,8 @@ fn reveal_workspace_location(app: AppHandle, location: String) -> Result<(), Str
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
-    if !url.starts_with("https://github.com/") || url.chars().any(char::is_whitespace) {
-        return Err("Workbench blocked an untrusted update link".into());
+    if !is_trusted_external_url(&url) {
+        return Err("Workbench blocked an untrusted external link".into());
     }
     #[cfg(target_os = "windows")]
     let mut command = {
@@ -2012,6 +2047,11 @@ fn open_external_url(url: String) -> Result<(), String> {
     };
     command.spawn().map_err(|error| error.to_string())?;
     Ok(())
+}
+
+fn is_trusted_external_url(url: &str) -> bool {
+    !url.chars().any(char::is_whitespace)
+        && (url == WORKBENCH_WEBSITE_URL || url.starts_with("https://github.com/"))
 }
 
 #[tauri::command]
@@ -2624,19 +2664,22 @@ fn window_layout_metrics(window: tauri::WebviewWindow) -> Result<WindowLayoutMet
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "The current display could not be identified".to_string())?;
     let work_area = monitor.work_area();
+    let client = PhysicalRect {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    };
+    let work_area = PhysicalRect {
+        x: work_area.position.x,
+        y: work_area.position.y,
+        width: work_area.size.width,
+        height: work_area.size.height,
+    };
     Ok(WindowLayoutMetrics {
-        client: PhysicalRect {
-            x: position.x,
-            y: position.y,
-            width: size.width,
-            height: size.height,
-        },
-        work_area: PhysicalRect {
-            x: work_area.position.x,
-            y: work_area.position.y,
-            width: work_area.size.width,
-            height: work_area.size.height,
-        },
+        visible_client: visible_client_rect(client, work_area),
+        client,
+        work_area,
         scale_factor: monitor.scale_factor(),
         maximized: window.is_maximized().map_err(|error| error.to_string())?,
     })
@@ -2686,7 +2729,7 @@ fn main() {
         .on_menu_event(|app, event| {
             let id = event.id().as_ref();
             let action = match id {
-                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "view-hypercube" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "whats-new" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
+                "new-scenario" | "new-file" | "batch-change" | "save-file" | "view-explore" | "view-create" | "view-run" | "view-compare" | "view-hypercube" | "zoom-in" | "zoom-out" | "actual-size" | "map-zoom-in" | "map-zoom-out" | "map-fit-mpo" | "map-virginia" | "refresh" | "run-selected" | "stop-selected-run" | "stop-all-runs" | "settings" | "show-workspace-in-finder" | "user-guide" | "whats-new" | "workbench-website" | "keyboard-shortcuts" | "runtime-setup-guide" | "export-dependency-svg" | "export-dependency-pdf" | "export-dependency-html" | "export-current-csv" | "export-current-xlsx" | "export-all-changed-csv" | "export-all-changed-xlsx" | "export-selected-changed" | "export-full-variables" | "export-map-pdf" | "export-map-png" | "export-map-svg" | "export-map-csv" | "export-map-xlsx" | "export-dashboard-pdf" | "export-dashboard-csv" | "export-dashboard-xlsx" => Some(id),
                 _ => None,
             };
             if let (Some(action), Some(window)) = (action, app.get_webview_window("main")) {
@@ -2732,6 +2775,131 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn visible_client_rect_accounts_for_taskbars_and_negative_monitors() {
+        let client = PhysicalRect {
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 0,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 40,
+                    y: 0,
+                    width: 1880,
+                    height: 1080
+                }
+            ),
+            PhysicalRect {
+                x: 40,
+                y: 0,
+                width: 1880,
+                height: 1080
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 40,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 40,
+                width: 1920,
+                height: 1040
+            }
+        );
+        assert_eq!(
+            visible_client_rect(
+                client,
+                PhysicalRect {
+                    x: 0,
+                    y: 0,
+                    width: 1880,
+                    height: 1080
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1880,
+                height: 1080
+            }
+        );
+        let negative_client = PhysicalRect {
+            x: -1920,
+            y: 0,
+            width: 1920,
+            height: 1080,
+        };
+        assert_eq!(
+            visible_client_rect(
+                negative_client,
+                PhysicalRect {
+                    x: -1920,
+                    y: 0,
+                    width: 1920,
+                    height: 1040
+                }
+            ),
+            PhysicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1040
+            }
+        );
+    }
+
+    #[test]
+    fn external_links_allow_only_the_exact_website_and_existing_github_links() {
+        assert!(is_trusted_external_url(WORKBENCH_WEBSITE_URL));
+        assert!(is_trusted_external_url(
+            "https://github.com/VisionEval/VisionEval/releases"
+        ));
+        for rejected in [
+            "http://sites.google.com/view/ve-workbench/home",
+            "https://sites.google.com/view/ve-workbench/home/",
+            "https://sites.google.com/view/ve-workbench/home?source=app",
+            "https://sites.google.com/view/ve-workbench/home#downloads",
+            "https://user@sites.google.com/view/ve-workbench/home",
+            "https://sites.google.com/view/ve-workbench/%68ome",
+            "https://sites.google.com/view/ve-workbench/home ",
+            "https://sites.google.com/view/ve-workbench-other/home",
+            "https://github.com.evil.example/project",
+        ] {
+            assert!(
+                !is_trusted_external_url(rejected),
+                "unexpectedly trusted {rejected}"
+            );
+        }
+    }
+
     #[test]
     fn notification_policy_applies_threshold_focus_and_force_rules() {
         assert_eq!(

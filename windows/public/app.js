@@ -1,16 +1,37 @@
 const WORKBENCH_DIALOG_GAP = 24;
+const SETTINGS_DIALOG_SIZE_KEY = "visioneval-settings-dialog-size-v2";
+const WORKBENCH_WEBSITE_URL = "https://sites.google.com/view/ve-workbench/home";
 const LARGE_DIALOG_SIZES = {
   settingsDialog:[920,760], hypercubeSafetyDialog:[1280,820], onboardingDialog:[920,760],
   compareExportDialog:[920,760], shortcutDialog:[920,760], runtimeGuideDialog:[920,760],
   regionGeographyDialog:[1040,900], regionMapDialog:[1180,840], packagePreviewDialog:[880,720],
   documentationReaderDialog:[1400,900],
 };
-let workbenchViewportBounds = {left:0, top:0, width:document.documentElement.clientWidth, height:document.documentElement.clientHeight};
-let viewportSyncSequence = 0;
-let settingsPreferredSize = (() => { try { return JSON.parse(localStorage.getItem("visioneval-settings-dialog-size") || "null"); } catch (_) { return null; } })();
+let workbenchViewportBounds = {left:0, top:0, width:window.innerWidth, height:window.innerHeight};
+let viewportSyncRunning = false;
+let viewportSyncQueued = false;
+localStorage.removeItem("visioneval-settings-dialog-size");
+let settingsPreferredSize = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_DIALOG_SIZE_KEY) || "null");
+    return saved?.version === 2 && Number.isFinite(saved.width) && Number.isFinite(saved.height) ? saved : null;
+  } catch (_) { return null; }
+})();
 function intersectViewportBounds(first, second) {
   const left = Math.max(first.left, second.left), top = Math.max(first.top, second.top), right = Math.min(first.left + first.width, second.left + second.width), bottom = Math.min(first.top + first.height, second.top + second.height);
   return {left, top, width:Math.max(0, right - left), height:Math.max(0, bottom - top)};
+}
+function correctLargeDialogEdges(dialog, bounds) {
+  if (!dialog.open) return;
+  const safe = {left:bounds.left + WORKBENCH_DIALOG_GAP, top:bounds.top + WORKBENCH_DIALOG_GAP, right:bounds.left + bounds.width - WORKBENCH_DIALOG_GAP, bottom:bounds.top + bounds.height - WORKBENCH_DIALOG_GAP};
+  const rect = dialog.getBoundingClientRect();
+  let shiftX = 0, shiftY = 0;
+  if (rect.left < safe.left) shiftX = safe.left - rect.left;
+  else if (rect.right > safe.right) shiftX = safe.right - rect.right;
+  if (rect.top < safe.top) shiftY = safe.top - rect.top;
+  else if (rect.bottom > safe.bottom) shiftY = safe.bottom - rect.bottom;
+  if (Math.abs(shiftX) > .5) dialog.style.left = `${parseFloat(dialog.style.left) + shiftX}px`;
+  if (Math.abs(shiftY) > .5) dialog.style.top = `${parseFloat(dialog.style.top) + shiftY}px`;
 }
 function applyLargeDialogLayout() {
   const bounds = workbenchViewportBounds, availableWidth = Math.max(0, bounds.width - 2 * WORKBENCH_DIALOG_GAP), availableHeight = Math.max(0, bounds.height - 2 * WORKBENCH_DIALOG_GAP);
@@ -19,43 +40,48 @@ function applyLargeDialogLayout() {
     const preferred = id === "settingsDialog" && settingsPreferredSize ? [settingsPreferredSize.width, settingsPreferredSize.height] : defaults;
     const width = Math.max(0, Math.min(Number(preferred[0]) || defaults[0], availableWidth));
     const height = Math.max(0, Math.min(Number(preferred[1]) || defaults[1], availableHeight));
-    dialog.style.left = `${Math.round(bounds.left + (bounds.width - width) / 2)}px`;
-    dialog.style.top = `${Math.round(bounds.top + (bounds.height - height) / 2)}px`;
+    dialog.style.setProperty("left", `${Math.round(bounds.left + bounds.width / 2)}px`, "important");
+    dialog.style.setProperty("top", `${Math.round(bounds.top + bounds.height / 2)}px`, "important");
+    dialog.style.setProperty("right", "auto", "important");
+    dialog.style.setProperty("bottom", "auto", "important");
+    dialog.style.transform = "translate(-50%, -50%)";
     dialog.style.width = `${Math.round(width)}px`; dialog.style.height = `${Math.round(height)}px`;
     dialog.style.maxWidth = `${Math.round(availableWidth)}px`; dialog.style.maxHeight = `${Math.round(availableHeight)}px`;
+    requestAnimationFrame(() => correctLargeDialogEdges(dialog, bounds));
   });
 }
 async function syncWorkbenchViewport() {
-  const sequence = ++viewportSyncSequence, root = document.documentElement;
-  const dom = {left:0, top:0, width:root.clientWidth, height:root.clientHeight};
-  const visualHeight = window.visualViewport?.height, visualWidth = window.visualViewport?.width;
-  const visual = window.visualViewport ? {left:window.visualViewport.offsetLeft, top:window.visualViewport.offsetTop, width:visualWidth, height:visualHeight} : dom;
-  let bounds = intersectViewportBounds(dom, visual);
+  if (viewportSyncRunning) { viewportSyncQueued = true; return; }
+  viewportSyncRunning = true;
   try {
-    const invoke = window.__TAURI_INTERNALS__?.invoke;
-    if (invoke) {
-      const metrics = await invoke("window_layout_metrics");
-      if (sequence !== viewportSyncSequence) return;
-      const pxPerCssX = metrics.client.width / Math.max(1, root.clientWidth), pxPerCssY = metrics.client.height / Math.max(1, root.clientHeight);
-      const physical = intersectViewportBounds(
-        {left:metrics.client.x, top:metrics.client.y, width:metrics.client.width, height:metrics.client.height},
-        {left:metrics.workArea.x, top:metrics.workArea.y, width:metrics.workArea.width, height:metrics.workArea.height},
-      );
-      const nativeBounds = {left:(physical.left - metrics.client.x) / pxPerCssX, top:(physical.top - metrics.client.y) / pxPerCssY, width:physical.width / pxPerCssX, height:physical.height / pxPerCssY};
-      bounds = intersectViewportBounds(bounds, nativeBounds);
+    const root = document.documentElement;
+    const layout = {left:0, top:0, width:window.innerWidth, height:window.innerHeight};
+    let bounds = layout;
+    try {
+      const invoke = window.__TAURI_INTERNALS__?.invoke;
+      if (invoke) {
+        const metrics = await invoke("window_layout_metrics");
+        const cssPerPhysicalX = layout.width / Math.max(1, metrics.client.width), cssPerPhysicalY = layout.height / Math.max(1, metrics.client.height);
+        const visible = metrics.visibleClient;
+        const nativeBounds = {left:visible.x * cssPerPhysicalX, top:visible.y * cssPerPhysicalY, width:visible.width * cssPerPhysicalX, height:visible.height * cssPerPhysicalY};
+        bounds = intersectViewportBounds(layout, nativeBounds);
+      }
+    } catch (error) { console.warn("Native window layout metrics were unavailable", error); }
+    if (bounds.width > 0 && bounds.height > 0) {
+      workbenchViewportBounds = bounds;
+      root.style.setProperty("--workbench-viewport-left", `${bounds.left}px`);
+      root.style.setProperty("--workbench-viewport-top", `${bounds.top}px`);
+      root.style.setProperty("--workbench-viewport-width", `${bounds.width}px`);
+      root.style.setProperty("--workbench-viewport-height", `${bounds.height}px`);
+      applyLargeDialogLayout();
     }
-  } catch (error) { console.warn("Native window layout metrics were unavailable", error); }
-  if (sequence !== viewportSyncSequence || bounds.width <= 0 || bounds.height <= 0) return;
-  workbenchViewportBounds = bounds;
-  root.style.setProperty("--workbench-viewport-left", `${bounds.left}px`);
-  root.style.setProperty("--workbench-viewport-top", `${bounds.top}px`);
-  root.style.setProperty("--workbench-viewport-width", `${bounds.width}px`);
-  root.style.setProperty("--workbench-viewport-height", `${bounds.height}px`);
-  applyLargeDialogLayout();
+  } finally {
+    viewportSyncRunning = false;
+    if (viewportSyncQueued) { viewportSyncQueued = false; requestAnimationFrame(syncWorkbenchViewport); }
+  }
 }
 syncWorkbenchViewport();
 window.visualViewport?.addEventListener("resize", syncWorkbenchViewport);
-window.visualViewport?.addEventListener("scroll", syncWorkbenchViewport);
 window.addEventListener("resize", syncWorkbenchViewport);
 window.addEventListener("workbench-native-layout-change", syncWorkbenchViewport);
 new ResizeObserver(syncWorkbenchViewport).observe(document.documentElement);
@@ -67,19 +93,19 @@ function resizeSettingsDialog(width, height) {
     width:Math.max(minimumWidth, Math.min(width, workbenchViewportBounds.width - 2 * WORKBENCH_DIALOG_GAP)),
     height:Math.max(minimumHeight, Math.min(height, workbenchViewportBounds.height - 2 * WORKBENCH_DIALOG_GAP)),
   };
-  localStorage.setItem("visioneval-settings-dialog-size", JSON.stringify(settingsPreferredSize)); applyLargeDialogLayout();
+  localStorage.setItem(SETTINGS_DIALOG_SIZE_KEY, JSON.stringify({version:2, ...settingsPreferredSize})); applyLargeDialogLayout();
 }
 const settingsResizeHandle = document.getElementById("settingsDialogResizer");
 settingsResizeHandle?.addEventListener("pointerdown", (event) => {
-  event.preventDefault(); const dialog = document.getElementById("settingsDialog"), start = dialog.getBoundingClientRect(), startX = event.clientX, startY = event.clientY, controller = new AbortController();
+  event.preventDefault(); const dialog = document.getElementById("settingsDialog"), start = {width:parseFloat(dialog.style.width) || dialog.getBoundingClientRect().width, height:parseFloat(dialog.style.height) || dialog.getBoundingClientRect().height}, startX = event.clientX, startY = event.clientY, controller = new AbortController();
   settingsResizeHandle.setPointerCapture?.(event.pointerId); settingsResizeHandle.classList.add("resizing");
   window.addEventListener("pointermove", (move) => resizeSettingsDialog(start.width + move.clientX - startX, start.height + move.clientY - startY), {signal:controller.signal});
   const finish = () => { controller.abort(); settingsResizeHandle.classList.remove("resizing"); };
   window.addEventListener("pointerup", finish, {once:true, signal:controller.signal}); window.addEventListener("pointercancel", finish, {once:true, signal:controller.signal});
 });
 settingsResizeHandle?.addEventListener("keydown", (event) => {
-  const dialog = document.getElementById("settingsDialog"), rect = dialog.getBoundingClientRect(), step = event.shiftKey ? 48 : 16;
-  if (event.key === "Home") { event.preventDefault(); settingsPreferredSize = null; localStorage.removeItem("visioneval-settings-dialog-size"); applyLargeDialogLayout(); return; }
+  const dialog = document.getElementById("settingsDialog"), rect = {width:parseFloat(dialog.style.width) || dialog.getBoundingClientRect().width, height:parseFloat(dialog.style.height) || dialog.getBoundingClientRect().height}, step = event.shiftKey ? 48 : 16;
+  if (event.key === "Home") { event.preventDefault(); settingsPreferredSize = null; localStorage.removeItem(SETTINGS_DIALOG_SIZE_KEY); applyLargeDialogLayout(); return; }
   const changes = {ArrowRight:[step,0], ArrowLeft:[-step,0], ArrowDown:[0,step], ArrowUp:[0,-step]}; if (!changes[event.key]) return;
   event.preventDefault(); resizeSettingsDialog(rect.width + changes[event.key][0], rect.height + changes[event.key][1]);
 });
@@ -6295,6 +6321,10 @@ async function openUpdateUrl(url){
   if(!/^https:\/\/github\.com\//.test(String(url||"")))return notify("Workbench blocked an untrusted update link.","error");
   try{await window.__TAURI_INTERNALS__.invoke("open_external_url",{url})}catch(error){notify(`Could not open the release page: ${error}`,"error")}
 }
+async function openWorkbenchWebsite(){
+  try{await window.__TAURI_INTERNALS__.invoke("open_external_url",{url:WORKBENCH_WEBSITE_URL})}
+  catch(error){notify(`Could not open ${WORKBENCH_WEBSITE_URL}: ${error}`,"error")}
+}
 async function checkUpdatesNow(){
   const button=$("checkUpdatesNow");setBusy(button,true,"Checking…");
   try{
@@ -6345,7 +6375,7 @@ $("automaticUpdateChecks").addEventListener("change",updateCheckControls);
 $("checkUpdatesNow").addEventListener("click",checkUpdatesNow);
 $("updateStatusList").addEventListener("click",event=>{const link=event.target.closest("[data-update-url]");if(link)return openUpdateUrl(link.dataset.updateUrl);const install=event.target.closest("[data-install-runtime-update]");if(install)return installRuntimeUpdate(install);const restore=event.target.closest("[data-restore-runtime]");if(restore)return restorePreviousRuntime(restore)});
 $('refreshDiagnostics').addEventListener('click',loadDiagnosticsSettings);
-$('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),preview=event.target.closest('[data-preview-document]');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(preview)openDocumentationInPreview(preview.dataset.previewDocument).catch(error=>notify(error.message||String(error),'error'))});
+$('settingsDocumentation').addEventListener('click',(event)=>{const read=event.target.closest('[data-read-document]'),preview=event.target.closest('[data-preview-document]'),website=event.target.closest('#openWorkbenchWebsite');if(read)openDocumentationReader(read.dataset.readDocument,read).catch(error=>notify(error.message||String(error),'error'));if(preview)openDocumentationInPreview(preview.dataset.previewDocument).catch(error=>notify(error.message||String(error),'error'));if(website)openWorkbenchWebsite()});
 $('documentationReaderClose').addEventListener('click',closeDocumentationReader);
 $('documentationReaderZoomOut').addEventListener('click',()=>setDocumentationZoom(documentationZoom-.15));
 $('documentationReaderFit').addEventListener('click',()=>setDocumentationZoom(1));
@@ -7191,6 +7221,7 @@ async function handleMenuAction(action) {
     return openDocumentationReader("user-guide").catch((error) => notify(String(error), "error"));
   }
   if (action === "whats-new") return openDocumentationReader("whats-new").catch((error) => notify(String(error), "error"));
+  if (action === "workbench-website") return openWorkbenchWebsite();
   if (action === "keyboard-shortcuts") return $("shortcutDialog").showModal();
   if (action === "runtime-setup-guide") return $("runtimeGuideDialog").showModal();
   if (action === "view-explore") return guardUnsaved(() => switchPage("explorePage"));

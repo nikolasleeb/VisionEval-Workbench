@@ -12,9 +12,9 @@ Certified runtime: VisionEval `VE-40-RC7`
 
 | Gate | Result |
 | --- | --- |
-| Python suite | PASS — 368 tests, 18 dependency/integration skips |
+| Python suite | PASS — 387 tests, 18 dependency/integration skips |
 | JavaScript syntax and frontend contract/accessibility coverage | PASS |
-| Rust tests | PASS — 15 tests |
+| Rust tests | PASS — 17 tests |
 | `cargo fmt --check` | PASS |
 | Documentation source validation | PASS — 62 Markdown files |
 | Generated document consistency | PASS — User Guide PDF 20 pages and DOCX 27 pages; What's New PDF/DOCX 1 page each |
@@ -107,10 +107,10 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
 ## Native work-area and input-validation follow-up
 
 - Added the native Tauri `window_layout_metrics` command. It reports the WebView
-  client rectangle, the current monitor work area, scale factor, and maximized
-  state in physical pixels. The frontend intersects that rectangle with the DOM
-  client area and `VisualViewport`, maps it through the measured physical/CSS
-  ratios, and centers large dialogs within a fixed 24 CSS-pixel inset.
+  client rectangle, the current monitor work area, their client-relative visible
+  intersection, scale factor, and maximized state in physical pixels. The
+  frontend maps that intersection through the native-inner/layout-viewport ratio
+  and centers large dialogs within a fixed 24 CSS-pixel inset.
 - Window move, resize, maximize/restore, scale-factor, visual-viewport, document
   resize, and Workbench zoom changes all trigger reclamping. Settings has a
   persistent pointer/keyboard resize handle; Hypercube remains non-resizable.
@@ -128,11 +128,6 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
 - The privacy-clean installer and installed executables contain no user-profile,
   private project, SSD build, Docker executable, Datastore, or workspace paths.
   The installer is unsigned, as expected.
-
-Manual on-screen confirmation of the exact Settings/Hypercube taskbar clearance
-is still required because native window automation is unavailable in this Codex
-session. Until that confirmation, the installer remains in the temporary SSD
-candidate folder and has not replaced the published release-candidate artifacts.
 
 ## Popup safe-area follow-up
 
@@ -156,6 +151,43 @@ candidate folder and has not replaced the published release-candidate artifacts.
   launched successfully. The installed backend retained the SSD workspace at
   `D:\VDOT\VE Workbench\Workspaces`, the native adapter, R 4.5.3, VisionEval
   RC7, and independent `VE_RUNTIME`/`VE_HOME` paths.
+
+## Dialog recentering and website-link follow-up
+
+- Native layout metrics now include the physical work-area/client intersection as
+  a client-relative rectangle. The frontend converts that rectangle through the
+  measured native-inner/layout-viewport ratio, centers each large dialog with a
+  single fixed-position translate rule, and corrects any measured edge drift.
+- Settings size persistence now uses a versioned record. The malformed size from
+  the preceding candidate is discarded once; later valid sizes are clamped,
+  recentered, and retained across openings and layout changes.
+- The installed-app smoke exposed and corrected two integration defects that
+  static geometry tests did not catch: overlapping resize notifications could
+  prevent the first layout from committing, and `inset: auto !important`
+  overrode the controller's inline center coordinates. Layout synchronization is
+  now single-flight/coalesced, and the controller owns all four inset edges.
+- Help and Settings Documentation now share one action for the official website,
+  `https://sites.google.com/view/ve-workbench/home`. The desktop command accepts
+  that string only by exact equality, while retaining the separate trusted GitHub
+  update-link policy.
+- Final source gates: 387 Python tests passed with 18 expected
+  dependency/integration skips; 77 frontend contract tests passed with 2 expected
+  skips; 17 Rust tests passed; JavaScript syntax, Rust formatting, and
+  `git diff --check` passed.
+- The final per-user installed smoke showed Settings centered with equal visible
+  clearance above/below and left/right, fixed header/footer, internal scrolling,
+  and a reachable bottom-right resize grip. Hypercube showed the same 24–25 px
+  usable-edge clearance with a fixed header/footer and internally scrolling
+  warning content.
+- The Help website item opened the Windows default Chrome browser. The Settings
+  Documentation card displayed the exact URL and remained open without saving or
+  discarding state. Exact-URL rejection variants are covered by Rust tests.
+- The final installer was rebuilt with Rust source-path remapping and contains no
+  private user or SSD build path. Silent current-user installation preserved the
+  desktop configuration and SSD workspace unchanged.
+- After all automated and installed-app gates passed, the corrected unsigned
+  installer was promoted from the temporary SSD build folder into the Windows
+  release-candidate folder. It remains unpublished and untagged.
 
 ## Expected warnings
 
