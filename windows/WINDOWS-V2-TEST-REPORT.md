@@ -206,9 +206,9 @@ startup/runtime/storage/shutdown smoke were rerun against the final candidate.
 - The rebuilt candidate installed per-user with exit code 0 while preserving the
   desktop configuration and SSD workspace. Its installed backend previewed the
   119-file PlanRVA 2.0 package in 552 ms and verified the package manifest.
-- This follow-up installer remains in its temporary SSD candidate folder pending
-  user confirmation that the review dialog is visible; it has not yet replaced
-  the promoted release-candidate installer.
+- The user confirmed that the PlanRVA package review dialog now appears. The
+  tested unsigned installer was promoted to the Windows release-candidate folder;
+  it remains unpublished and untagged.
 
 ## Expected warnings
 
