@@ -343,6 +343,26 @@ class RegionBuilderTests(unittest.TestCase):
         self.assertEqual(sources[1]["id"], "workspace:limited")
         self.assertEqual(sources[1]["supportedRegionIds"], [DEFAULT_FAMPO_ID])
 
+    def test_custom_city_uses_input_library_geo_casing(self):
+        library = self.root / "richmond-inputs"
+        write(library / "bzone_lat_lon.csv", "Geo,Year,Latitude,Longitude\n517600001001,2024,37.5,-77.4\n")
+        write(library / "marea_lane_miles.csv", "Geo,Year,FwyLaneMi\nRichmond City,2024,100\n")
+        write(library / "azone_hh_pop_by_age.csv", "Geo,Year,Age0to14\nRichmond City,2024,10\n")
+        selection = self.service._package_selection(
+            library,
+            {"id": "test-mpo", "fips": {"51041": "Chesterfield County"}},
+            {"regions": {}},
+            {"builder": {"localityPrefixLength": 5}},
+            {"geographyMode": "custom", "selectedBzones": ["517600001001"]},
+            {"51760": "Richmond city"},
+        )
+        self.assertEqual(selection["geoRows"][0]["Azone"], "Richmond City")
+        self.assertEqual(selection["geoRows"][0]["Marea"], "Richmond City")
+        self.assertEqual(selection["mareas"], {"Richmond City"})
+        plan, errors = self.service._input_plan_from_path(library, selection)
+        self.assertEqual(errors, [])
+        self.assertEqual(next(item for item in plan if item["file"] == "marea_lane_miles.csv")["rowsAfter"], 1)
+
     def test_package_statewide_region_is_context_only(self):
         packages, package_id, source_id = install_va_package(self.root, self.workspace, spatial=True)
         service = RegionBuilderService(self.workspace, self.root, packages)

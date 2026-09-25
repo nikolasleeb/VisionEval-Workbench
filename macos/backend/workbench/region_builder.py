@@ -767,6 +767,28 @@ class RegionBuilderService:
                 and str(row.get("COUNTYNAME") or "").strip()
             }
 
+    @staticmethod
+    def _input_locality_names(input_path: Path, names: dict[str, str]) -> dict[str, str]:
+        """Use the Input Library's exact Geo spelling, not Census display casing."""
+        wanted = {name.casefold() for name in names.values()}
+        canonical: dict[str, str] = {}
+        for pattern in ("marea_*.csv", "azone_*.csv"):
+            for path in sorted(input_path.glob(pattern)):
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    if "Geo" not in (reader.fieldnames or []):
+                        continue
+                    for row in reader:
+                        value = str(row.get("Geo") or "").strip()
+                        key = value.casefold()
+                        if key in wanted and key not in canonical:
+                            canonical[key] = value
+                if len(canonical) == len(wanted):
+                    break
+            if len(canonical) == len(wanted):
+                break
+        return {fips: canonical.get(name.casefold(), name) for fips, name in names.items()}
+
     def geography_options(self, package_id: str, source_library_id: str, region_id: str) -> dict[str, Any]:
         if self._model_bundle_source(package_id):
             if region_id != "installed-model-scope":
@@ -821,6 +843,7 @@ class RegionBuilderService:
         for fips, name in locality_names.items():
             if fips in available_fips:
                 fips_to_azone.setdefault(fips, name)
+        fips_to_azone = self._input_locality_names(input_path, fips_to_azone)
         by_fips: dict[str, set[str]] = {fips: set() for fips in fips_to_azone}
         for row in rows:
             bzone = str(row.get("Geo", "")).strip()
@@ -1062,6 +1085,7 @@ class RegionBuilderService:
             for fips, name in locality_names.items():
                 if fips in available_fips:
                     fips_to_azone.setdefault(fips, name)
+        fips_to_azone = self._input_locality_names(input_path, fips_to_azone)
         eligible_bzones = {value for value in available_bzones if value[:prefix_length] in official_fips}
         statewide = region.get("regionType") == "statewide"
         if statewide:
