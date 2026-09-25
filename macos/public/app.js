@@ -666,15 +666,21 @@ function observeJobStates(jobs) {
 function setBusy(button, busy, label = "Working…") {
   if (!button) return;
   if (busy) {
-    button.dataset.originalText = button.textContent;
-    button.dataset.originalDisabled = button.disabled ? "true" : "false";
-    button.dataset.originalDisabledReason = button.dataset.disabledReason || "";
+    if (button.dataset.busy !== "true") {
+      button.dataset.originalText = button.textContent;
+      button.dataset.originalDisabled = button.disabled ? "true" : "false";
+      button.dataset.originalDisabledReason = button.dataset.disabledReason || "";
+      button.dataset.busy = "true";
+    }
     button.textContent = label;
     setButtonAvailability(button, false, `${label.replace(/…$/, "")} is in progress.`);
   } else {
+    if (button.dataset.busy !== "true") return;
     button.textContent = button.dataset.originalText || button.textContent;
     const wasDisabled = button.dataset.originalDisabled === "true";
     setButtonAvailability(button, !wasDisabled, button.dataset.originalDisabledReason || disabledReasonFor(button));
+    delete button.dataset.busy;
+    delete button.dataset.originalText;
     delete button.dataset.originalDisabled;
     delete button.dataset.originalDisabledReason;
   }

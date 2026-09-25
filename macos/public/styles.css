@@ -379,8 +379,8 @@ button.item-card { font-weight: 400; }
 .hypercube-scope-summary strong { color:var(--text); }
 .hypercube-axes-heading { align-items: end; margin-top: 4px; }
 .hypercube-axis-list { display: grid; gap: 10px; }
-.hypercube-axis-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(150px, 1fr) minmax(145px, 1fr) repeat(3, minmax(95px, .7fr)) auto; gap: 9px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
-.hypercube-axis-row .danger { min-width: 42px; padding-inline: 12px; }
+.hypercube-axis-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(150px, 1fr) minmax(145px, 1fr) repeat(3, minmax(95px, .7fr)) auto; gap: 9px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2); }
+.hypercube-axis-row .danger { min-width: 42px; margin-top: 25px; padding-inline: 12px; }
 .hypercube-actions { display: flex; align-items:center; gap: 9px; flex-wrap: wrap; }
 .hypercube-actions #previewHypercube { margin-left: auto; }
 #hypercubeSaveStatus { margin-right:0; }
