@@ -331,6 +331,18 @@ class RegionBuilderTests(unittest.TestCase):
         self.assertEqual(reference["package"]["retrievedAt"], "2026-08-05")
         self.assertIn("Checked 2026-08-05", reference["sourcesDocument"])
 
+    def test_workspace_source_must_cover_an_official_mpo(self):
+        packages, package_id, packaged_source = install_va_package(self.root, self.workspace, spatial=True)
+        service = RegionBuilderService(self.workspace, self.root, packages)
+        workspace_file = self.workspace.input_library / "limited" / "bzone_lat_lon.csv"
+        write(workspace_file, "Geo,Year,Latitude,Longitude\n999,2024,38,-77\n")
+        self.assertEqual([source["id"] for source in service.sources(package_id)["sources"]], [packaged_source])
+
+        write(workspace_file, "Geo,Year,Latitude,Longitude\n511770001001,2024,38,-77\n516300001001,2024,38,-77\n511790001001,2024,38,-77\n")
+        sources = service.sources(package_id)["sources"]
+        self.assertEqual(sources[1]["id"], "workspace:limited")
+        self.assertEqual(sources[1]["supportedRegionIds"], [DEFAULT_FAMPO_ID])
+
     def test_package_statewide_region_is_context_only(self):
         packages, package_id, source_id = install_va_package(self.root, self.workspace, spatial=True)
         service = RegionBuilderService(self.workspace, self.root, packages)

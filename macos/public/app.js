@@ -796,6 +796,11 @@ function selectedOption(select, value) {
   if ([...select.options].some((option) => option.value === value)) select.value = value;
 }
 
+function compatibleRegionSources(sources, regionId) {
+  if (!regionId) return sources;
+  return sources.filter((source) => !Array.isArray(source.supportedRegionIds) || source.supportedRegionIds.includes(regionId));
+}
+
 function showAppRecovery(error) {
   const recovery = $("appRecovery");
   if (!recovery) return;
@@ -1013,20 +1018,21 @@ function renderRegionBuilder() {
   }
   const sources = state.regionBuilderSources?.sources || [];
   const regions = state.regionBuilderRegions?.regions || [];
-  const previousSource = state.regionBuilderSourceLibraryId || sourceSelect.value || "";
-  const previousRegion = state.regionBuilderRegionId || regionSelect.value || "";
-  sourceSelect.innerHTML = sources.length ? sources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible Input Library</option>`;
+  const previousSource = state.regionBuilderSourceLibraryId;
+  const previousRegion = state.regionBuilderRegionId;
   if (regions.length) {
     const regional = regions.filter((item) => item.regionType !== "statewide");
     regionSelect.innerHTML = regional.length ? `<optgroup label="MPO study areas">${regional.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</optgroup>` : `<option value="">No supported MPO definitions</option>`;
   } else regionSelect.innerHTML = `<option value="">No region definitions</option>`;
-  selectedOption(sourceSelect, previousSource);
   selectedOption(regionSelect, previousRegion);
-  state.regionBuilderSourceLibraryId = sourceSelect.value;
   state.regionBuilderRegionId = regionSelect.value;
+  const compatibleSources = compatibleRegionSources(sources, state.regionBuilderRegionId);
+  sourceSelect.innerHTML = compatibleSources.length ? compatibleSources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible Input Library</option>`;
+  selectedOption(sourceSelect, previousSource);
+  state.regionBuilderSourceLibraryId = sourceSelect.value;
   const selectedRegion = regions.find((item) => item.id === state.regionBuilderRegionId);
   initializeRegionBuilderIdentity(selectedRegion, packageChanged);
-  updateRegionBuilderAvailability(sources, regions);
+  updateRegionBuilderAvailability(compatibleSources, regions);
   renderRegionMapLoadStatus();
   $("customizeRegionGeography").disabled = selectedRegion?.regionType === "statewide";
   $("customizeRegionGeography").title = selectedRegion?.regionType === "statewide" ? "The statewide build includes every packaged Bzone." : "Include or exclude individual Azones and Bzones.";
@@ -1055,6 +1061,7 @@ function regionBuilderInstalledScope() {
 function renderRegionBuilderMode() {
   const installed = regionBuilderInstalledScope();
   $("regionOutputOptions").hidden = installed;
+  $("regionSourceLibraryField").hidden = installed;
   $("previewRegionBuild").hidden = installed;
   $("buildRegionAssets").hidden = installed;
   $("regionSourceLibrary").disabled = installed;
@@ -4128,8 +4135,7 @@ $("regionDefinition").addEventListener("change", (event) => {
   state.regionBuilderIdentityKey = "";
   resetRegionBuilderGeography();
   initializeRegionBuilderIdentity(selectedRegion, true);
-  renderRegionBuilderMode();
-  updateRegionBuilderAvailability();
+  renderRegionBuilder();
 });
 ["regionName", "regionState"].forEach((id) => $(id).addEventListener("input", () => { state.regionBuilderIdentityDrafts[state.regionBuilderGeographyMode] = currentRegionBuilderIdentity(); state.regionBuilderPreview = null; renderRegionBuilderPreview(); updateRegionBuilderAvailability(); }));
 $("useOfficialRegionGeography").addEventListener("click", () => switchRegionBuilderIdentity("official"));

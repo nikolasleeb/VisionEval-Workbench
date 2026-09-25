@@ -682,10 +682,15 @@ class RegionBuilderService:
                 "id": f"workspace:{library['id']}", "name": library["name"], "kind": "workspace",
                 "fileCount": library["fileCount"], "pairedTemplateId": model_source["templateId"],
             }]}
-        root, manifest, _, _ = self._package_context(package_id)
+        root, manifest, _, crosswalk = self._package_context(package_id)
         input_config = manifest["inputLibrary"]
         packaged = safe_package_path(root, str(input_config["path"]))
         required = {str(item) for item in input_config.get("requiredFiles", [])}
+        region_bzones = {
+            region_id: {str(bzone) for bzone in region.get("bzones", [])}
+            for region_id, region in crosswalk.get("regions", {}).items()
+            if isinstance(region, dict) and region.get("bzones")
+        }
         sources: list[dict[str, Any]] = [{
             "id": f"package:{package_id}",
             "name": str(input_config.get("name") or f"{manifest['coverage']} InputLibrary"),
@@ -695,11 +700,25 @@ class RegionBuilderService:
         for item in self.workspace.list_input_libraries():
             library_path = self.workspace.input_library / item["id"]
             if all((library_path / filename).is_file() for filename in required):
+                supported_regions = None
+                if region_bzones:
+                    bzone_path = library_path / "bzone_lat_lon.csv"
+                    available = set()
+                    if bzone_path.is_file():
+                        with bzone_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            available = {str(row.get("Geo") or "").strip() for row in csv.DictReader(handle)}
+                    supported_regions = [
+                        region_id for region_id, bzones in region_bzones.items()
+                        if bzones.issubset(available)
+                    ]
+                    if not supported_regions:
+                        continue
                 sources.append({
                     "id": f"workspace:{item['id']}",
                     "name": f"{item['name']} (workspace)",
                     "kind": "workspace",
                     "fileCount": item["fileCount"],
+                    **({"supportedRegionIds": supported_regions} if supported_regions is not None else {}),
                 })
         return {"packageId": package_id, "sources": sources}
 
