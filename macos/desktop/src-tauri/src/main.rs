@@ -1795,6 +1795,11 @@ fn nonterminal_job_count(root: &Path) -> usize {
         .count()
 }
 
+fn workspace_housekeeping(name: &std::ffi::OsStr) -> bool {
+    let name = name.to_string_lossy();
+    name == ".DS_Store" || name.starts_with("._")
+}
+
 fn transfer_workspace_tree(
     source: &Path,
     destination: &Path,
@@ -1807,6 +1812,9 @@ fn transfer_workspace_tree(
     }
     for entry in fs::read_dir(source)? {
         let entry = entry?;
+        if workspace_housekeeping(&entry.file_name()) {
+            continue;
+        }
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
         let kind = entry.file_type()?;
@@ -1836,11 +1844,13 @@ fn transfer_workspace_tree(
                     break;
                 }
                 if verify {
-                    output.read_exact(&mut check[..count])?;
+                    output.read_exact(&mut check[..count]).map_err(|error| {
+                        io::Error::new(error.kind(), format!("Could not verify {}: {error}", destination_path.display()))
+                    })?;
                     if buffer[..count] != check[..count] {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            "Workspace copy verification failed; the original remains unchanged.",
+                            format!("Copied file differs from the original: {}", destination_path.display()),
                         ));
                     }
                 } else {
@@ -1853,7 +1863,7 @@ fn transfer_workspace_tree(
                 if output.read(&mut check[..1])? != 0 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        "Workspace copy has unexpected extra data.",
+                        format!("Copied file has unexpected extra data: {}", destination_path.display()),
                     ));
                 }
             } else {
@@ -1871,6 +1881,9 @@ fn tree_summary(root: &Path) -> io::Result<(u64, u64)> {
     let mut bytes = 0u64;
     for entry in fs::read_dir(root)? {
         let entry = entry?;
+        if workspace_housekeeping(&entry.file_name()) {
+            continue;
+        }
         if entry.file_type()?.is_dir() {
             let summary = tree_summary(&entry.path())?;
             files += summary.0;
@@ -1977,12 +1990,9 @@ fn move_workspace_blocking(app: &AppHandle, destination: String) -> Result<Strin
             }
         }).map_err(|error| format!("Workspace move did not finish: {error}. The original remains active; leave the partial destination alone."))?;
         workspace_move_progress(app, phase, message, totals.0, totals.1);
-        if totals != summary
-            || tree_summary(&destination).map_err(|error| error.to_string())? != summary
-        {
-            return Err(
-                "Workspace copy verification failed; the original remains unchanged.".into(),
-            );
+        let destination_summary = tree_summary(&destination).map_err(|error| error.to_string())?;
+        if totals != summary || destination_summary != summary {
+            return Err(format!("Workspace copy verification failed: expected {} files / {} bytes; processed {} files / {} bytes; destination contains {} files / {} bytes. The original remains unchanged.", summary.0, summary.1, totals.0, totals.1, destination_summary.0, destination_summary.1));
         }
     }
     workspace_status(&destination)?;
@@ -2850,6 +2860,15 @@ mod tests {
         transfer_workspace_tree(&source, &destination, true, &mut verified, &mut |_, _| {})
             .unwrap();
         assert_eq!(verified, totals);
+        // Finder and exFAT AppleDouble files are not workspace data.
+        fs::write(destination.join(".DS_Store"), b"finder metadata").unwrap();
+        fs::write(destination.join("nested/._data"), b"appledouble metadata").unwrap();
+        fs::write(source.join(".DS_Store"), b"different finder metadata").unwrap();
+        assert_eq!(tree_summary(&source).unwrap(), totals);
+        assert_eq!(tree_summary(&destination).unwrap(), totals);
+        transfer_workspace_tree(&source, &destination, true, &mut (0, 0), &mut |_, _| {}).unwrap();
+        fs::write(destination.join("unexpected-workspace-data"), b"real data").unwrap();
+        assert_ne!(tree_summary(&destination).unwrap(), totals);
         // Equal file sizes alone must not pass verification.
         fs::write(destination.join("nested/data"), vec![43u8; 2_100_000]).unwrap();
         assert!(
