@@ -1845,12 +1845,18 @@ fn transfer_workspace_tree(
                 }
                 if verify {
                     output.read_exact(&mut check[..count]).map_err(|error| {
-                        io::Error::new(error.kind(), format!("Could not verify {}: {error}", destination_path.display()))
+                        io::Error::new(
+                            error.kind(),
+                            format!("Could not verify {}: {error}", destination_path.display()),
+                        )
                     })?;
                     if buffer[..count] != check[..count] {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            format!("Copied file differs from the original: {}", destination_path.display()),
+                            format!(
+                                "Copied file differs from the original: {}",
+                                destination_path.display()
+                            ),
                         ));
                     }
                 } else {
@@ -1863,7 +1869,10 @@ fn transfer_workspace_tree(
                 if output.read(&mut check[..1])? != 0 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidData,
-                        format!("Copied file has unexpected extra data: {}", destination_path.display()),
+                        format!(
+                            "Copied file has unexpected extra data: {}",
+                            destination_path.display()
+                        ),
                     ));
                 }
             } else {
