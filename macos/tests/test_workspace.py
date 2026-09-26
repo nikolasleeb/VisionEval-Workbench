@@ -50,6 +50,15 @@ class WorkspaceTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_reopen_workspace_ignores_binary_appledouble_metadata(self):
+        metadata = self.workspace.internal / "._settings.json"
+        metadata.write_bytes(b"\x00\x05\x16\x07\xb0\xff")
+        self.assertIsNone(read_json(metadata, None))
+        reopened = Workspace(self.workspace.root)
+        self.assertEqual(reopened.root, self.workspace.root)
+        self.assertTrue(reopened.settings()["retainFullExports"])
+        self.assertEqual(metadata.read_bytes(), b"\x00\x05\x16\x07\xb0\xff")
+
     def test_workspace_marker_settings_and_storage_contract(self):
         marker = read_json(self.workspace.root / ".visioneval-workspace.json", {})
         self.assertEqual(marker["formatVersion"], 2)

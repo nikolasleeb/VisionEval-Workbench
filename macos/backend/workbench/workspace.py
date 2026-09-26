@@ -55,6 +55,9 @@ def asset_display_name(value: Any) -> str:
 
 
 def read_json(path: Path, default: Any = None) -> Any:
+    # AppleDouble sidecars on external drives are binary metadata, not JSON.
+    if path.name.startswith("._") or path.name == ".DS_Store":
+        return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -275,7 +278,7 @@ class Workspace:
                         return new + value[len(old):]
             return value
 
-        candidates = list(self.internal.rglob("*.json"))
+        candidates = [path for path in self.internal.rglob("*.json") if not path.name.startswith("._")]
         candidates.append(self.catalog_path)
         candidates.extend(self.projects.glob("*/project.json"))
         candidates.extend(self.removed_projects.glob("*/project.json"))
