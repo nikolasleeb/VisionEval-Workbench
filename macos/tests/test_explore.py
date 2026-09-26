@@ -30,6 +30,18 @@ class ExploreTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_external_drive_sidecars_are_not_input_files(self):
+        library = self.workspace.input_library / "Example"
+        (library / "._azone_people.csv").write_bytes(b"\x00\x05\x16\x07\xb0\xff")
+        (library / ".DS_Store").write_bytes(b"finder metadata")
+        result = self.service.files("Example")
+        self.assertFalse(any(item["filename"].startswith("._") for item in result["files"]))
+        self.assertEqual(self.workspace.list_input_libraries()[0]["fileCount"], 1)
+        detail = self.service.file("Example", "azone_people.csv")
+        self.assertTrue(detail)
+        with self.assertRaises(WorkspaceError):
+            self.service.file("Example", "._azone_people.csv")
+
     def test_lists_files_with_stable_internal_ids(self):
         result = self.service.files("Example")
         self.assertEqual(result["files"][0]["id"], "input:azone_people.csv")

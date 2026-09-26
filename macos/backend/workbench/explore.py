@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .workspace import Workspace, WorkspaceError
+from .workspace import Workspace, WorkspaceError, is_workspace_data
 
 
 IDENTIFIER_FIELDS = {"geo", "azone", "bzone", "czone", "marea", "region", "hhid", "vehid", "wkrid", "year"}
@@ -464,6 +464,8 @@ class ExploreService:
         if library_id:
             root = self.library(library_id)
             for path in sorted(root.glob("*.csv"), key=lambda item: item.name.lower()):
+                if not is_workspace_data(path):
+                    continue
                 columns = self.columns(path)
                 key = path.stem.lower()
                 by_name[path.name.lower()] = {
@@ -479,7 +481,7 @@ class ExploreService:
     def file(self, library_id: str, filename: str, template_id: str = "", explanation_catalog_path: Path | None = None) -> dict[str, Any]:
         catalog = self.catalog_for(explanation_catalog_path)
         safe_name = Path(filename).name
-        if safe_name != filename or not safe_name.lower().endswith(".csv"):
+        if safe_name != filename or not safe_name.lower().endswith(".csv") or not is_workspace_data(Path(safe_name)):
             raise WorkspaceError("Invalid input filename")
         catalog_names = {
             *(f"{key}.csv" for key in catalog.get("explanations", {})),

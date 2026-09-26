@@ -54,9 +54,14 @@ def asset_display_name(value: Any) -> str:
     return LEGACY_ASSET_DISPLAY_NAMES.get(text, text)
 
 
+def is_workspace_data(path: Path) -> bool:
+    """Exclude macOS housekeeping sidecars without hiding real dotfiles."""
+    return not any(part.startswith("._") or part == ".DS_Store" for part in path.parts)
+
+
 def read_json(path: Path, default: Any = None) -> Any:
     # AppleDouble sidecars on external drives are binary metadata, not JSON.
-    if path.name.startswith("._") or path.name == ".DS_Store":
+    if not is_workspace_data(path):
         return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -90,7 +95,7 @@ def fingerprint_tree(root: Path, relative_paths: list[str] | None = None) -> str
     digest = hashlib.sha256()
     paths = [root / item for item in relative_paths] if relative_paths else sorted(p for p in root.rglob("*") if p.is_file())
     for path in paths:
-        if not path.is_file():
+        if not path.is_file() or not is_workspace_data(path):
             continue
         digest.update(str(path.relative_to(root)).encode())
         with path.open("rb") as handle:
@@ -759,7 +764,7 @@ class Workspace:
                 if isinstance(asset, dict) and asset.get("kind") == "input-library" and asset.get("id"):
                     registered_names[str(asset["id"])] = str(asset.get("name") or asset["id"])
         for path in sorted((p for p in self.input_library.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
-            files = sorted(p.name for p in path.glob("*.csv"))
+            files = sorted(p.name for p in path.glob("*.csv") if is_workspace_data(p))
             manifest = read_json(path / "region_builder_manifest.json", {})
             pairing = self.input_library_pairing(path.name)
             output.append({
@@ -839,7 +844,7 @@ class Workspace:
     def validate_template(path: Path) -> dict[str, Any]:
         required = ["visioneval.cnf", "scripts/run_model.R", "defs", "inputs"]
         missing = [name for name in required if not (path / name).exists()]
-        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv")) if (path / "inputs").is_dir() else []
+        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv") if is_workspace_data(p)) if (path / "inputs").is_dir() else []
         errors = ([f"Missing {name}" for name in missing] + ([] if csv_files else ["No input CSV files found"]))
         config = (path / "visioneval.cnf").read_text(encoding="utf-8", errors="replace") if (path / "visioneval.cnf").is_file() else ""
         for field in ("ScriptsDir", "InputDir", "ParamDir", "GeoFile", "ModelParamFile", "Years"):

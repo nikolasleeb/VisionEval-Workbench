@@ -31,7 +31,7 @@ from .runtime import RuntimeManager
 from .runtime import CURRENT_RELEASE_TAG
 from .update_checks import UpdateCheckService
 from .region_builder import RegionBuilderService
-from .workspace import Workspace, WorkspaceError, fingerprint_tree, make_id, now_iso, read_json
+from .workspace import Workspace, WorkspaceError, fingerprint_tree, is_workspace_data, make_id, now_iso, read_json
 
 # Windows' MIME registry does not consistently know modern JavaScript module
 # extensions. Chromium refuses to execute an ES module served as text/plain.
@@ -1039,6 +1039,8 @@ def handler_class(application: WorkbenchApplication):
                 inputs = source / sim.get("name", "") / "inputs"
                 if inputs.is_dir():
                     for file in inputs.glob("*.csv"):
+                        if not is_workspace_data(file):
+                            continue
                         baseline_file = application.workspace.input_library / project["inputLibrary"]["id"] / file.name
                         if baseline_file.exists() and file.read_bytes() != baseline_file.read_bytes():
                             application.workspace.save_overlay(project["id"], variant["id"], file.name, file.read_text(encoding="utf-8"))
