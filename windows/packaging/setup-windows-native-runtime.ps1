@@ -91,7 +91,7 @@ ve.runtime <- Sys.getenv("VE_RUNTIME")
 suppressPackageStartupMessages(library(VEStart))
 startVisionEval(ve.home=ve.home, ve.runtime=ve.runtime, overwrite=FALSE)
 "@ | Set-Content -Encoding utf8 (Join-Path $VeRuntime ".Rprofile")
-    "R version $rVersion" | Set-Content -Encoding utf8 (Join-Path $VeRuntime "r.version")
+    "that.R:$rVersion" | Set-Content -Encoding utf8 (Join-Path $VeRuntime "r.version")
     @"
 repository=https://github.com/VisionEval/VisionEval-4
 tag=$releaseTag

@@ -20,6 +20,8 @@ class FakeRunner:
 
     def __call__(self, command, **kwargs):
         self.calls.append(command)
+        if command[-1] == 'cat(paste(R.version$major, R.version$minor, sep="."))':
+            return subprocess.CompletedProcess(command, 0, "4.5.3", "")
         if "inspect" in command and not self.installed:
             return subprocess.CompletedProcess(command, 1, "", "not found")
         if "image" in command and "inspect" in command and "--format" in command and "{{json .Config.Labels}}" in command:
@@ -245,6 +247,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertTrue(result["rReused"])
             self.assertTrue((home / "ve-lib" / "4.5" / "VEStart" / "DESCRIPTION").is_file())
             self.assertTrue((runtime / ".Rprofile").is_file())
+            self.assertEqual((runtime / "r.version").read_text(encoding="utf-8"), "that.R:4.5.3\n")
             environment = read_renviron(runtime)
             self.assertEqual(Path(environment["VE_HOME"]), home.resolve())
             self.assertEqual(Path(environment["VE_RUNTIME"]), runtime.resolve())

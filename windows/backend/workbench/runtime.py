@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import http.client
 import json
 import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import tempfile
 import threading
@@ -1263,35 +1265,125 @@ class RuntimeManager:
         phase: str,
         progress: Callable[..., None] | None,
         cancel_event: threading.Event | None,
+        rscript: str | None = None,
     ) -> None:
         if not url.lower().startswith("https://"):
             raise WorkspaceError("Managed runtime downloads require a pinned HTTPS URL.")
+        if rscript:
+            self._download_verified_with_r(url, destination, expected_sha256, rscript, phase, progress, cancel_event)
+            return
         request = urllib.request.Request(url, headers={"User-Agent": "VisionEval-Workbench/2.0.0"})
-        digest = hashlib.sha256()
-        received = 0
+        # Retry network failures only. Each attempt starts clean: partial bytes
+        # never become an installable archive, and TLS/checksum failures fail closed.
         try:
-            with urllib.request.urlopen(request, timeout=45) as response, destination.open("wb") as handle:
-                total = int(response.headers.get("Content-Length") or 0)
-                while True:
-                    self._check_install_cancelled(cancel_event)
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    handle.write(chunk)
-                    digest.update(chunk)
-                    received += len(chunk)
+            for attempt in range(1, 4):
+                self._check_install_cancelled(cancel_event)
+                digest = hashlib.sha256()
+                received = 0
+                try:
+                    with urllib.request.urlopen(request, timeout=120) as response, destination.open("wb") as handle:
+                        total = int(response.headers.get("Content-Length") or 0)
+                        read_chunk = getattr(response, "read1", response.read)
+                        while True:
+                            self._check_install_cancelled(cancel_event)
+                            # read1 returns available data instead of waiting to
+                            # fill a 1 MiB buffer on a slow connection.
+                            chunk = read_chunk(64 * 1024)
+                            if not chunk:
+                                break
+                            handle.write(chunk)
+                            digest.update(chunk)
+                            received += len(chunk)
+                            self._install_progress(
+                                progress, phase, f"Downloading {destination.name} (attempt {attempt} of 3)",
+                                bytesReceived=received, bytesTotal=total, attempt=attempt,
+                                percent=round(received * 100 / total, 1) if total else None,
+                            )
+                        if total and received != total:
+                            raise http.client.IncompleteRead(b"", max(0, total - received))
+                    if digest.hexdigest().lower() != expected_sha256.lower():
+                        raise WorkspaceError(f"The checksum for {destination.name} does not match the certified manifest.")
+                    return
+                except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.IncompleteRead) as exc:
+                    reason = getattr(exc, "reason", exc)
+                    transient = not isinstance(reason, ssl.SSLError)
+                    if isinstance(exc, urllib.error.HTTPError):
+                        transient = exc.code in {408, 429, 500, 502, 503, 504}
+                    destination.unlink(missing_ok=True)
+                    if not transient or attempt == 3:
+                        raise WorkspaceError(
+                            f"Could not download {destination.name} after {attempt} attempt(s): {exc}. "
+                            "Check your connection or use the manual instructions in Setup guide."
+                        ) from exc
                     self._install_progress(
-                        progress,
-                        phase,
-                        f"Downloading {destination.name}",
-                        bytesReceived=received,
-                        bytesTotal=total,
-                        percent=round(received * 100 / total, 1) if total else None,
+                        progress, phase, f"Connection interrupted; retrying {destination.name} "
+                        f"(attempt {attempt + 1} of 3)…", attempt=attempt + 1,
+                        bytesReceived=0, bytesTotal=0, percent=None,
                     )
-        except (OSError, urllib.error.URLError) as exc:
-            raise WorkspaceError(f"Could not download {destination.name}: {exc}") from exc
-        if digest.hexdigest().lower() != expected_sha256.lower():
-            raise WorkspaceError(f"The checksum for {destination.name} does not match the certified manifest.")
+                    delay = 2 ** attempt
+                    if cancel_event:
+                        cancel_event.wait(delay)
+                        self._check_install_cancelled(cancel_event)
+                    else:
+                        time.sleep(delay)
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
+
+    def _download_verified_with_r(self, url, destination, expected_sha256, rscript, phase, progress, cancel_event):
+        # Use the same libcurl route as the official VE installer, but never
+        # source its mutable install script or permit it to modify runtime paths.
+        if url != CERTIFIED_VE_ARCHIVE_URL or expected_sha256 != CERTIFIED_VE_ARCHIVE_SHA256:
+            raise WorkspaceError("R downloads require the certified VisionEval archive and checksum.")
+        self._check_install_cancelled(cancel_event)
+        expression = (
+            'options(timeout=740); download.file('
+            + json.dumps(url) + ', destfile=' + json.dumps(destination.as_posix())
+            + ', method="libcurl", mode="wb", quiet=TRUE)'
+        )
+        log = destination.with_suffix(destination.suffix + ".download.log")
+        process = None
+        started = time.monotonic()
+        try:
+            with log.open("wb") as output:
+                process = subprocess.Popen(
+                    [rscript, "--vanilla", "-e", expression], stdout=output, stderr=output,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                while process.poll() is None:
+                    self._check_install_cancelled(cancel_event)
+                    if time.monotonic() - started > 900:
+                        raise WorkspaceError("VisionEval download exceeded its 15-minute limit. Try again or use Setup guide.")
+                    received = destination.stat().st_size if destination.exists() else 0
+                    self._install_progress(
+                        progress, phase,
+                        "Waiting for the VisionEval download server; this can take several minutes."
+                        if not received else f"Downloading {destination.name} with R libcurl",
+                        bytesReceived=received, bytesTotal=553016785,
+                        percent=round(received * 100 / 553016785, 1) if received else None,
+                    )
+                    if cancel_event:
+                        cancel_event.wait(0.5)
+                    else:
+                        time.sleep(0.5)
+            self._check_install_cancelled(cancel_event)
+            if process.returncode:
+                error = log.read_text(encoding="utf-8", errors="replace")[-2000:]
+                raise WorkspaceError(f"R libcurl could not download VisionEval: {error}. Use Setup guide or retry installation.")
+            digest = hashlib.sha256()
+            with destination.open("rb") as archive:
+                while chunk := archive.read(1024 * 1024):
+                    self._check_install_cancelled(cancel_event)
+                    digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise WorkspaceError("The VisionEval archive checksum does not match the certified manifest.")
+        except BaseException:
+            if process is not None and process.poll() is None:
+                self._terminate_native_tree(process, timeout=5)
+            destination.unlink(missing_ok=True)
+            raise
+        finally:
+            log.unlink(missing_ok=True)
 
     @staticmethod
     def _compatible_rscript() -> str | None:
@@ -1329,7 +1421,7 @@ class RuntimeManager:
         return descriptions[0].parent.parent
 
     @staticmethod
-    def _write_native_runtime_files(runtime: Path, home: Path, rscript: Path) -> None:
+    def _write_native_runtime_files(runtime: Path, home: Path, rscript: Path, r_version: str = CERTIFIED_R_VERSION) -> None:
         runtime.mkdir(parents=True, exist_ok=True)
         (runtime / "models").mkdir(exist_ok=True)
         runtime_text, home_text = runtime.as_posix(), home.as_posix()
@@ -1337,7 +1429,8 @@ class RuntimeManager:
         (runtime / ".Renviron").write_text(environment, encoding="utf-8")
         home.mkdir(parents=True, exist_ok=True)
         (home / ".Renviron").write_text(environment, encoding="utf-8")
-        (runtime / "r.version").write_text(f"R version {CERTIFIED_R_VERSION}\n", encoding="utf-8")
+        # VEStart reads colon-separated named variables, not display text.
+        (runtime / "r.version").write_text(f"that.R:{r_version}\n", encoding="utf-8")
         profile = (
             've.home <- Sys.getenv("VE_HOME")\n'
             've.runtime <- Sys.getenv("VE_RUNTIME")\n'
@@ -1423,6 +1516,14 @@ class RuntimeManager:
             else:
                 self._install_progress(progress, "reusing-r", "Using the existing compatible R 4.5 installation.")
 
+            version_result = self.runner(
+                [rscript_text, "--vanilla", "-e", 'cat(paste(R.version$major, R.version$minor, sep="."))'],
+                capture_output=True, text=True, timeout=15,
+            )
+            selected_r_version = (version_result.stdout or "").strip()
+            if version_result.returncode or not re.fullmatch(r"4\.5\.\d+", selected_r_version):
+                raise WorkspaceError("The selected Rscript must report a compatible R 4.5 version before installing VisionEval.")
+
             archive = temporary / CERTIFIED_VE_ARCHIVE_NAME
             self._download_verified(
                 CERTIFIED_VE_ARCHIVE_URL,
@@ -1431,6 +1532,7 @@ class RuntimeManager:
                 phase="downloading-visioneval",
                 progress=progress,
                 cancel_event=cancel_event,
+                rscript=rscript_text,
             )
             self._install_progress(progress, "extracting-visioneval", f"Installing VisionEval {RC7_RELEASE_TAG}.")
             package_root = self._safe_extract_runtime(archive, temporary / "extracted", cancel_event)
@@ -1443,7 +1545,7 @@ class RuntimeManager:
                 target_library.replace(previous_library)
             staged_library.replace(target_library)
             installed_library = True
-            self._write_native_runtime_files(runtime, home, Path(rscript_text))
+            self._write_native_runtime_files(runtime, home, Path(rscript_text), selected_r_version)
             self.native_runtime, self.native_home, self.rscript = runtime, home, str(Path(rscript_text).resolve())
             self.image = str(home)
             self._install_progress(progress, "verifying", "Verifying the installed VisionEval runtime.")
