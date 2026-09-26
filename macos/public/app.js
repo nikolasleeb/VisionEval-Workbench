@@ -6245,7 +6245,28 @@ document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeWorks
 document.querySelectorAll("[data-reveal-workspace-location]").forEach(button=>button.addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:button.dataset.revealWorkspaceLocation}).catch(error=>notify(String(error),"error"))));
 $("revealWorkspaceRoot").addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:"root"}).catch(error=>notify(String(error),"error")));
 $("switchWorkspace").addEventListener("click",async()=>{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)changeWorkspace(path)});
-$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(!path)return;await window.__TAURI_INTERNALS__.invoke("move_workspace",{destination:path});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error")}});
+async function moveWorkspaceWithProgress(path){
+  const invoke=window.__TAURI_INTERNALS__.invoke,dialog=document.createElement('dialog');
+  dialog.className='workspace-move-dialog';
+  dialog.innerHTML='<h2>Moving workspace</h2><p data-move-message role="status">Preparing the move…</p><progress data-move-progress max="100"></progress><p data-move-count class="muted"></p><p>Keep the SSD connected. Workbench will verify the new copy before switching to it and removing the old copy. Please do not force quit.</p>';
+  dialog.addEventListener('cancel',event=>event.preventDefault());document.body.appendChild(dialog);dialog.showModal();
+  state.workspaceMoving=true;
+  const priorQuit=window.requestWorkbenchQuit;
+  window.requestWorkbenchQuit=()=>{dialog.querySelector('[data-move-message]').textContent='The workspace move is still running. Please wait before quitting.';};
+  let polling=false;
+  const poll=async()=>{if(polling)return;polling=true;try{
+    const status=await invoke('workspace_move_status');
+    dialog.querySelector('[data-move-message]').textContent=status.message||'Preparing the move…';
+    const progress=dialog.querySelector('[data-move-progress]');
+    if(status.totalBytes&&['copying','verifying'].includes(status.phase))progress.value=Math.min(100,status.bytes/status.totalBytes*100);else progress.removeAttribute('value');
+    dialog.querySelector('[data-move-count]').textContent=status.totalFiles?`${status.phase==='verifying'?'Verified':'Copied'} ${number(status.files)} of ${number(status.totalFiles)} files · ${humanBytes(status.bytes)} of ${humanBytes(status.totalBytes)}`:'';
+  }catch(_error){}finally{polling=false;}};
+  const timer=setInterval(poll,500);
+  try{await invoke('move_workspace',{destination:path});const url=await invoke('start_backend');window.location.replace(url);}
+  catch(error){try{await invoke('start_backend');await refreshState({quiet:true});}catch(_restartError){}notify(String(error),'error');}
+  finally{clearInterval(timer);state.workspaceMoving=false;window.requestWorkbenchQuit=priorQuit;dialog.close();dialog.remove();}
+}
+$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)await moveWorkspaceWithProgress(path);}catch(error){notify(String(error),"error")}});
 $("settingsVerifyRuntime").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsInstallRuntime"))$("settingsInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsStartDocker"))$("settingsStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));

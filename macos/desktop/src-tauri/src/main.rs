@@ -2,7 +2,7 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -33,6 +33,38 @@ struct BackendState {
     port: Mutex<Option<u16>>,
     lifecycle: Mutex<()>,
     quit_requested: Mutex<bool>,
+    workspace_move: Mutex<WorkspaceMoveProgress>,
+}
+
+#[derive(Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WorkspaceMoveProgress {
+    running: bool,
+    phase: String,
+    message: String,
+    files: u64,
+    bytes: u64,
+    total_files: u64,
+    total_bytes: u64,
+}
+
+fn workspace_move_progress(app: &AppHandle, phase: &str, message: &str, files: u64, bytes: u64) {
+    if let Ok(mut progress) = app.state::<BackendState>().workspace_move.lock() {
+        progress.phase = phase.into();
+        progress.message = message.into();
+        progress.files = files;
+        progress.bytes = bytes;
+    }
+}
+
+#[tauri::command]
+fn workspace_move_status(app: AppHandle) -> Result<WorkspaceMoveProgress, String> {
+    let state = app.state::<BackendState>();
+    let progress = state
+        .workspace_move
+        .lock()
+        .map_err(|error| error.to_string())?;
+    Ok(progress.clone())
 }
 
 fn default_appearance() -> String {
@@ -1763,16 +1795,73 @@ fn nonterminal_job_count(root: &Path) -> usize {
         .count()
 }
 
-fn copy_directory(source: &Path, destination: &Path) -> io::Result<()> {
-    fs::create_dir_all(destination)?;
+fn transfer_workspace_tree(
+    source: &Path,
+    destination: &Path,
+    verify: bool,
+    totals: &mut (u64, u64),
+    report: &mut impl FnMut(u64, u64),
+) -> io::Result<()> {
+    if !verify {
+        fs::create_dir_all(destination)?;
+    }
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let source_path = entry.path();
         let destination_path = destination.join(entry.file_name());
-        if entry.file_type()?.is_dir() {
-            copy_directory(&source_path, &destination_path)?;
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Workspace contains a symbolic link; the original remains unchanged.",
+            ));
+        }
+        if kind.is_dir() {
+            transfer_workspace_tree(&source_path, &destination_path, verify, totals, report)?;
         } else {
-            fs::copy(&source_path, &destination_path)?;
+            let mut input = fs::File::open(&source_path)?;
+            let mut buffer = vec![0u8; 1024 * 1024];
+            let mut output = if verify {
+                fs::File::open(&destination_path)?
+            } else {
+                fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&destination_path)?
+            };
+            let mut check = vec![0u8; buffer.len()];
+            loop {
+                let count = input.read(&mut buffer)?;
+                if count == 0 {
+                    break;
+                }
+                if verify {
+                    output.read_exact(&mut check[..count])?;
+                    if buffer[..count] != check[..count] {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Workspace copy verification failed; the original remains unchanged.",
+                        ));
+                    }
+                } else {
+                    output.write_all(&buffer[..count])?;
+                }
+                totals.1 += count as u64;
+                report(totals.0, totals.1);
+            }
+            if verify {
+                if output.read(&mut check[..1])? != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Workspace copy has unexpected extra data.",
+                    ));
+                }
+            } else {
+                output.sync_all()?;
+                fs::set_permissions(&destination_path, entry.metadata()?.permissions())?;
+            }
+            totals.0 += 1;
+            report(totals.0, totals.1);
         }
     }
     Ok(())
@@ -1794,8 +1883,7 @@ fn tree_summary(root: &Path) -> io::Result<(u64, u64)> {
     Ok((files, bytes))
 }
 
-#[tauri::command]
-fn move_workspace(app: AppHandle, destination: String) -> Result<String, String> {
+fn move_workspace_blocking(app: &AppHandle, destination: String) -> Result<String, String> {
     let state = app.state::<BackendState>();
     let mut config = read_config(&app);
     let source = PathBuf::from(&config.workspace_root);
@@ -1809,13 +1897,37 @@ fn move_workspace(app: AppHandle, destination: String) -> Result<String, String>
     if source == destination {
         return Ok(config.workspace_root);
     }
+    let source_canonical = fs::canonicalize(&source).map_err(|error| error.to_string())?;
+    let destination_canonical = if destination.exists() {
+        fs::canonicalize(&destination).map_err(|error| error.to_string())?
+    } else {
+        fs::canonicalize(
+            destination
+                .parent()
+                .ok_or("Invalid workspace destination")?,
+        )
+        .map_err(|error| error.to_string())?
+        .join(
+            destination
+                .file_name()
+                .ok_or("Invalid workspace destination")?,
+        )
+    };
+    if destination_canonical.starts_with(&source_canonical)
+        || source_canonical.starts_with(&destination_canonical)
+    {
+        return Err(
+            "Choose a separate empty folder, not the workspace itself or a folder inside it."
+                .into(),
+        );
+    }
     if destination.exists()
         && fs::read_dir(&destination)
             .map_err(|error| error.to_string())?
             .next()
             .is_some()
     {
-        return Err("The destination folder is not empty.".into());
+        return Err("The destination contains files, possibly from an interrupted move. Your original workspace is unchanged. Choose a new empty folder; do not delete either copy until it has been checked.".into());
     }
     stop_backend(&state);
     config.migration_recovery = Some(MigrationRecovery {
@@ -1832,19 +1944,46 @@ fn move_workspace(app: AppHandle, destination: String) -> Result<String, String>
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    if fs::rename(&source, &destination).is_err() {
-        copy_directory(&source, &destination)
-            .map_err(|error| format!("Could not copy workspace: {error}"))?;
-        if tree_summary(&source).map_err(|error| error.to_string())?
-            != tree_summary(&destination).map_err(|error| error.to_string())?
+    workspace_move_progress(
+        app,
+        "scanning",
+        "Counting workspace files. The original is still active.",
+        0,
+        0,
+    );
+    let summary = tree_summary(&source).map_err(|error| error.to_string())?;
+    {
+        let mut progress = state
+            .workspace_move
+            .lock()
+            .map_err(|error| error.to_string())?;
+        progress.total_files = summary.0;
+        progress.total_bytes = summary.1;
+    }
+    for verify in [false, true] {
+        let phase = if verify { "verifying" } else { "copying" };
+        let message = if verify {
+            "Verifying copied file contents. The original is still active."
+        } else {
+            "Copying workspace. Keep the SSD connected and let Workbench finish."
+        };
+        workspace_move_progress(app, phase, message, 0, 0);
+        let mut last = Instant::now();
+        let mut totals = (0, 0);
+        transfer_workspace_tree(&source, &destination, verify, &mut totals, &mut |files, bytes| {
+            if last.elapsed() >= Duration::from_millis(250) {
+                workspace_move_progress(app, phase, message, files, bytes);
+                last = Instant::now();
+            }
+        }).map_err(|error| format!("Workspace move did not finish: {error}. The original remains active; leave the partial destination alone."))?;
+        workspace_move_progress(app, phase, message, totals.0, totals.1);
+        if totals != summary
+            || tree_summary(&destination).map_err(|error| error.to_string())? != summary
         {
             return Err(
                 "Workspace copy verification failed; the original remains unchanged.".into(),
             );
         }
-        fs::remove_dir_all(&source).map_err(|error| {
-            format!("The copy was verified but the original could not be removed: {error}")
-        })?;
     }
     workspace_status(&destination)?;
     let id = initialize_workspace(&destination)?;
@@ -1853,8 +1992,60 @@ fn move_workspace(app: AppHandle, destination: String) -> Result<String, String>
         recovery.state = "verified".into();
         recovery.updated_at = now_string();
     }
-    write_config(&app, &config)?;
+    // Record the verified destination before removing anything from the source.
+    // A forced quit during cleanup will therefore reopen the complete SSD copy.
+    write_config(app, &config)?;
+    workspace_move_progress(
+        app,
+        "cleanup",
+        "Verified and switched to the new workspace. Removing the old copy…",
+        summary.0,
+        summary.1,
+    );
+    if let Err(error) = fs::remove_dir_all(&source) {
+        if let Some(recovery) = config.migration_recovery.as_mut() {
+            recovery.state = "source_retained".into();
+            recovery.message = format!("The new workspace is verified and active. Some original files remain at {}: {error}", source.display());
+        }
+        write_config(app, &config)?;
+    }
     Ok(destination.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn move_workspace(app: AppHandle, destination: String) -> Result<String, String> {
+    {
+        let state = app.state::<BackendState>();
+        let mut progress = state
+            .workspace_move
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if progress.running {
+            return Err("A workspace move is already in progress.".into());
+        }
+        *progress = WorkspaceMoveProgress {
+            running: true,
+            phase: "preparing".into(),
+            message: "Preparing the workspace move…".into(),
+            ..Default::default()
+        };
+    }
+    let worker_app = app.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        move_workspace_blocking(&worker_app, destination)
+    })
+    .await
+    .map_err(|error| format!("Workspace move task failed: {error}"))
+    .and_then(|result| result);
+    if let Ok(mut progress) = app.state::<BackendState>().workspace_move.lock() {
+        progress.running = false;
+        progress.phase = if result.is_ok() { "complete" } else { "failed" }.into();
+        progress.message = match &result {
+            Ok(_) => "Workspace move complete.".into(),
+            Err(error) => error.clone(),
+        };
+    }
+    result
 }
 
 #[tauri::command]
@@ -2586,6 +2777,14 @@ fn report_renderer_smoke(app: AppHandle, result: Value) -> Result<(), String> {
 #[tauri::command]
 fn complete_quit(app: AppHandle) -> Result<(), String> {
     let state = app.state::<BackendState>();
+    if state
+        .workspace_move
+        .lock()
+        .map_err(|error| error.to_string())?
+        .running
+    {
+        return Err("The workspace move is still running. Keep the SSD connected and wait for it to finish.".into());
+    }
     *state
         .quit_requested
         .lock()
@@ -2608,7 +2807,7 @@ fn main() {
                 if let Ok(value) = serde_json::to_string(action) { let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('visioneval-menu-action', {{ detail: {value} }}));")); }
             }
         })
-        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, switch_workspace, forget_workspace, trash_workspace, factory_reset_workspace, reset_preferences, reveal_workspace, reveal_workspace_location, open_external_url, open_documentation_document, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, acknowledge_upgrade_notice, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
+        .invoke_handler(tauri::generate_handler![desktop_state, create_workspace, create_recommended_workspace, choose_workspace, choose_workspace_destination, choose_workspace_parent, choose_folder, choose_package, choose_package_folder, choose_rscript, save_dependency_export, save_backend_export, save_visual_export, save_comparison_export, move_workspace, workspace_move_status, switch_workspace, forget_workspace, trash_workspace, factory_reset_workspace, reset_preferences, reveal_workspace, reveal_workspace_location, open_external_url, open_documentation_document, get_workspace_settings, update_workspace_settings, update_desktop_preferences, send_workbench_notification, save_runtime_profile, complete_onboarding, acknowledge_upgrade_notice, get_theme, set_theme, set_menu_context, set_app_zoom, start_docker_desktop, start_backend, restart_backend, renderer_smoke_mode, report_renderer_smoke, complete_quit])
         .on_window_event(|window, event| if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             let already_quitting = window.try_state::<BackendState>().and_then(|state| state.quit_requested.lock().ok().map(|value| *value)).unwrap_or(false);
             if !already_quitting {
@@ -2624,6 +2823,42 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn workspace_transfer_copies_and_verifies_contents_with_progress() {
+        let root = std::env::temp_dir().join(format!(
+            "ve-move-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let source = root.join("source");
+        let destination = root.join("destination");
+        fs::create_dir_all(source.join("nested")).unwrap();
+        fs::write(source.join("nested/data"), vec![42u8; 2_100_000]).unwrap();
+        fs::write(source.join("empty"), []).unwrap();
+        let mut totals = (0, 0);
+        let mut calls = 0;
+        transfer_workspace_tree(&source, &destination, false, &mut totals, &mut |_, _| {
+            calls += 1
+        })
+        .unwrap();
+        assert_eq!(totals, (2, 2_100_000));
+        assert!(calls >= 4);
+        let mut verified = (0, 0);
+        transfer_workspace_tree(&source, &destination, true, &mut verified, &mut |_, _| {})
+            .unwrap();
+        assert_eq!(verified, totals);
+        // Equal file sizes alone must not pass verification.
+        fs::write(destination.join("nested/data"), vec![43u8; 2_100_000]).unwrap();
+        assert!(
+            transfer_workspace_tree(&source, &destination, true, &mut (0, 0), &mut |_, _| {})
+                .is_err()
+        );
+        assert!(source.join("nested/data").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
     #[test]
     fn notification_policy_applies_threshold_focus_and_force_rules() {
         assert_eq!(

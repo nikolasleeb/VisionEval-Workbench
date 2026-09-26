@@ -9,6 +9,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendContractTests(unittest.TestCase):
+    def test_workspace_move_runs_off_ui_thread_and_reports_native_progress(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        host = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        permissions = (ROOT / "desktop" / "src-tauri" / "permissions" / "workbench.toml").read_text(encoding="utf-8")
+        self.assertIn("async fn move_workspace", host)
+        self.assertIn("move_workspace_blocking(&worker_app, destination)", host)
+        self.assertIn('"workspace_move_status"', permissions)
+        self.assertIn("async function moveWorkspaceWithProgress", source)
+        self.assertIn("invoke('workspace_move_status')", source)
+        self.assertIn("Please do not force quit", source)
+        move = host[host.index("fn move_workspace_blocking"):host.index("async fn move_workspace")]
+        self.assertLess(move.index("remember_workspace"), move.index("fs::remove_dir_all(&source)"))
+        self.assertIn("partial destination alone", move)
+
     def test_workbench_website_is_available_from_help_and_documentation(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
