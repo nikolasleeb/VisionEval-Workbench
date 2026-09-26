@@ -9,7 +9,7 @@ import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
-from backend.workbench.runtime import RuntimeInstallCancelled, RuntimeManager
+from backend.workbench.runtime import RuntimeInstallCancelled, RuntimeManager, CERTIFIED_VE_ARCHIVE_URL, CERTIFIED_VE_ARCHIVE_SHA256
 from backend.workbench.workspace import WorkspaceError
 
 
@@ -20,6 +20,50 @@ class Response(io.BytesIO):
 
 
 class RuntimeDownloadTests(unittest.TestCase):
+    def test_r_download_verifies_checksum_and_uses_long_timeout(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as root:
+            destination = Path(root) / "archive.zip"
+            payload = b"test archive"
+            digest = hashlib.sha256(payload).hexdigest()
+            destination.write_bytes(payload)
+            manager = RuntimeManager.__new__(RuntimeManager)
+            process = SimpleNamespace(poll=lambda: 0, returncode=0)
+            with patch("backend.workbench.runtime.CERTIFIED_VE_ARCHIVE_SHA256", digest), patch("backend.workbench.runtime.subprocess.Popen", return_value=process) as launch:
+                manager._download_verified(CERTIFIED_VE_ARCHIVE_URL, destination, digest, phase="download", progress=None, cancel_event=None, rscript="Rscript.exe")
+            command = launch.call_args.args[0]
+            self.assertIn("timeout=740", command[-1])
+            self.assertIn('method="libcurl"', command[-1])
+            self.assertEqual(destination.read_bytes(), payload)
+            self.assertFalse(destination.with_suffix(".zip.download.log").exists())
+
+    def test_r_download_checksum_failure_cleans_partial(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as root:
+            destination = Path(root) / "archive.zip"
+            destination.write_bytes(b"bad archive")
+            manager = RuntimeManager.__new__(RuntimeManager)
+            with patch("backend.workbench.runtime.subprocess.Popen", return_value=SimpleNamespace(poll=lambda: 0, returncode=0)):
+                with self.assertRaises(WorkspaceError):
+                    manager._download_verified(CERTIFIED_VE_ARCHIVE_URL, destination, CERTIFIED_VE_ARCHIVE_SHA256, phase="download", progress=None, cancel_event=None, rscript="Rscript.exe")
+            self.assertFalse(destination.exists())
+
+    def test_r_download_cancellation_terminates_child(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as root:
+            destination = Path(root) / "archive.zip"
+            manager = RuntimeManager.__new__(RuntimeManager)
+            event = threading.Event()
+            def launch(*args, **kwargs):
+                destination.write_bytes(b"partial")
+                event.set()
+                return SimpleNamespace(poll=lambda: None)
+            with patch("backend.workbench.runtime.subprocess.Popen", side_effect=launch), patch.object(manager, "_terminate_native_tree") as terminate:
+                with self.assertRaises(RuntimeInstallCancelled):
+                    manager._download_verified(CERTIFIED_VE_ARCHIVE_URL, destination, CERTIFIED_VE_ARCHIVE_SHA256, phase="download", progress=None, cancel_event=event, rscript="Rscript.exe")
+            terminate.assert_called_once()
+            self.assertFalse(destination.exists())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -1265,9 +1265,13 @@ class RuntimeManager:
         phase: str,
         progress: Callable[..., None] | None,
         cancel_event: threading.Event | None,
+        rscript: str | None = None,
     ) -> None:
         if not url.lower().startswith("https://"):
             raise WorkspaceError("Managed runtime downloads require a pinned HTTPS URL.")
+        if rscript:
+            self._download_verified_with_r(url, destination, expected_sha256, rscript, phase, progress, cancel_event)
+            return
         request = urllib.request.Request(url, headers={"User-Agent": "VisionEval-Workbench/2.0.0"})
         # Retry network failures only. Each attempt starts clean: partial bytes
         # never become an installable archive, and TLS/checksum failures fail closed.
@@ -1325,6 +1329,61 @@ class RuntimeManager:
         except BaseException:
             destination.unlink(missing_ok=True)
             raise
+
+    def _download_verified_with_r(self, url, destination, expected_sha256, rscript, phase, progress, cancel_event):
+        # Use the same libcurl route as the official VE installer, but never
+        # source its mutable install script or permit it to modify runtime paths.
+        if url != CERTIFIED_VE_ARCHIVE_URL or expected_sha256 != CERTIFIED_VE_ARCHIVE_SHA256:
+            raise WorkspaceError("R downloads require the certified VisionEval archive and checksum.")
+        self._check_install_cancelled(cancel_event)
+        expression = (
+            'options(timeout=740); download.file('
+            + json.dumps(url) + ', destfile=' + json.dumps(destination.as_posix())
+            + ', method="libcurl", mode="wb", quiet=TRUE)'
+        )
+        log = destination.with_suffix(destination.suffix + ".download.log")
+        process = None
+        started = time.monotonic()
+        try:
+            with log.open("wb") as output:
+                process = subprocess.Popen(
+                    [rscript, "--vanilla", "-e", expression], stdout=output, stderr=output,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                while process.poll() is None:
+                    self._check_install_cancelled(cancel_event)
+                    if time.monotonic() - started > 900:
+                        raise WorkspaceError("VisionEval download exceeded its 15-minute limit. Try again or use Setup guide.")
+                    received = destination.stat().st_size if destination.exists() else 0
+                    self._install_progress(
+                        progress, phase,
+                        "Waiting for the VisionEval download server; this can take several minutes."
+                        if not received else f"Downloading {destination.name} with R libcurl",
+                        bytesReceived=received, bytesTotal=553016785,
+                        percent=round(received * 100 / 553016785, 1) if received else None,
+                    )
+                    if cancel_event:
+                        cancel_event.wait(0.5)
+                    else:
+                        time.sleep(0.5)
+            self._check_install_cancelled(cancel_event)
+            if process.returncode:
+                error = log.read_text(encoding="utf-8", errors="replace")[-2000:]
+                raise WorkspaceError(f"R libcurl could not download VisionEval: {error}. Use Setup guide or retry installation.")
+            digest = hashlib.sha256()
+            with destination.open("rb") as archive:
+                while chunk := archive.read(1024 * 1024):
+                    self._check_install_cancelled(cancel_event)
+                    digest.update(chunk)
+            if digest.hexdigest() != expected_sha256:
+                raise WorkspaceError("The VisionEval archive checksum does not match the certified manifest.")
+        except BaseException:
+            if process is not None and process.poll() is None:
+                self._terminate_native_tree(process, timeout=5)
+            destination.unlink(missing_ok=True)
+            raise
+        finally:
+            log.unlink(missing_ok=True)
 
     @staticmethod
     def _compatible_rscript() -> str | None:
@@ -1473,6 +1532,7 @@ class RuntimeManager:
                 phase="downloading-visioneval",
                 progress=progress,
                 cancel_event=cancel_event,
+                rscript=rscript_text,
             )
             self._install_progress(progress, "extracting-visioneval", f"Installing VisionEval {RC7_RELEASE_TAG}.")
             package_root = self._safe_extract_runtime(archive, temporary / "extracted", cancel_event)
