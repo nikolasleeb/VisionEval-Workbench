@@ -109,6 +109,7 @@
           </div>
           <div id="regionBuilderForm" class="stack" hidden>
             <label id="regionPackageField">Develop source<select id="regionPackage"></select></label>
+            <label id="regionSourceLibraryField">Input data source<select id="regionSourceLibrary"></select><small>The Virginia MPO package includes its own statewide input files. Only libraries covering the selected region are shown.</small></label>
             <section id="officialRegionGeographyView" class="region-geography-mode-panel">
               <label><span id="regionSelectorLabel">Region</span><select id="regionDefinition"></select></label>
               <p class="muted">Use the regional package's official MPO boundary rule.</p>
@@ -120,7 +121,6 @@
             <details id="regionOutputOptions" class="region-builder-options">
               <summary>Output options</summary>
               <div class="region-builder-grid">
-                <label>Source model package<select id="regionSourceLibrary"></select></label>
                 <label class="region-name-field">Region name<input id="regionName"><small>The name shown in Workbench and used for the generated assets.</small></label>
                 <label>State abbreviation<input id="regionState" maxlength="8"></label>
               </div>
