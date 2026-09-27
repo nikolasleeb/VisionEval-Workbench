@@ -31,6 +31,35 @@ class FakeComparison(ComparisonService):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_shared_chart_skips_empty_or_nonnumeric_scanner_totals(self):
+        summaries = [
+            {"table":"Azone","variable":str(index),"pairStats":[{"reference":{"sum":left},"comparison":{"sum":right},"rowsCompared":1}]}
+            for index,(left,right) in enumerate([(None,None),({},{}),([],[]),("text","text"),(10,12)])
+        ]
+        payload = self.service._dashboard_from_scan({"summaries":summaries},"reference","comparison","2045",[],"",[],"name")
+        self.assertEqual(len(payload["rows"]),1)
+        self.assertEqual(payload["rows"][0]["percentChange"],20)
+        self.assertEqual(len(payload["unavailable"]),4)
+
+    def test_precision_zero_boundary_and_shared_unchanged_summary(self):
+        scan = {"scanned":3,"summaries":[
+            {"table":"Azone","variable":name,"pairStats":[{"reference":{"sum":100},"comparison":{"sum":100+value},"rowsCompared":1,"rowsChanged":0}]}
+            for name,value in [("Tiny",.004),("Negative",-.004),("Boundary",.006)]
+        ]}
+        payload = self.service._dashboard_from_scan(scan,"reference","comparison","2045",[],"",[],"name")
+        self.assertEqual(len(payload["rows"]),3)
+        displayed = self.service.dashboard_display(payload["dashboardToken"],hide_zero=True)
+        self.assertEqual([row["variable"] for row in displayed["rows"]],["Boundary"])
+
+    def test_categorical_summaries_are_bounded_and_tail_is_compared(self):
+        first = [f"category-{i:03}" for i in range(75)]
+        a = self.service._summary(first)
+        b = self.service._summary(first[:-1]+["other-tail"])
+        self.assertEqual(a["distinctCategories"],75)
+        self.assertTrue(a["categoriesTruncated"])
+        self.assertLessEqual(len(a["categories"]),50)
+        self.assertNotEqual(a["distributionFingerprint"],b["distributionFingerprint"])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.service = FakeComparison(self.temp.name)

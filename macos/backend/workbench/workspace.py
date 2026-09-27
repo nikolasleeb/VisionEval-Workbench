@@ -54,7 +54,15 @@ def asset_display_name(value: Any) -> str:
     return LEGACY_ASSET_DISPLAY_NAMES.get(text, text)
 
 
+def is_workspace_data(path: Path) -> bool:
+    """Exclude macOS housekeeping sidecars without hiding real dotfiles."""
+    return not any(part.startswith("._") or part == ".DS_Store" for part in path.parts)
+
+
 def read_json(path: Path, default: Any = None) -> Any:
+    # AppleDouble sidecars on external drives are binary metadata, not JSON.
+    if not is_workspace_data(path):
+        return default
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -87,7 +95,7 @@ def fingerprint_tree(root: Path, relative_paths: list[str] | None = None) -> str
     digest = hashlib.sha256()
     paths = [root / item for item in relative_paths] if relative_paths else sorted(p for p in root.rglob("*") if p.is_file())
     for path in paths:
-        if not path.is_file():
+        if not path.is_file() or not is_workspace_data(path):
             continue
         digest.update(str(path.relative_to(root)).encode())
         with path.open("rb") as handle:
@@ -252,6 +260,23 @@ class Workspace:
 
     def _normalize_managed_paths(self) -> None:
         """Rewrite host paths persisted before the managed-layout migration."""
+        marker = read_json(self.marker_path, {})
+        previous_root = marker.get("rootPath")
+        if previous_root and Path(previous_root).is_absolute():
+            self.root_aliases.add(Path(previous_root))
+        # Older v2 workspaces did not record their root. Recover it only from
+        # registered Datastores whose managed relative destination exists here.
+        for record in read_json(self.catalog_path, {}).get("datastores", []):
+            stored = str(record.get("path", ""))
+            anchor = os.sep + "Results" + os.sep + "Models" + os.sep
+            if anchor in stored:
+                old, tail = stored.split(anchor, 1)
+                relative = Path("Results") / "Models" / tail
+                candidate = self.root / relative
+                if (Path(old).is_absolute() and ".." not in relative.parts
+                        and candidate.is_dir() and not candidate.is_symlink()
+                        and self.root in candidate.resolve().parents):
+                    self.root_aliases.add(Path(old))
         replacements = {}
         for alias in self.root_aliases:
             replacements.update({
@@ -263,6 +288,9 @@ class Workspace:
                 str(alias / "runs"): str(self.runs),
                 str(alias / "exchange"): str(self.exchange),
             })
+        for alias in self.root_aliases:
+            if alias != self.root:
+                replacements[str(alias)] = str(self.root)
 
         def replace(value: Any) -> Any:
             if isinstance(value, dict):
@@ -275,17 +303,30 @@ class Workspace:
                         return new + value[len(old):]
             return value
 
-        candidates = list(self.internal.rglob("*.json"))
+        # Only path-bearing control metadata needs rebasing. Derived scan/map
+        # payloads can be hundreds of MB and must never be parsed at startup.
+        candidates = list(self.internal.glob("*.json"))
+        candidates.extend(self.runs.glob("*.json"))
+        candidates.extend(self.runs.glob("*/job.json"))
+        for filename in ("operation.json", "request.json"):
+            candidates.extend(self.exchange.rglob(filename))
+        candidates.extend((self.exchange / "system").glob("*profile*.json"))
+        candidates.extend((self.internal / "archive" / "assets").rglob(".asset-archive.json"))
         candidates.append(self.catalog_path)
         candidates.extend(self.projects.glob("*/project.json"))
         candidates.extend(self.removed_projects.glob("*/project.json"))
         for path in dict.fromkeys(candidates):
+            if path.name.startswith("._"):
+                continue
             payload = read_json(path, None)
             if payload is None:
                 continue
             normalized = replace(payload)
             if normalized != payload:
                 write_json(path, normalized)
+        if marker.get("rootPath") != str(self.root):
+            marker["rootPath"] = str(self.root)
+            write_json(self.marker_path, marker)
 
     @staticmethod
     def default_settings() -> dict[str, Any]:
@@ -756,7 +797,7 @@ class Workspace:
                 if isinstance(asset, dict) and asset.get("kind") == "input-library" and asset.get("id"):
                     registered_names[str(asset["id"])] = str(asset.get("name") or asset["id"])
         for path in sorted((p for p in self.input_library.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
-            files = sorted(p.name for p in path.glob("*.csv"))
+            files = sorted(p.name for p in path.glob("*.csv") if is_workspace_data(p))
             manifest = read_json(path / "region_builder_manifest.json", {})
             pairing = self.input_library_pairing(path.name)
             output.append({
@@ -836,7 +877,7 @@ class Workspace:
     def validate_template(path: Path) -> dict[str, Any]:
         required = ["visioneval.cnf", "scripts/run_model.R", "defs", "inputs"]
         missing = [name for name in required if not (path / name).exists()]
-        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv")) if (path / "inputs").is_dir() else []
+        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv") if is_workspace_data(p)) if (path / "inputs").is_dir() else []
         errors = ([f"Missing {name}" for name in missing] + ([] if csv_files else ["No input CSV files found"]))
         config = (path / "visioneval.cnf").read_text(encoding="utf-8", errors="replace") if (path / "visioneval.cnf").is_file() else ""
         for field in ("ScriptsDir", "InputDir", "ParamDir", "GeoFile", "ModelParamFile", "Years"):

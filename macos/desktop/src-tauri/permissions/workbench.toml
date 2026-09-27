@@ -16,6 +16,7 @@ commands.allow = [
   "save_comparison_export",
   "save_visual_export",
   "move_workspace",
+  "workspace_move_status",
   "switch_workspace",
   "forget_workspace",
   "trash_workspace",

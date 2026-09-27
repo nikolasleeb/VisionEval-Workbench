@@ -26,6 +26,9 @@ TABLE_KEYS = {
     "Azone": "Azone", "Bzone": "Bzone", "Marea": "Marea",
 }
 MICRODATA_TABLES = {"Household", "Vehicle", "Worker"}
+SCAN_VERSION = 4
+SUMMARY_VERSION = 1
+SYNTHETIC_IDS = {"HhId", "VehId", "WkrId"}
 
 
 def _number(value: Any) -> float | None:
@@ -61,6 +64,7 @@ class ComparisonService:
         self.map_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.density_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.snapshot_lock = threading.RLock()
+        self.scan_manager = None
         try:
             self.unit_conflicts = read_json(conflicts_path or helper.with_name("unit_conflicts.json"), {}).get("conflicts", [])
         except (AttributeError, OSError):
@@ -296,7 +300,8 @@ class ComparisonService:
             return {"kind": "numeric", "count": len(values), "recordCount": len(values), "numericCount": len(numeric), "missingCount": len(values) - len(numeric), "sum": sum(numeric), "mean": sum(numeric) / len(numeric), "min": ordered[0], "q1": quantile(.25), "median": quantile(.5), "q3": quantile(.75), "max": ordered[-1]}
         categories = Counter(str(value) for value in values if value is not None)
         present = sum(categories.values())
-        return {"kind": "categorical", "count": len(values), "recordCount": len(values), "numericCount": 0, "missingCount": len(values) - present, "categories": [{"label": key, "count": count, "share": count / present * 100 if present else 0} for key, count in categories.most_common()], "topCategories": [{"label": key, "count": count} for key, count in categories.most_common(10)]}
+        distribution = sorted(categories.items())
+        return {"kind": "categorical", "count": len(values), "recordCount": len(values), "numericCount": 0, "missingCount": len(values) - present, "categories": [{"label": key, "count": count, "share": count / present * 100 if present else 0} for key, count in categories.most_common(50)], "topCategories": [{"label": key, "count": count} for key, count in categories.most_common(10)], "distinctCategories": len(categories), "categoriesTruncated": len(categories) > 50, "distributionFingerprint": hashlib.sha256(json.dumps(distribution, ensure_ascii=False).encode()).hexdigest()}
 
     @staticmethod
     def _percent_change(left_value: Any, right_value: Any) -> float | None:
@@ -864,7 +869,7 @@ class ComparisonService:
                 left, right = reference_summary.get(name), summary.get(name)
                 delta = right - left if isinstance(left, (int, float)) and isinstance(right, (int, float)) else None
                 measures[name] = {"reference": left, "comparison": right, "change": delta, "percentChange": self._percent_change(left, right)}
-            categorical_changed = reference_summary.get("categories", []) != summary.get("categories", [])
+            categorical_changed = reference_summary.get("distributionFingerprint", reference_summary.get("categories", [])) != summary.get("distributionFingerprint", summary.get("categories", []))
             changes.append({"label": record.get("label", record["id"]), "measures": measures, "categoriesChanged": categorical_changed})
             stats.append({
                 "label": record.get("label", record["id"]), "rowsCompared": None, "matchedRows": None,
@@ -975,7 +980,7 @@ class ComparisonService:
         return {"mode":"records","identitySemantics":"run_local_synthetic" if table in MICRODATA_TABLES else "stable_key","table":table,"variable":variable,"year":year,"key":columns[0]["keyName"],"reference":reference,"comparisons":comparisons,"rows":rows,"totalRows":len(keys),"displayRows":len(keys),"changedRows":None,"offset":offset,"limit":page_limit,"metadata":meta,"referenceSummary":{},"comparisonSummaries":[],"stats":[],"filterField":filter_field,"filterValues":filter_values or [],"sortColumn":sort_column,"sortDirection":sort_direction,"statsPending":True}
 
     def changes(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None, progress=None, cancelled=None) -> dict[str, Any]:
-        variables = [item for item in self.variables([reference_id, *comparison_ids]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"])]
+        variables = [item for item in self.variables([reference_id, *comparison_ids]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"]) and not (item["table"] in MICRODATA_TABLES and item["name"] in SYNTHETIC_IDS)]
         records = [self._record(reference_id), *[self._record(item) for item in comparison_ids]]
         cache_skipped: dict[tuple[str, str], str] = {}
         if self.cache:
@@ -1005,7 +1010,7 @@ class ComparisonService:
                     cache_completed += 1
                     if progress:
                         progress(cache_completed, cache_total, table, "", phase="preparing_cache", recordLabel=record.get("label", record["id"]), cacheHits=cache_hits, cacheMisses=cache_misses)
-        results, skipped = [], []
+        results, skipped, summaries = [], [], []
         for index, item in enumerate(variables):
             if cancelled and cancelled(): raise WorkspaceError("Change scan cancelled")
             if progress: progress(index, len(variables), item["table"], item["name"], phase="scanning")
@@ -1015,19 +1020,23 @@ class ComparisonService:
                 continue
             try:
                 payload = self.compare(reference_id, comparison_ids, item["table"], item["name"], year, False, 1, 0, filter_field, filter_values)
+                for pair_index, pair in enumerate(payload["stats"]):
+                    pair.setdefault("reference", payload.get("referenceSummary", {}))
+                    pair.setdefault("comparison", (payload.get("comparisonSummaries") or [{}])[pair_index])
+                summaries.append({"table": item["table"], "variable": item["name"], "units": item.get("units", ""), "description": item.get("description", ""), "pairStats": payload["stats"]})
                 if payload["changedRows"]:
                     pair_stats = payload["stats"]
                     results.append({"table": item["table"], "variable": item["name"], "changedRows": payload["changedRows"], "totalRows": payload["totalRows"], "percentRowsChanged": payload["changedRows"] / payload["totalRows"] * 100 if payload["totalRows"] else 0, "totalPercentChanges": [{"label": pair.get("label", f"Comparison {index + 1}"), "value": pair.get("totalPercentChange")} for index, pair in enumerate(pair_stats)], "units": item.get("units", ""), "description": item.get("description", ""), "pairStats": pair_stats})
             except WorkspaceError as exc:
                 skipped.append({"table": item["table"], "variable": item["name"], "reason": str(exc)})
         if progress: progress(len(variables), len(variables), "", "", phase="scanning")
-        return {"year": year, "scanned": len(variables), "changedVariables": len(results), "results": results, "skipped": skipped, "filterField": filter_field, "filterValues": filter_values or []}
+        return {"scannerVersion": SCAN_VERSION, "summaryVersion": SUMMARY_VERSION, "summaries": summaries, "year": year, "scanned": len(variables), "changedVariables": len(results), "results": results, "skipped": skipped, "filterField": filter_field, "filterValues": filter_values or []}
 
     def scan_request(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
         records = [self._record(reference_id), *[self._record(item) for item in comparison_ids]]
         if len(records) < 2:
             raise WorkspaceError("Choose at least one comparison datastore")
-        variables = [item for item in self.variables([item["id"] for item in records]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"])]
+        variables = [item for item in self.variables([item["id"] for item in records]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"]) and not (item["table"] in MICRODATA_TABLES and item["name"] in SYNTHETIC_IDS)]
         def scan_record(item: dict[str, Any]) -> dict[str, Any]:
             mapping = self._county_mapping(item) or {"azone": {}, "bzone": {}}
             return {
@@ -1051,6 +1060,11 @@ class ComparisonService:
         return self.runtime.r_command(self.scan_helper, str(request_path), str(output_path), str(progress_path))
 
     def dashboard(self, reference_id: str, comparison_id: str, year: str, variable_keys: list[str] | None = None, filter_field: str = "", filter_values: list[str] | None = None, sort_by: str = "name") -> dict[str, Any]:
+        # Selected Bzones use a specialized geography assignment, not the
+        # generic scanner's location-filter semantics.
+        if self.scan_manager and not (filter_field == "Bzone" and filter_values):
+            scan = self.scan_manager.completed_scan(reference_id, [comparison_id], year, filter_field, filter_values)
+            return self._dashboard_from_scan(scan, reference_id, comparison_id, year, variable_keys, filter_field, filter_values, sort_by)
         selected = set(variable_keys or [])
         variables = [item for item in self.variables([reference_id, comparison_id]) if year in item["years"] and (not selected or f"{item['table']}/{item['name']}" in selected) and item["name"] != TABLE_KEYS.get(item["table"])]
         records = [self._record(reference_id), self._record(comparison_id)]
@@ -1111,6 +1125,27 @@ class ComparisonService:
                 self.dashboard_snapshots.popitem(last=False)
         return {**payload, "sortBy": sort_by}
 
+    def _dashboard_from_scan(self, scan, reference_id, comparison_id, year, variable_keys, filter_field, filter_values, sort_by):
+        selected = set(variable_keys or [])
+        rows, unavailable = [], list(scan.get("skipped") or [])
+        for item in scan.get("summaries", []):
+            if selected and f"{item['table']}/{item['variable']}" not in selected:
+                continue
+            pair = (item.get("pairStats") or [{}])[0]
+            left = _number((pair.get("reference") or {}).get("sum"))
+            right = _number((pair.get("comparison") or {}).get("sum"))
+            if left is None or right is None or left == 0:
+                unavailable.append({"table": item["table"], "variable": item["variable"], "reason": "No numeric values in the selected geography or zero reference total"})
+                continue
+            rows.append({"table": item["table"], "variable": item["variable"], "label": f"{item['table']} / {item['variable']}", "units": item.get("units", ""), "description": item.get("description", ""), "referenceSum": left, "comparisonSum": right, "percentChange": (right-left)/abs(left)*100, "changedRows": pair.get("rowsChanged"), "totalRows": pair.get("rowsCompared") or max(pair["reference"].get("recordCount", 0), pair["comparison"].get("recordCount", 0))})
+        token = make_id("dashboard", year)
+        payload = {"dashboardToken": token, "reference": self._record(reference_id), "comparison": self._record(comparison_id), "year": year, "rows": rows, "unavailable": unavailable, "scanned": scan.get("scanned", 0), "availableRows": len(rows), "unavailableRows": len(unavailable), "filterField": filter_field, "filterValues": filter_values or [], "filterLabels": filter_values or [], "scopeLabel": "All locations" if not filter_field or not filter_values else f"{filter_field}: {', '.join(filter_values)}", "variableKeys": sorted(selected), "sharedScan": True}
+        with self.snapshot_lock:
+            self.dashboard_snapshots[token] = payload
+            while len(self.dashboard_snapshots) > 8:
+                self.dashboard_snapshots.popitem(last=False)
+        return {**payload, "sortBy": sort_by}
+
     def dashboard_snapshot(self, token: str) -> dict[str, Any]:
         with self.snapshot_lock:
             payload = self.dashboard_snapshots.get(token)
@@ -1133,7 +1168,11 @@ class ComparisonService:
         else:
             display_mode, rows = "all", source
         if hide_zero:
-            rows = [row for row in rows if float(row.get("percentChange") or 0) != 0]
+            precision = self.workspace.settings().get("numericPrecision", {})
+            digits = precision.get("percentage")
+            digits = precision.get("default", 2) if digits is None else digits
+            cutoff = 0.5 * 10 ** -max(0, min(8, int(digits)))
+            rows = [row for row in rows if abs(float(row.get("percentChange") or 0)) >= cutoff]
         if sort_by == "value_desc": rows.sort(key=lambda row: -row["percentChange"])
         elif sort_by == "value_asc": rows.sort(key=lambda row: row["percentChange"])
         elif sort_by == "magnitude": rows.sort(key=lambda row: -abs(row["percentChange"]))
@@ -1356,6 +1395,9 @@ class ComparisonScanManager:
         (self.root / "cache").mkdir(exist_ok=True)
         self.lock = threading.RLock()
         self.processes: dict[str, subprocess.Popen] = {}
+        self.execution_lock = threading.RLock()
+        self.service.scan_manager = self
+        self.active: dict[str, str] = {}
 
     def _cache_key(self, request: dict[str, Any]) -> str:
         fingerprint = []
@@ -1369,27 +1411,57 @@ class ComparisonScanManager:
             if listing.is_file():
                 stat = listing.stat()
                 files.append([listing.name, stat.st_size, stat.st_mtime_ns])
-            fingerprint.append([record["id"], record.get("registrationFingerprint", ""), files])
-        payload = {"records": fingerprint, "year": request.get("year"), "filterField": request.get("filterField"), "filterValues": request.get("filterValues")}
+            fingerprint.append([record["id"], record.get("registrationFingerprint", ""), str(root.resolve()), record.get("county", {}), files])
+        payload = {"scannerVersion": SCAN_VERSION, "variables": request.get("variables", []), "records": fingerprint, "year": request.get("year"), "filterField": request.get("filterField") or "", "filterValues": sorted(set(str(value).lower() for value in request.get("filterValues") or []))}
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+
+    @staticmethod
+    def reusable(payload):
+        return isinstance(payload, dict) and payload.get("scannerVersion") == SCAN_VERSION and payload.get("summaryVersion") == SUMMARY_VERSION and isinstance(payload.get("summaries"), list)
+
+    def completed_scan(self, reference_id, comparison_ids, year, filter_field="", filter_values=None):
+        status = self.start(reference_id, comparison_ids, year, filter_field, filter_values)
+        while status["state"] in {"waiting", "running"}:
+            time.sleep(.1)
+            status = self.status(status["id"])
+        if status["state"] != "succeeded":
+            raise WorkspaceError(status.get("message", "Comparison scan did not complete"))
+        return status["result"]
 
     def start(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
         request = self.service.scan_request(reference_id, comparison_ids, year, filter_field, filter_values)
+        cache_key = self._cache_key(request)
+        with self.lock:
+            active = self.active.get(cache_key)
+            if active:
+                status = self.status(active)
+                if status["state"] in {"waiting", "running"}:
+                    return status
+            return self._start_request(request, year, cache_key)
+
+    def _start_request(self, request, year, cache_key):
         operation_id = make_id("comparison-scan", year)
         directory = self.root / operation_id; directory.mkdir()
-        cache_key = self._cache_key(request); cache = self.root / "cache" / f"{cache_key}.json"
+        cache = self.root / "cache" / f"{cache_key}.json"
         operation = {"id": operation_id, "state": "waiting", "phase": "cache_validation", "createdAt": now_iso(), "startedAt": "", "finishedAt": "", "cacheKey": cache_key, "cached": cache.is_file(), "message": "Validating scan cache", "containerName": f"ve-{operation_id}"[:63]}
         write_json(directory / "request.json", request)
-        if cache.is_file():
+        if cache.is_file() and self.reusable(read_json(cache, None)):
             shutil.copy2(cache, directory / "result.json")
             operation.update({"state": "succeeded", "phase": "complete", "startedAt": now_iso(), "finishedAt": now_iso(), "message": "Loaded cached change scan"})
             write_json(directory / "operation.json", operation)
             return self.status(operation_id)
         write_json(directory / "operation.json", operation)
+        self.active[cache_key] = operation_id
         threading.Thread(target=self._run, args=(operation_id, cache), daemon=True).start()
         return self.status(operation_id)
 
     def _run(self, operation_id: str, cache: Path) -> None:
+        with self.execution_lock:
+            if self.status(operation_id).get("state") == "cancelled":
+                return
+            self._run_serial(operation_id, cache)
+
+    def _run_serial(self, operation_id: str, cache: Path) -> None:
         directory = self.root / operation_id; operation_path = directory / "operation.json"
         native = self.service.runtime.adapter == "native"
         operation = read_json(operation_path, {}); operation.update({"state": "running", "phase": "preparing_cache" if native else "starting_runtime", "startedAt": now_iso(), "message": "Preparing comparison caches" if native else "Starting batch scanner"}); write_json(operation_path, operation)
