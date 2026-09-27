@@ -1,41 +1,14 @@
-# Apple Silicon macOS Installation and Runtime
+# Apple Silicon macOS 2.0 Installation and Runtime
 
-Use this page to install the native ARM64 application and its managed VisionEval runtime.
+Read the illustrated [Installation and Setup PDF](https://github.com/nikolasleeb/VisionEval-Workbench/raw/refs/heads/main/docs/tutorials/macOS-v2.0/Mac-2.0-Installation-and-Setup.pdf) for screenshots and videos.
 
-> [!NOTE]
-> For screenshots and first-time-user guidance, use the complete [Apple Silicon installation guide](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Installation-macOS-Apple-Silicon.pdf).
+1. Confirm Apple Silicon and macOS 12 or newer. Install [Docker Desktop for Apple silicon](https://docs.docker.com/desktop/setup/install/mac-install/) and start its engine.
+2. Download the [Workbench 2.0 ARM64 DMG](https://github.com/nikolasleeb/VisionEval-Workbench/releases/download/v2.0.0/VisionEval-Workbench-v2.0.0-macos-arm64.dmg).
+3. Open the DMG and drag VisionEval Workbench to Applications. Launch the Applications copy, then eject the installer.
+4. Choose a workspace for projects, assets, runs, and results, separate from the application.
+5. Follow Workbench's runtime setup to install and verify the approved ARM64 runtime. Confirm **Settings → Runtime → Ready** before running models; keep Docker running.
+6. Download optional package ZIPs from the [2.0 release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0). In **Settings → Assets**, select the intact ZIP, review its preview, and install. Do not unzip it first.
 
-## Requirements
+The current installer is Developer ID signed and notarized. Earlier ad-hoc signing and quarantine-removal workarounds do not apply.
 
-- Apple Silicon Mac running macOS 12 or newer
-- Docker Desktop for Apple Silicon when running models or reading uncached R data
-- Enough free disk space for the app, runtime image, workspace, and results
-
-Intel users should follow [Intel macOS Installation and Runtime](Intel-macOS-Installation-and-Runtime).
-
-## Install Workbench
-
-1. Open the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
-2. Download `VisionEval-Workbench-v1.0.0-macos-arm64.dmg`.
-3. Open the DMG and drag **VisionEval Workbench** to **Applications**.
-4. Choose an empty, recognizable workspace folder on first launch.
-
-The app is ad-hoc signed but is not Apple-notarized. If macOS reports that it cannot be opened, cancel the warning and run this once in Terminal:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/VisionEval Workbench.app"
-open "/Applications/VisionEval Workbench.app"
-```
-
-This removes quarantine from this app copy only; it does not disable Gatekeeper globally.
-
-## Install the runtime
-
-1. Install and start Docker Desktop for Apple Silicon.
-2. In onboarding or **Settings → Runtime**, select **Install runtime**.
-3. Keep Workbench open while it pulls the pinned image and performs verification.
-4. Continue only after Workbench reports **Installed**, **Verified**, and **Connected**.
-
-Workbench uses an immutable container digest internally. Normal users do not need to enter Docker commands or manage tags.
-
-**Next:** [Using Workbench on macOS](Using-Workbench-on-macOS) · [Troubleshooting](Troubleshooting)
+See [Regional Packages](Regional-Packages) for data sources and [Workspaces and Resources](macOS-Workspaces-and-Resources) before increasing concurrency or moving to an SSD.

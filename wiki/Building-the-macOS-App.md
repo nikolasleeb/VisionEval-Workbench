@@ -19,7 +19,7 @@ This page is for contributors building the native ARM64 edition from the separat
 
 ## Release verification
 
-The release workflow validates generated assets and documentation, runs Python and JavaScript tests, runs Rust formatting and tests, builds the sidecar and ARM64 application, ad-hoc signs and verifies the bundle, and packages the app in a DMG.
+For the current Mac 2.0 release, the public app and DMG are Developer ID signed and Apple notarized. Use the current macos packaging scripts and release verification instructions in the repository when preparing a release; older ad-hoc packaging does not describe the public 2.0 installer. This guide publication changes documentation only and does not rebuild the application.
 
 > [!IMPORTANT]
 > Apple Silicon, Intel, and Windows source trees are maintained separately because their runtime and operating-system integration differ.

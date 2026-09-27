@@ -1,28 +1,15 @@
-# Using Workbench on Apple Silicon macOS
+# Using Workbench on Apple Silicon macOS 2.0
 
-The Apple Silicon edition follows **Explore → Create → Run → Compare** and starts Docker only for work that requires the ARM64 VisionEval runtime.
+Follow the illustrated [Project and Scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/raw/refs/heads/main/docs/tutorials/macOS-v2.0/Mac-2.0-Project-and-Scenario-Walkthrough.pdf) alongside the [Mac videos](https://sites.google.com/view/ve-workbench/documentation/mac-resources).
 
-## Explore
+1. **Explore:** read input explanations, units, and dependencies.
+2. **Create → Develop:** build an official MPO or custom region from a source covering its geography. For Virginia regions, choose the package's statewide Virginia InputLibrary, not unrelated PlanRVA inputs.
+3. **Create → Setup:** name the project and preserve an untouched baseline.
+4. **Create → Editor:** use **New file** for a focused single-file edit. The Batch Change arrow opens coordinated edits across multiple files with shared operation and scope. Choose target year and geography deliberately.
+5. **Create → Review:** start with the scenario summary and saved file, row, and cell counts. Expand Automatic summary and file details to inspect before/after values. Your note records intent; the generated summary records saved changes.
+6. **Run:** select baseline and scenarios, check runtime and resources, and wait for successful completion. Inspect job logs for failures.
+7. **Compare:** select completed reference and comparison results. Run **Find All Changes** first to discover affected outputs, then explore one variable in detail. Use Map Visualization for spatial inspection. Check units, coverage, and warnings.
 
-Inspect inputs, definitions, units, and dependencies without starting Docker or changing source packages.
+Synthetic-population IDs can be run-local; do not assume identical IDs identify the same entity across independent runs. Positive change means an increase, not automatically an improvement.
 
-## Create
-
-Create projects and scenarios in the Workbench workspace. Installed assets are copied into the workspace; source packages and original model folders remain unchanged.
-
-## Run
-
-Start Docker Desktop and verify the managed runtime. Workbench prepares a fresh model copy, applies the scenario overlay, and creates a temporary container for the job. Entering **Run** never starts a model automatically.
-
-> [!TIP]
-> macOS can run two jobs in parallel when the configured resources allow it. Additional jobs remain queued.
-
-## Compare
-
-Compare completed datastores with tables, statistics, charts, maps, and exports. Docker may be required to read uncached RDA data; existing comparison caches remain usable without it.
-
-## Assets and guided exercise
-
-Regional ZIP files are installed through **Settings → Assets**; see [Regional Packages](Regional-Packages). For a complete worked example, use the [scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/blob/main/docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf).
-
-**Related:** [Apple Silicon Installation and Runtime](macOS-Installation-and-Runtime) · [Troubleshooting](Troubleshooting)
+[Hypercube](macOS-Hypercube) adds **Build → Review → Run → Analyze → Export** for bounded matrices. [Workspaces and Resources](macOS-Workspaces-and-Resources) explains concurrency, Docker memory, storage, and SSD move/reopen behavior.

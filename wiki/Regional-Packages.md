@@ -9,6 +9,14 @@ VisionEval Workbench 1.0.0 provides two optional, platform-neutral ZIP packages.
 
 ## Install a package
 
+### Current Mac 2.0 packages
+
+The [2.0 release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/tag/v2.0.0) provides **planrva-2.0.zip**, **virginia-mpo-regions-2.0.zip**, and **wppdc-2.0.zip**. The table above describes the earlier package naming.
+
+For Mac 2.0, PlanRVA supplies its paired model and InputLibrary for the PlanRVA region. In **Create → Develop**, Virginia MPO Regional Data supplies its own statewide **Virginia InputLibrary (49 files)** for other MPOs/custom regions. These inputs are inside the regional package even when Settings → Assets does not list them as a separate Input Library. Do not substitute PlanRVA inputs to bypass a missing-zone or locality error.
+
+Preview the region and confirm coverage before building its assets. The [Mac project/scenario walkthrough](https://github.com/nikolasleeb/VisionEval-Workbench/raw/refs/heads/main/docs/tutorials/macOS-v2.0/Mac-2.0-Project-and-Scenario-Walkthrough.pdf) illustrates the current workflow.
+
 1. Download the ZIP from the [latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest).
 2. Keep the ZIP intact; do not unzip it.
 3. Open **Settings → Assets**.

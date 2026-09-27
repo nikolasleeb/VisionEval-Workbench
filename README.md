@@ -50,14 +50,19 @@ Do not unzip these packages. In Workbench, open **Settings → Assets**, choose 
 
 ## Tutorials
 
-The v2.0 applications include their current User Guide and What's New documents under **Settings → Documentation**. Earlier installation tutorials in this repository describe previous versions and are being refreshed for v2.0.
+The v2.0 applications include their current User Guide and What's New documents under **Settings → Documentation**. The illustrated [Mac 2.0 guides](docs/tutorials/macOS-v2.0/README.md) are available as PDFs and editable Word documents:
+
+- [Installation and Setup](docs/tutorials/macOS-v2.0/Mac-2.0-Installation-and-Setup.pdf)
+- [Project and Scenario Walkthrough](docs/tutorials/macOS-v2.0/Mac-2.0-Project-and-Scenario-Walkthrough.pdf)
+- [Hypercube Walkthrough](docs/tutorials/macOS-v2.0/Mac-2.0-Hypercube-Walkthrough.pdf)
+- [Workspaces and Resources](docs/tutorials/macOS-v2.0/Mac-2.0-Workspaces-and-Resources.pdf)
 
 - [Browse all tutorials and walkthroughs](docs/tutorials/README.md)
-- [Scenario walkthrough (PDF)](docs/tutorials/VisionEval-Workbench-Scenario-Walkthrough.pdf)
+- [Legacy guides for earlier versions](docs/tutorials/archive/README.md)
 - [Windows User Guide](windows/UserGuide.md)
 - [Apple Silicon macOS User Guide](macos/UserGuide.md)
 
-Visit the [VisionEval Workbench website](https://sites.google.com/view/ve-workbench/home) for additional guidance and future Version 2 tutorials.
+Visit [Mac Resources](https://sites.google.com/view/ve-workbench/documentation/mac-resources) for the accompanying videos.
 
 ## Help and documentation
 
