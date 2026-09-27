@@ -507,7 +507,7 @@ function memoryFailure(job) {
 }
 
 function jobDisplayMessage(job) {
-  if (jobFailureKind(job) === "memory") return "Docker stopped this run because it ran out of available memory. Reduce parallel runs or increase Docker’s memory allocation, then retry.";
+  if (jobFailureKind(job) === "memory") return "This run exhausted available memory. Close other memory-intensive applications and retry a smaller model.";
   if (jobFailureKind(job) === "memory_suspected") return "This run was forcibly stopped. Memory pressure is the most common cause of exit code 137; check Resources and the run log before retrying.";
   return job?.message || "";
 }
@@ -518,9 +518,7 @@ function chooseMemoryRetry(job) {
   const allocation = Number(state.data?.runtime?.dockerMemoryBytes || 0);
   const concurrency = Number(state.desktop?.resources?.maxConcurrentRuns || state.data?.queue?.maxActive || 1);
   const cap = Number(state.desktop?.resources?.memoryLimitGb || 0);
-  const details = [`Current concurrency: ${concurrency}`];
-  if (allocation) details.push(`Docker Desktop allocation: ${humanBytes(allocation)}`);
-  details.push(`Per-run Workbench limit: ${cap ? `${cap.toLocaleString()} GB` : "none"}`);
+  const details = ["Windows runs one VisionEval case at a time. Check available memory in Task Manager."];
   $("confirmationDialogTitle").textContent = "Retry memory-related failure?";
   $("confirmationDialogMessage").textContent = `${jobDisplayMessage(job)}\n\n${details.join(" · ")}\n\nRetrying without changing resources may produce the same failure.`;
   $("confirmationDialogPhraseLabel").hidden = true;
@@ -914,6 +912,11 @@ function selectedOption(select, value) {
   if ([...select.options].some((option) => option.value === value)) select.value = value;
 }
 
+function compatibleRegionSources(sources, regionId) {
+  if (!regionId) return sources;
+  return sources.filter((source) => !Array.isArray(source.supportedRegionIds) || source.supportedRegionIds.includes(regionId));
+}
+
 function showAppRecovery(error) {
   const recovery = $("appRecovery");
   if (!recovery) return;
@@ -1142,20 +1145,21 @@ function renderRegionBuilder() {
   }
   const sources = state.regionBuilderSources?.sources || [];
   const regions = state.regionBuilderRegions?.regions || [];
-  const previousSource = state.regionBuilderSourceLibraryId || sourceSelect.value || "";
-  const previousRegion = state.regionBuilderRegionId || regionSelect.value || "";
-  sourceSelect.innerHTML = sources.length ? sources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible Input Library</option>`;
+  const previousSource = state.regionBuilderSourceLibraryId;
+  const previousRegion = state.regionBuilderRegionId;
   if (regions.length) {
     const regional = regions.filter((item) => item.regionType !== "statewide");
     regionSelect.innerHTML = regional.length ? `<optgroup label="MPO study areas">${regional.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`).join("")}</optgroup>` : `<option value="">No supported MPO definitions</option>`;
   } else regionSelect.innerHTML = `<option value="">No region definitions</option>`;
-  selectedOption(sourceSelect, previousSource);
   selectedOption(regionSelect, previousRegion);
-  state.regionBuilderSourceLibraryId = sourceSelect.value;
   state.regionBuilderRegionId = regionSelect.value;
+  const compatibleSources = compatibleRegionSources(sources, state.regionBuilderRegionId);
+  sourceSelect.innerHTML = compatibleSources.length ? compatibleSources.map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}${item.fileCount ? ` (${item.fileCount} files)` : ""}</option>`).join("") : `<option value="">No compatible Input Library</option>`;
+  selectedOption(sourceSelect, previousSource);
+  state.regionBuilderSourceLibraryId = sourceSelect.value;
   const selectedRegion = regions.find((item) => item.id === state.regionBuilderRegionId);
   initializeRegionBuilderIdentity(selectedRegion, packageChanged);
-  updateRegionBuilderAvailability(sources, regions);
+  updateRegionBuilderAvailability(compatibleSources, regions);
   renderRegionMapLoadStatus();
   $("customizeRegionGeography").disabled = selectedRegion?.regionType === "statewide";
   $("customizeRegionGeography").title = selectedRegion?.regionType === "statewide" ? "The statewide build includes every packaged Bzone." : "Include or exclude individual Azones and Bzones.";
@@ -1184,6 +1188,7 @@ function regionBuilderInstalledScope() {
 function renderRegionBuilderMode() {
   const installed = regionBuilderInstalledScope();
   $("regionOutputOptions").hidden = installed;
+  $("regionSourceLibraryField").hidden = installed;
   $("previewRegionBuild").hidden = installed;
   $("buildRegionAssets").hidden = installed;
   $("regionSourceLibrary").disabled = installed;
@@ -3920,9 +3925,9 @@ function renderRunResourceGuide(project) {
   }else if(cap&&cap<2.5){
     warnings.push(`The ${cap.toLocaleString()} GB per-run limit is below the MPO/regional planning range.`);
   }
-  const lead=warnings.length?warnings.join(" "):"Parallel runs share Docker memory.";
+  const lead="Windows runs one native VisionEval case at a time. Large models can use substantial memory and disk space.";
   guide.classList.toggle("warning",Boolean(warnings.length));
-  guide.innerHTML=`<span>${escapeHtml(lead)}</span><span>${warnings.length?"Review concurrency and memory guidance in":"Adjust concurrency and view memory guidance in"}</span><button type="button" class="text-button" data-open-run-resources>Settings → Resources</button>`;
+  guide.innerHTML=`<span>${escapeHtml(lead)}</span><span>View resource guidance in</span><button type="button" class="text-button" data-open-run-resources>Settings → Resources</button>`;
   guide.querySelector("[data-open-run-resources]")?.addEventListener("click",()=>openSettings("settingsResources").catch(error=>notify(error.message||String(error),"error")));
   guide.hidden=false;
 }
@@ -4320,8 +4325,7 @@ $("regionDefinition").addEventListener("change", (event) => {
   state.regionBuilderIdentityKey = "";
   resetRegionBuilderGeography();
   initializeRegionBuilderIdentity(selectedRegion, true);
-  renderRegionBuilderMode();
-  updateRegionBuilderAvailability();
+  renderRegionBuilder();
 });
 ["regionName", "regionState"].forEach((id) => $(id).addEventListener("input", () => { state.regionBuilderIdentityDrafts[state.regionBuilderGeographyMode] = currentRegionBuilderIdentity(); state.regionBuilderPreview = null; renderRegionBuilderPreview(); updateRegionBuilderAvailability(); }));
 $("useOfficialRegionGeography").addEventListener("click", () => switchRegionBuilderIdentity("official"));
@@ -5135,11 +5139,13 @@ $("confirmRun").addEventListener("click", async (event) => {
   event.preventDefault();
   const variationIds = [...state.runSelectedVariationIds];
   const includeBaseline = state.runBaselineSelected;
+  // A checked baseline is an explicit run request, even when it is required.
+  const forceRerunVariationIds = [...new Set([...state.runForceRerunIds, ...(includeBaseline ? ["baseline"] : [])])];
   const mode = state.data?.runtime?.adapter === "native" ? "queued" : document.querySelector('input[name="runMode"]:checked')?.value || "queued";
   if (!variationIds.length && !includeBaseline) return notify("Select at least one run.", "error");
   setBusy($("confirmRun"), true, "Starting…");
   try {
-    const batch = await post("/api/batches", { projectId: $("runProject").value, variationIds, includeBaseline, mode,forceRerunVariationIds:[...state.runForceRerunIds] });
+    const batch = await post("/api/batches", { projectId: $("runProject").value, variationIds, includeBaseline, mode,forceRerunVariationIds });
     $("runDialog").close();
     const reused=batch.reusedResults?.length||0;
     notify(batch.jobs.length?`Added ${batch.jobs.length} run${batch.jobs.length === 1 ? "" : "s"} to the combined queue as one ${mode} batch${reused?`; reused ${reused} current result${reused===1?"":"s"}`:""}.`:`No run was needed; reused ${reused} current result${reused===1?"":"s"}.`, "success");
@@ -5467,7 +5473,8 @@ function number(value, column = "", context = "output") {
   if (typeof value !== "number") return String(value);
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: precisionFor(context) }).format(value);
 }
-function percentage(value) { return number(value, "", "percentage"); }
+function percentageIsZero(value) { return typeof value === "number" && Math.abs(value) < 0.5 * 10 ** -precisionFor("percentage"); }
+function percentage(value) { return number(percentageIsZero(value) ? 0 : value, "", "percentage"); }
 function metric(label, value, {title="",className=""}={}) { return `<article class="metric ${escapeHtml(className)}"${title?` title="${escapeHtml(title)}"`:""}><small>${escapeHtml(label)}</small><strong>${escapeHtml(number(value))}</strong></article>`; }
 
 function comparisonValuesDiffer(left, right) {
@@ -6153,7 +6160,7 @@ function updateParallelMemoryGuide(){
     $("dockerMemory").textContent="Windows native runs are serialized so the connected VE_Runtime is used by only one run at a time.";
     $("parallelMemoryGuide").textContent="Standard and Hypercube batches share one FIFO runtime slot. Later batches begin automatically when the active batch finishes or is stopped.";
     $("parallelMemoryGuide").classList.remove("warning-notice");
-    $("memoryLimitGuide").textContent="Docker memory limits do not apply to the Windows native runtime. Monitor Windows memory and disk use for large regional models.";
+    $("memoryLimitGuide").textContent="Monitor Windows memory and disk use for large regional models.";
     $("memoryLimitGuide").classList.remove("warning-text");
     return;
   }
@@ -6451,7 +6458,28 @@ document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeWorks
 document.querySelectorAll("[data-reveal-workspace-location]").forEach(button=>button.addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:button.dataset.revealWorkspaceLocation}).catch(error=>notify(String(error),"error"))));
 $("revealWorkspaceRoot").addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:"root"}).catch(error=>notify(String(error),"error")));
 $("switchWorkspace").addEventListener("click",async()=>{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)changeWorkspace(path)});
-$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(!path)return;await window.__TAURI_INTERNALS__.invoke("move_workspace",{destination:path});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error")}});
+async function moveWorkspaceWithProgress(path){
+  const invoke=window.__TAURI_INTERNALS__.invoke,dialog=document.createElement('dialog');
+  dialog.className='workspace-move-dialog';
+  dialog.innerHTML='<h2>Moving workspace</h2><p data-move-message role="status">Preparing the move…</p><progress data-move-progress max="100"></progress><p data-move-count class="muted"></p><p>Keep the SSD connected. Workbench will verify the new copy before switching to it and removing the old copy. Please do not force quit.</p>';
+  dialog.addEventListener('cancel',event=>event.preventDefault());document.body.appendChild(dialog);dialog.showModal();
+  state.workspaceMoving=true;
+  const priorQuit=window.requestWorkbenchQuit;
+  window.requestWorkbenchQuit=()=>{dialog.querySelector('[data-move-message]').textContent='The workspace move is still running. Please wait before quitting.';};
+  let polling=false;
+  const poll=async()=>{if(polling)return;polling=true;try{
+    const status=await invoke('workspace_move_status');
+    dialog.querySelector('[data-move-message]').textContent=status.message||'Preparing the move…';
+    const progress=dialog.querySelector('[data-move-progress]');
+    if(status.totalBytes&&['copying','verifying'].includes(status.phase))progress.value=Math.min(100,status.bytes/status.totalBytes*100);else progress.removeAttribute('value');
+    dialog.querySelector('[data-move-count]').textContent=status.totalFiles?`${status.phase==='verifying'?'Verified':'Copied'} ${number(status.files)} of ${number(status.totalFiles)} files · ${humanBytes(status.bytes)} of ${humanBytes(status.totalBytes)}`:'';
+  }catch(_error){}finally{polling=false;}};
+  const timer=setInterval(poll,500);
+  try{await invoke('move_workspace',{destination:path});const url=await invoke('start_backend');window.location.replace(url);}
+  catch(error){try{await invoke('start_backend');await refreshState({quiet:true});}catch(_restartError){}notify(String(error),'error');}
+  finally{clearInterval(timer);state.workspaceMoving=false;window.requestWorkbenchQuit=priorQuit;dialog.close();dialog.remove();}
+}
+$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)await moveWorkspaceWithProgress(path);}catch(error){notify(String(error),"error")}});
 $("settingsVerifyRuntime").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsInstallRuntime"))$("settingsInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsStartDocker"))$("settingsStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
@@ -7163,7 +7191,7 @@ $("selectDashboardVariables").addEventListener("click",()=>{document.querySelect
 $("clearDashboardVariables").addEventListener("click",()=>{document.querySelectorAll("[data-dashboard-variable]").forEach((box)=>{box.checked=false;});updateDashboardVariableSummary();setDashboardDirty();});
 function dashboardParams(){const params=new URLSearchParams({reference:$("dashboardReference").value,comparison:$("dashboardComparison").value,year:$("dashboardYear").value});const selected=[...document.querySelectorAll("[data-dashboard-variable]:checked")].map((box)=>box.dataset.dashboardVariable);if(selected.length)params.set("variableKey",selected.join("|"));if(state.dashboardFilterField&&state.dashboardFilterValues.size){params.set("filterField",state.dashboardFilterField);params.set("filterValue",[...state.dashboardFilterValues].join("|"));}return params;}
 function dashboardDisplaySettings(){const mode=$("dashboardDisplayMode").value,value=Number($("dashboardDisplayValue").value)||0;return{sortBy:$("dashboardSort").value,displayMode:mode,threshold:mode==="threshold"?Math.max(0,value):0,count:mode==="extremes"?Math.max(1,Math.floor(value||5)):5,hideZero:$("dashboardHideZero").checked};}
-function dashboardDisplayRows(){const source=[...(state.dashboardPayload?.rows||[])],settings=dashboardDisplaySettings();let rows=source;if(settings.displayMode==="threshold")rows=source.filter((row)=>Math.abs(row.percentChange)>=settings.threshold);else if(settings.displayMode==="extremes"){const increases=source.filter((row)=>row.percentChange>0).sort((a,b)=>b.percentChange-a.percentChange).slice(0,settings.count),decreases=source.filter((row)=>row.percentChange<0).sort((a,b)=>a.percentChange-b.percentChange).slice(0,settings.count),keys=new Set([...increases,...decreases].map((row)=>`${row.table}/${row.variable}`));rows=source.filter((row)=>keys.has(`${row.table}/${row.variable}`));}if(settings.hideZero)rows=rows.filter((row)=>row.percentChange!==0);if(settings.sortBy==="value_desc")rows.sort((a,b)=>b.percentChange-a.percentChange);else if(settings.sortBy==="value_asc")rows.sort((a,b)=>a.percentChange-b.percentChange);else if(settings.sortBy==="magnitude")rows.sort((a,b)=>Math.abs(b.percentChange)-Math.abs(a.percentChange));else rows.sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true}));return rows;}
+function dashboardDisplayRows(){const source=[...(state.dashboardPayload?.rows||[])],settings=dashboardDisplaySettings();let rows=source;if(settings.displayMode==="threshold")rows=source.filter((row)=>Math.abs(row.percentChange)>=settings.threshold);else if(settings.displayMode==="extremes"){const increases=source.filter((row)=>row.percentChange>0).sort((a,b)=>b.percentChange-a.percentChange).slice(0,settings.count),decreases=source.filter((row)=>row.percentChange<0).sort((a,b)=>a.percentChange-b.percentChange).slice(0,settings.count),keys=new Set([...increases,...decreases].map((row)=>`${row.table}/${row.variable}`));rows=source.filter((row)=>keys.has(`${row.table}/${row.variable}`));}if(settings.hideZero)rows=rows.filter((row)=>!percentageIsZero(row.percentChange));if(settings.sortBy==="value_desc")rows.sort((a,b)=>b.percentChange-a.percentChange);else if(settings.sortBy==="value_asc")rows.sort((a,b)=>a.percentChange-b.percentChange);else if(settings.sortBy==="magnitude")rows.sort((a,b)=>Math.abs(b.percentChange)-Math.abs(a.percentChange));else rows.sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true}));return rows;}
 $("generateDashboard").addEventListener("click",async()=>{const params=dashboardParams();try{state.dashboardPayload=await withCompareActivity("Generating chart","Scanning selected numeric variables.",()=>request(`/api/comparison/dashboard?${params}`,{signal:state.compareController.signal}));state.dashboardInputSignature=params.toString();state.dashboardDirty=false;$("dashboardStaleMessage").hidden=true;setDashboardVariablesExpanded(false);renderDashboard(state.dashboardPayload);setDashboardExportAvailability();syncMenuContext();}catch(error){if(error.name!=="AbortError")notify(error.message,"error");}});
 function renderDashboard(payload){const rows=dashboardDisplayRows(),unavailable=(payload.unavailable||[]),notChartedTitle=unavailable.length?unavailable.map((item)=>`${item.table} / ${item.variable}: ${item.reason}`).join("\n"):"Outputs are not charted when they are nonnumeric, have no numeric rows in the selected location scope, have a zero reference total, or cannot be read safely.";$("dashboardMetrics").innerHTML=metric("Displayed bars",rows.length)+metric("Chartable outputs",payload.availableRows)+metric("Not charted",payload.unavailableRows,{title:notChartedTitle})+metric("Year",payload.year);const max=Math.max(1,...rows.map((row)=>Math.abs(row.percentChange)));$("dashboardDetails").className="dashboard-chart";$("dashboardDetails").innerHTML=`<p class="dashboard-scope"><strong>Scope:</strong> ${escapeHtml(payload.scopeLabel||"All locations")}</p>`+(rows.map((row)=>{const width=Math.abs(row.percentChange)/max*50,left=row.percentChange<0?50-width:50;return `<div class="dashboard-row"><div><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.units||"")}</small></div><div class="dashboard-track"><span class="dashboard-zero"></span><span class="dashboard-bar ${row.percentChange<0?"negative":"positive"}" style="left:${left}%;width:${width}%"></span></div><strong>${percentage(row.percentChange)}%</strong></div>`;}).join("")||`<p class="muted">No generated variables match this display filter.</p>`);}
 function updateDashboardDisplayControl(){const mode=$("dashboardDisplayMode").value,label=$("dashboardDisplayValueLabel");label.hidden=mode==="all";document.querySelector(".dashboard-view-controls").classList.toggle("has-display-value",mode!=="all");if(mode==="threshold"){$("dashboardDisplayValueText").textContent="Minimum magnitude (%)";$("dashboardDisplayValue").min="0";$("dashboardDisplayValue").step="0.1";$("dashboardDisplayValue").title="Show changes at or above this percentage in either direction.";}else if(mode==="extremes"){$("dashboardDisplayValueText").textContent="Bars per direction";$("dashboardDisplayValue").min="1";$("dashboardDisplayValue").step="1";$("dashboardDisplayValue").title="Show up to this many largest increases and this many largest decreases.";}if(state.dashboardPayload)renderDashboard(state.dashboardPayload);}

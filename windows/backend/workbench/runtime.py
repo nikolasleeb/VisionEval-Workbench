@@ -221,6 +221,16 @@ def find_docker_executable() -> str | None:
     return next((path for path in candidates if path and Path(path).is_file() and os.access(path, os.X_OK)), None)
 
 
+def native_process_path(value: str | Path) -> str:
+    """R's Windows launcher does not support Win32 extended-path prefixes."""
+    text = str(value)
+    if text.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + text[8:]
+    if text.startswith("\\\\?\\"):
+        return text[4:]
+    return text
+
+
 def find_rscript_executable(configured: str = "", version_hint: str = "", runtime: str | Path = "") -> str | None:
     """Find Rscript in PATH or a standard user/system Windows installation."""
     candidates = [configured]
@@ -248,7 +258,7 @@ def find_rscript_executable(configured: str = "", version_hint: str = "", runtim
                 candidates.extend(str(path) for path in sorted(root.glob("R-*/bin/x64/Rscript.exe"), reverse=True))
     else:
         candidates.extend(ambient)
-    return next((path for path in candidates if path and Path(path).is_file()), None)
+    return next((native_process_path(path) for path in candidates if path and Path(path).is_file()), None)
 
 
 def read_renviron(directory: str | Path) -> dict[str, str]:
@@ -275,7 +285,7 @@ def find_native_runtime(configured: str = "") -> Path | None:
     for value in candidates:
         if not value:
             continue
-        path = Path(value).expanduser()
+        path = Path(native_process_path(value)).expanduser()
         markers = (
             (path / ".Renviron").is_file(),
             (path / ".Rprofile").is_file(),
@@ -302,7 +312,7 @@ def find_native_home(configured: str = "") -> Path | None:
     for value in candidates:
         if not value or value.startswith("local/"):
             continue
-        path = Path(value).expanduser()
+        path = Path(native_process_path(value)).expanduser()
         if (path / "ve-lib").is_dir():
             return path.resolve()
     return None
@@ -494,9 +504,9 @@ class RuntimeManager:
         environment = os.environ.copy()
         environment.update({
             "VISIONEVAL_RUNTIME_ADAPTER": "native",
-            "VE_HOME": str(self.native_home),
-            "VE_RUNTIME": str(self.native_runtime),
-            "VE_RELEASE_METADATA": str(self.native_home / "WORKBENCH-RELEASE"),
+            "VE_HOME": native_process_path(self.native_home),
+            "VE_RUNTIME": native_process_path(self.native_runtime),
+            "VE_RELEASE_METADATA": native_process_path(self.native_home / "WORKBENCH-RELEASE"),
         })
         return environment
 
@@ -506,7 +516,7 @@ class RuntimeManager:
             raise WorkspaceError("Rscript was not found. Choose the Rscript.exe used by this VisionEval installation.")
         if not self.cli_path.is_file():
             raise WorkspaceError("The Workbench VisionEval command script is missing")
-        return [rscript, "--vanilla", str(self.cli_path), command, *args], self._native_environment()
+        return [native_process_path(rscript), "--vanilla", native_process_path(self.cli_path), command, *map(native_process_path, args)], self._native_environment()
 
     @staticmethod
     def _native_creation_flags() -> int:
@@ -542,14 +552,14 @@ class RuntimeManager:
         if self.adapter != "native":
             raise WorkspaceError("Native VisionEval configuration is available only on Windows")
         resolved_runtime = find_native_runtime(runtime)
-        if not resolved_runtime or resolved_runtime != Path(runtime).expanduser().resolve():
+        if not resolved_runtime or resolved_runtime != Path(native_process_path(runtime)).expanduser().resolve():
             raise WorkspaceError("Choose a VE_RUNTIME folder containing VisionEval startup configuration")
         resolved_home = find_native_home(home)
-        if not resolved_home or resolved_home != Path(home).expanduser().resolve():
+        if not resolved_home or resolved_home != Path(native_process_path(home)).expanduser().resolve():
             raise WorkspaceError("Choose a VE_HOME folder containing ve-lib")
         resolved_runtime, resolved_home = validate_native_path_separation(resolved_runtime, resolved_home)
         resolved_rscript = find_rscript_executable(rscript)
-        if not resolved_rscript or Path(resolved_rscript).resolve() != Path(rscript).expanduser().resolve():
+        if not resolved_rscript or Path(resolved_rscript).resolve() != Path(native_process_path(rscript)).expanduser().resolve():
             raise WorkspaceError("Choose a valid Rscript.exe")
         self.native_runtime = resolved_runtime
         self.native_home = resolved_home
@@ -570,7 +580,7 @@ class RuntimeManager:
             rscript = self.rscript or find_rscript_executable()
             if not rscript:
                 raise WorkspaceError("Rscript was not found. Choose Rscript.exe in Runtime settings.")
-            return [rscript, "--vanilla", str(Path(script).resolve()), *map(str, args)], self._native_environment()
+            return [native_process_path(rscript), "--vanilla", native_process_path(Path(script).resolve()), *map(native_process_path, args)], self._native_environment()
         docker = find_docker_executable()
         if not docker:
             raise WorkspaceError("Docker Desktop is required on macOS to read VisionEval datastores")
@@ -2032,10 +2042,11 @@ class RuntimeManager:
             result_retention_mode = (
                 "datastore_only"
                 if project.get("projectType") == "hypercube"
-                else "datastore_and_csv" if self.workspace.settings().get("retainFullExports", True) else "datastore_only"
+                else "datastore_and_csv"
             )
             for index, (variation_id, variation_name, baseline) in enumerate(selected):
-                job_id = make_id("run", variation_name)
+                # Display names belong in metadata, not repeated VE export paths.
+                job_id = make_id("run")
                 directory = self.workspace.runs / job_id
                 directory.mkdir()
                 job = {

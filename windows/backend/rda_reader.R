@@ -1,6 +1,28 @@
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 1) stop("Usage: Rscript rda_reader.R <file.Rda> [--metadata]", call. = FALSE)
 metadata_mode <- "--metadata" %in% args
+if (identical(args[[1]], "--csv")) {
+  home <- Sys.getenv("VE_HOME", "")
+  minor <- strsplit(R.version$minor, "\\.")[[1]][1]
+  .libPaths(c(file.path(home, "ve-lib", paste(R.version$major, minor, sep=".")), .libPaths()))
+  variable <- args[[2]]
+  parts <- lapply(args[-c(1,2)], function(path) {
+    columns <- names(data.table::fread(path, nrows=0, showProgress=FALSE))
+    ids <- intersect(columns, c("HhId", "VehId", "WkrId", "Azone", "Bzone", "Marea"))
+    selected <- intersect(columns, c("Scenario", "Global", "Year", ids, variable))
+    data.table::fread(path, select=selected, colClasses=list(character=ids), showProgress=FALSE)
+  })
+  data <- Reduce(function(left, right) {
+    join <- intersect(c("Scenario", "Global", "Year", "HhId", "VehId", "WkrId", "Azone", "Bzone", "Marea"), intersect(names(left), names(right)))
+    if (!length(join)) stop("CSV partitions have no shared identity columns")
+    extra <- setdiff(names(right), names(left))
+    merge(left, right[, c(join, extra), with=FALSE], by=join, all=TRUE, sort=FALSE)
+  }, parts)
+  if (!variable %in% names(data)) stop("Variable is absent from CSV export: ", variable)
+  values <- data[[variable]]
+  cat(jsonlite::toJSON(list(values=values), auto_unbox=FALSE, na="null", digits=NA))
+  quit(status=0)
+}
 
 json_escape <- function(x) {
   x <- gsub("\\\\", "\\\\\\\\", x)

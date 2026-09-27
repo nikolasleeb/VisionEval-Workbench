@@ -28,6 +28,12 @@ TABLE_KEYS = {
 MICRODATA_TABLES = {"Household", "Vehicle", "Worker"}
 
 
+def _discovery_variable(item: dict[str, Any]) -> bool:
+    return item["name"] != TABLE_KEYS.get(item["table"]) and not (
+        item["table"] in MICRODATA_TABLES and item["name"] in {"HhId", "VehId", "WkrId"}
+    )
+
+
 def _number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
@@ -61,6 +67,7 @@ class ComparisonService:
         self.map_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.density_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.snapshot_lock = threading.RLock()
+        self.scan_manager = None
         try:
             self.unit_conflicts = read_json(conflicts_path or helper.with_name("unit_conflicts.json"), {}).get("conflicts", [])
         except (AttributeError, OSError):
@@ -103,6 +110,9 @@ class ComparisonService:
         return json.loads(result.stdout)
 
     def _metadata(self, record: dict[str, Any], *, fresh: bool = False) -> dict[str, Any]:
+        inventory = self._csv_inventory(record)
+        if inventory is not None:
+            return inventory["metadata"]
         path = str(Path(record["path"]) / "DatastoreListing.Rda")
         return self._read_rda.__wrapped__(self, path, True) if fresh else self._read_rda(path, True)
 
@@ -119,9 +129,58 @@ class ComparisonService:
 
     def _inventory(self, record: dict[str, Any]) -> dict[str, Any]:
         root = Path(record["path"])
+        csv_inventory = self._csv_inventory(record)
+        if csv_inventory is not None:
+            return csv_inventory
         if self.cache:
             return self.cache.output_inventory(root, lambda: self._metadata(record, fresh=True))
         return {"items": self._variable_files(root), "metadata": self._metadata(record)}
+
+    def _csv_inventory(self, record: dict[str, Any]) -> dict[str, Any] | None:
+        """Only standard, project-owned results use completed CSV exports."""
+        if not record.get("projectId"):
+            return None
+        try:
+            _, project = self.workspace.project(record["projectId"])
+        except WorkspaceError:
+            return None
+        if project.get("projectType") == "hypercube":
+            return None
+        output = Path(record["path"]).parent / "output"
+        manifests = sorted(output.glob("*/Metadata.csv"), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+        if not manifests:
+            raise WorkspaceError("Standard comparison requires a completed CSV export. Export this result's CSVs before comparing; the model Datastore is preserved.")
+        manifest = self.workspace.within(manifests[0])
+        items, metadata, tables = [], {}, {}
+        with manifest.open(encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                year, table, name = row.get("Group", ""), row.get("Table", ""), row.get("Name", "")
+                if not year.isdigit() or not table or not name or name in {"Scenario", "Global", "Year"}:
+                    continue
+                filename = row.get("DBTable", "")
+                if not filename or Path(filename).name != filename:
+                    raise WorkspaceError("CSV metadata contains an unsafe output filename")
+                source = self.workspace.within(manifest.parent / filename)
+                if not source.is_file():
+                    raise WorkspaceError("CSV export is incomplete; export the results again before comparing")
+                key = f"{year}/{table}"
+                tables.setdefault(key, set()).add(str(source))
+                scenario = row.get("Scenario", "")
+                pattern = re.compile(rf"^{re.escape(table)}(?:_\d+)?_{re.escape(scenario)}_{re.escape(year)}\.csv$")
+                for sibling in manifest.parent.glob("*.csv"):
+                    if pattern.fullmatch(sibling.name):
+                        tables[key].add(str(self.workspace.within(sibling)))
+                items.append({"year": year, "table": table, "name": name})
+                metadata[f"{table}/{name}"] = {"units": row.get("Units", ""), "description": row.get("Description", ""), "module": row.get("Module", ""), "type": ""}
+        return {"items": items, "metadata": metadata, "csvTables": {key: sorted(paths) for key, paths in tables.items()}}
+
+    @lru_cache(maxsize=12)
+    def _read_csv_column(self, files: tuple[str, ...], variable: str, fingerprint: tuple) -> list[Any]:
+        command, environment = self.runtime.r_command(self.helper, "--csv", variable, *files)
+        result = subprocess.run(command, capture_output=True, text=True, env=environment)
+        if result.returncode:
+            raise WorkspaceError((result.stderr or result.stdout).strip() or "Could not read comparison CSV")
+        return json.loads(result.stdout)["values"]
 
     def variables(self, datastore_ids: list[str]) -> list[dict[str, Any]]:
         records = [self._record(item) for item in datastore_ids]
@@ -142,14 +201,24 @@ class ComparisonService:
         return output
 
     def _column(self, root: Path, year: str, table: str, variable: str) -> list[Any]:
+        record = self.cache._record(root) if self.cache else next((item for item in self.workspace.catalog(False)["datastores"] if Path(item["path"]).resolve() == root.resolve()), {})
+        inventory = self._csv_inventory(record)
+        if inventory is not None:
+            files = tuple(inventory["csvTables"].get(f"{year}/{table}", []))
+            if not files:
+                return []
+            fingerprint = tuple((Path(path).stat().st_size, Path(path).stat().st_mtime_ns) for path in files)
+            return self._read_csv_column(files, variable, fingerprint)
         path = root / year / table / f"{variable}.Rda"
-        if self.cache and path.is_file():
+        record = self.cache._record(root) if self.cache else {}
+        if self.cache and path.is_file() and self._csv_inventory(record) is None:
             return self.cache.column(root, year, table, variable)["list"]
         return self._read_rda(str(path)).get("values", []) if path.is_file() else []
 
     def _keyed(self, root: Path, year: str, table: str, variable: str) -> dict[str, Any]:
         path = root / year / table / f"{variable}.Rda"
-        if self.cache and path.is_file():
+        record = self.cache._record(root) if self.cache else {}
+        if self.cache and path.is_file() and self._csv_inventory(record) is None:
             cached = self.cache.column(root, year, table, variable)
             return {key: cached[key] for key in ("keyName", "order", "values")}
         values = self._column(root, year, table, variable)
@@ -975,7 +1044,7 @@ class ComparisonService:
         return {"mode":"records","identitySemantics":"run_local_synthetic" if table in MICRODATA_TABLES else "stable_key","table":table,"variable":variable,"year":year,"key":columns[0]["keyName"],"reference":reference,"comparisons":comparisons,"rows":rows,"totalRows":len(keys),"displayRows":len(keys),"changedRows":None,"offset":offset,"limit":page_limit,"metadata":meta,"referenceSummary":{},"comparisonSummaries":[],"stats":[],"filterField":filter_field,"filterValues":filter_values or [],"sortColumn":sort_column,"sortDirection":sort_direction,"statsPending":True}
 
     def changes(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None, progress=None, cancelled=None) -> dict[str, Any]:
-        variables = [item for item in self.variables([reference_id, *comparison_ids]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"])]
+        variables = [item for item in self.variables([reference_id, *comparison_ids]) if year in item["years"] and _discovery_variable(item)]
         records = [self._record(reference_id), *[self._record(item) for item in comparison_ids]]
         cache_skipped: dict[tuple[str, str], str] = {}
         if self.cache:
@@ -986,6 +1055,8 @@ class ComparisonService:
             for table, names in by_table.items():
                 if cancelled and cancelled(): raise WorkspaceError("Change scan cancelled")
                 for record in records:
+                    if self._csv_inventory(record) is not None:
+                        continue
                     if progress:
                         progress(cache_completed, cache_total, table, "", phase="preparing_cache", recordLabel=record.get("label", record["id"]), cacheHits=cache_hits, cacheMisses=cache_misses)
                     try:
@@ -1005,7 +1076,7 @@ class ComparisonService:
                     cache_completed += 1
                     if progress:
                         progress(cache_completed, cache_total, table, "", phase="preparing_cache", recordLabel=record.get("label", record["id"]), cacheHits=cache_hits, cacheMisses=cache_misses)
-        results, skipped = [], []
+        results, skipped, summaries = [], [], []
         for index, item in enumerate(variables):
             if cancelled and cancelled(): raise WorkspaceError("Change scan cancelled")
             if progress: progress(index, len(variables), item["table"], item["name"], phase="scanning")
@@ -1015,24 +1086,28 @@ class ComparisonService:
                 continue
             try:
                 payload = self.compare(reference_id, comparison_ids, item["table"], item["name"], year, False, 1, 0, filter_field, filter_values)
+                summaries.append({"table": item["table"], "variable": item["name"],
+                                  "reference": payload["referenceSummary"], "comparisons": payload["comparisonSummaries"],
+                                  "totalRows": payload["totalRows"], "changedRows": payload["changedRows"]})
                 if payload["changedRows"]:
                     pair_stats = payload["stats"]
                     results.append({"table": item["table"], "variable": item["name"], "changedRows": payload["changedRows"], "totalRows": payload["totalRows"], "percentRowsChanged": payload["changedRows"] / payload["totalRows"] * 100 if payload["totalRows"] else 0, "totalPercentChanges": [{"label": pair.get("label", f"Comparison {index + 1}"), "value": pair.get("totalPercentChange")} for index, pair in enumerate(pair_stats)], "units": item.get("units", ""), "description": item.get("description", ""), "pairStats": pair_stats})
             except WorkspaceError as exc:
                 skipped.append({"table": item["table"], "variable": item["name"], "reason": str(exc)})
         if progress: progress(len(variables), len(variables), "", "", phase="scanning")
-        return {"year": year, "scanned": len(variables), "changedVariables": len(results), "results": results, "skipped": skipped, "filterField": filter_field, "filterValues": filter_values or []}
+        return {"summaryVersion": 1, "summaries": summaries, "year": year, "scanned": len(variables), "changedVariables": len(results), "results": results, "skipped": skipped, "filterField": filter_field, "filterValues": filter_values or []}
 
     def scan_request(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
         records = [self._record(reference_id), *[self._record(item) for item in comparison_ids]]
         if len(records) < 2:
             raise WorkspaceError("Choose at least one comparison datastore")
-        variables = [item for item in self.variables([item["id"] for item in records]) if year in item["years"] and item["name"] != TABLE_KEYS.get(item["table"])]
+        variables = [item for item in self.variables([item["id"] for item in records]) if year in item["years"] and _discovery_variable(item)]
         def scan_record(item: dict[str, Any]) -> dict[str, Any]:
             mapping = self._county_mapping(item) or {"azone": {}, "bzone": {}}
             return {
                 "id": item["id"], "label": item.get("label", item["id"]), "path": item["path"],
                 "county": {"azone": mapping["azone"], "bzone": mapping["bzone"]},
+                "csvTables": (self._csv_inventory(item) or {}).get("csvTables", {}),
                 "registrationFingerprint": hashlib.sha256(json.dumps(
                     {key: value for key, value in item.items() if key != "path"}, sort_keys=True, default=str
                 ).encode()).hexdigest(),
@@ -1052,9 +1127,14 @@ class ComparisonService:
 
     def dashboard(self, reference_id: str, comparison_id: str, year: str, variable_keys: list[str] | None = None, filter_field: str = "", filter_values: list[str] | None = None, sort_by: str = "name") -> dict[str, Any]:
         selected = set(variable_keys or [])
-        variables = [item for item in self.variables([reference_id, comparison_id]) if year in item["years"] and (not selected or f"{item['table']}/{item['name']}" in selected) and item["name"] != TABLE_KEYS.get(item["table"])]
+        variables = [item for item in self.variables([reference_id, comparison_id]) if year in item["years"] and (not selected or f"{item['table']}/{item['name']}" in selected) and _discovery_variable(item)]
         records = [self._record(reference_id), self._record(comparison_id)]
-        if self.cache:
+        scan = None
+        if self.scan_manager and self.scan_helper.is_file() and not (filter_field == "Bzone" and filter_values):
+            scan = self.scan_manager.summaries(reference_id, comparison_id, year, filter_field, filter_values)
+        scanned = {(item["table"], item["variable"]): item for item in (scan or {}).get("summaries", [])}
+        scan_errors = {(item["table"], item["variable"]): item["reason"] for item in (scan or {}).get("skipped", [])}
+        if self.cache and scan is None:
             by_table: dict[str,list[str]]={}
             for item in variables: by_table.setdefault(item["table"],[]).append(item["name"])
             for table,names in by_table.items():
@@ -1063,7 +1143,14 @@ class ComparisonService:
         for item in variables:
             try:
                 assignments = []
-                if filter_field == "Bzone" and filter_values:
+                if scan is not None:
+                    summary = scanned.get((item["table"], item["name"]))
+                    if summary is None:
+                        raise WorkspaceError(scan_errors.get((item["table"], item["name"]), "No scan summary available"))
+                    left = _number(summary["reference"].get("sum"))
+                    right = _number(summary["comparisons"][0].get("sum"))
+                    total_rows, changed_rows = summary["totalRows"], summary["changedRows"]
+                elif filter_field == "Bzone" and filter_values:
                     selected_bzones = {str(value) for value in filter_values}
                     aggregates = [
                         self._aggregate_map_record(record, year, item["table"], item["name"], "bzone")
@@ -1133,7 +1220,12 @@ class ComparisonService:
         else:
             display_mode, rows = "all", source
         if hide_zero:
-            rows = [row for row in rows if float(row.get("percentChange") or 0) != 0]
+            precision = self.workspace.settings()["numericPrecision"]
+            digits = precision.get("percentage")
+            if digits is None:
+                digits = precision.get("default", 2)
+            minimum_visible = 0.5 * 10 ** -digits
+            rows = [row for row in rows if abs(float(row.get("percentChange") or 0)) >= minimum_visible]
         if sort_by == "value_desc": rows.sort(key=lambda row: -row["percentChange"])
         elif sort_by == "value_asc": rows.sort(key=lambda row: row["percentChange"])
         elif sort_by == "magnitude": rows.sort(key=lambda row: -abs(row["percentChange"]))
@@ -1356,6 +1448,24 @@ class ComparisonScanManager:
         (self.root / "cache").mkdir(exist_ok=True)
         self.lock = threading.RLock()
         self.processes: dict[str, subprocess.Popen] = {}
+        self.service.scan_manager = self
+        self.summary_lock = threading.RLock()
+        self.active_keys: dict[str, str] = {}
+
+    def summaries(self, reference_id: str, comparison_id: str, year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
+        # Both views use the same fingerprinted cache. Serialize chart requests so
+        # simultaneous requests cannot launch duplicate scanners.
+        with self.summary_lock:
+            operation = self.start(reference_id, [comparison_id], year, filter_field, filter_values)
+            while operation["state"] in {"waiting", "running"}:
+                time.sleep(0.1)
+                operation = self.status(operation["id"])
+            if operation["state"] != "succeeded":
+                raise WorkspaceError(operation.get("message") or "Chart scan failed")
+            result = operation["result"]
+            if result.get("summaryVersion") != 1:
+                raise WorkspaceError("Chart scan did not produce complete summaries")
+            return result
 
     def _cache_key(self, request: dict[str, Any]) -> str:
         fingerprint = []
@@ -1370,14 +1480,28 @@ class ComparisonScanManager:
                 stat = listing.stat()
                 files.append([listing.name, stat.st_size, stat.st_mtime_ns])
             fingerprint.append([record["id"], record.get("registrationFingerprint", ""), files])
-        payload = {"records": fingerprint, "year": request.get("year"), "filterField": request.get("filterField"), "filterValues": request.get("filterValues")}
+        csv_fingerprints = []
+        for record in request.get("records", []):
+            csv_fingerprints.append([[path, Path(path).stat().st_size, Path(path).stat().st_mtime_ns]
+                                    for paths in record.get("csvTables", {}).values() for path in paths])
+        payload = {"scannerVersion": 4, "csv": csv_fingerprints, "records": fingerprint, "variables": request.get("variables"), "year": request.get("year"), "filterField": request.get("filterField"), "filterValues": sorted(set(request.get("filterValues") or []))}
         return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
     def start(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
+        with self.lock:
+            return self._start_locked(reference_id, comparison_ids, year, filter_field, filter_values)
+
+    def _start_locked(self, reference_id: str, comparison_ids: list[str], year: str, filter_field: str = "", filter_values: list[str] | None = None) -> dict[str, Any]:
         request = self.service.scan_request(reference_id, comparison_ids, year, filter_field, filter_values)
+        cache_key = self._cache_key(request)
+        active_id = self.active_keys.get(cache_key)
+        if active_id:
+            active = self.status(active_id)
+            if active["state"] in {"waiting", "running"}:
+                return active
         operation_id = make_id("comparison-scan", year)
         directory = self.root / operation_id; directory.mkdir()
-        cache_key = self._cache_key(request); cache = self.root / "cache" / f"{cache_key}.json"
+        cache = self.root / "cache" / f"{cache_key}.json"
         operation = {"id": operation_id, "state": "waiting", "phase": "cache_validation", "createdAt": now_iso(), "startedAt": "", "finishedAt": "", "cacheKey": cache_key, "cached": cache.is_file(), "message": "Validating scan cache", "containerName": f"ve-{operation_id}"[:63]}
         write_json(directory / "request.json", request)
         if cache.is_file():
@@ -1386,6 +1510,7 @@ class ComparisonScanManager:
             write_json(directory / "operation.json", operation)
             return self.status(operation_id)
         write_json(directory / "operation.json", operation)
+        self.active_keys[cache_key] = operation_id
         threading.Thread(target=self._run, args=(operation_id, cache), daemon=True).start()
         return self.status(operation_id)
 
@@ -1398,14 +1523,14 @@ class ComparisonScanManager:
             records = request.get("records", [])
             progress_path, output_path = directory / "progress.json", directory / "result.json"
             write_json(progress_path, {"completed": 0, "total": 0 if native else len(request.get("variables") or []), "table": "", "variable": "", "phase": "preparing_cache" if native else "starting_runtime", "cacheHits": 0, "cacheMisses": 0})
-            if native:
-                command, environment = None, None
-            else:
+            if self.service.scan_helper.is_file():
                 try:
                     invocation = self.service.scan_command(directory / "request.json", output_path, progress_path, operation.get("containerName", ""))
                     command, environment = invocation if isinstance(invocation, tuple) else (invocation, None)
                 except (FileNotFoundError, OSError, WorkspaceError):
                     command, environment = None, None
+            else:
+                command, environment = None, None
             if command:
                 process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
                 with self.lock: self.processes[operation_id] = process

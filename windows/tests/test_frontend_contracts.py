@@ -9,13 +9,33 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class FrontendContractTests(unittest.TestCase):
+    def test_checked_baseline_is_always_an_explicit_run_request(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        submit = source[source.index('$("confirmRun").addEventListener'):]
+        self.assertIn('...(includeBaseline ? ["baseline"] : [])', submit)
+        self.assertIn('includeBaseline, mode,forceRerunVariationIds', submit)
+
+    def test_workspace_move_runs_off_ui_thread_and_reports_native_progress(self):
+        source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
+        host = (ROOT / "desktop" / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
+        permissions = (ROOT / "desktop" / "src-tauri" / "permissions" / "workbench.toml").read_text(encoding="utf-8")
+        self.assertIn("async fn move_workspace", host)
+        self.assertIn("move_workspace_blocking(&worker_app, destination)", host)
+        self.assertIn('"workspace_move_status"', permissions)
+        self.assertIn("async function moveWorkspaceWithProgress", source)
+        self.assertIn("invoke('workspace_move_status')", source)
+        self.assertIn("Please do not force quit", source)
+        move = host[host.index("fn move_workspace_blocking"):host.index("async fn move_workspace")]
+        self.assertLess(move.index("remember_workspace"), move.index("fs::remove_dir_all(&source)"))
+        self.assertIn("partial destination alone", move)
+
     def test_hypercube_discovery_and_case_exports_are_manual_and_accessible(self):
         markup = (ROOT / "public" / "index.html").read_text(encoding="utf-8")
         source = (ROOT / "public" / "app.js").read_text(encoding="utf-8")
         server = (ROOT / "backend" / "workbench" / "server.py").read_text(encoding="utf-8")
         self.assertIn('data-hypercube-subpage="hypercubeExportPage"', markup)
         self.assertIn('aria-describedby="hypercubeDiscoveryHelp"', markup)
-        self.assertIn("An 81-case regional Hypercube scan is often around 10 minutes", markup)
+        self.assertIn("Scan time depends on this computer, model size, and the number of cases", markup)
         self.assertNotIn('id="openHypercubeCompare"', markup)
         self.assertNotIn('id="compareHypercubePair"', markup)
         self.assertNotIn('id="viewHypercubeRows"', markup)
@@ -190,7 +210,7 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("less than 16 GB of RAM", markup)
         self.assertIn("This is guidance, not a block", markup)
         self.assertIn("81 serialized execution waves", markup)
-        self.assertIn("parallel execution is not available in Windows 2.0", markup)
+        self.assertIn("Windows runs one case at a time through the native runtime", markup)
         self.assertNotIn("21 execution waves", markup)
         self.assertNotIn("four concurrent runs", markup.lower())
         self.assertIn("physicalMemoryBytes", source)
@@ -251,7 +271,8 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn('class="inline-check batch-baseline-toggle"', markup)
         self.assertIn('class="control-help"', markup)
         self.assertNotIn('class="notice guidance-notice" role="status" aria-live="polite" hidden></p>', markup)
-        self.assertIn("Parallel runs share Docker memory.", source)
+        self.assertNotIn("Parallel runs share Docker memory.", source)
+        self.assertIn("Windows runs one native VisionEval case at a time.", source)
         self.assertIn("Settings → Resources", source)
         self.assertIn("function jobDisplayMessage(job)", source)
         self.assertIn("function chooseMemoryRetry(job)", source)

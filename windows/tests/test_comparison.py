@@ -3,9 +3,10 @@ import unittest
 import time
 import zipfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
-from backend.workbench.comparison import ComparisonOperationManager, ComparisonService
+from backend.workbench.comparison import ComparisonOperationManager, ComparisonService, ComparisonScanManager, _discovery_variable
+from backend.workbench.workspace import write_json
 from backend.workbench.excel_exports import ComparisonExportManager, WorkbookWriter
 from backend.workbench.workspace import Workspace, WorkspaceError
 
@@ -31,6 +32,60 @@ class FakeComparison(ComparisonService):
 
 
 class ComparisonTests(unittest.TestCase):
+    def test_discovery_excludes_synthetic_primary_and_foreign_ids(self):
+        for table in ("Household", "Vehicle", "Worker"):
+            for name in ("HhId", "VehId", "WkrId"):
+                self.assertFalse(_discovery_variable({"table": table, "name": name}))
+            self.assertTrue(_discovery_variable({"table": table, "name": "Income"}))
+            self.assertTrue(_discovery_variable({"table": table, "name": "Bzone"}))
+    def test_chart_uses_complete_scan_summaries_without_compare_or_cache(self):
+        names = ["Changed", "Unchanged", "ZeroBase", "Category", "Missing"]
+        self.service.variables = lambda ids: [{"table": "Azone", "name": name, "years": ["2045"]} for name in names]
+        self.service.scan_helper.touch()
+        manager = Mock()
+        manager.summaries.return_value = {"summaryVersion": 1, "summaries": [
+            {"table": "Azone", "variable": name, "reference": {"sum": left},
+             "comparisons": [{"sum": right}], "totalRows": 2, "changedRows": changed}
+            for name, left, right, changed in [("Changed", -100, -90, 1), ("Unchanged", 20, 20, 0),
+                                               ("ZeroBase", 0, 5, 1), ("Category", None, None, 1)]
+        ], "skipped": [{"table": "Azone", "variable": "Missing", "reason": "Missing output"}]}
+        self.service.scan_manager = manager
+        self.service.cache = Mock()
+        with patch.object(self.service, "compare", side_effect=AssertionError("must reuse scan")):
+            chart = self.service.dashboard("reference", "comparison", "2045")
+        self.service.cache.ensure.assert_not_called()
+        self.assertEqual({row["variable"]: row["percentChange"] for row in chart["rows"]}, {"Changed": 10, "Unchanged": 0})
+        self.assertEqual(chart["unavailableRows"], 3)
+
+    def test_scan_cache_reuses_complete_summaries_and_invalidates_sources_and_scope(self):
+        manager = ComparisonScanManager(self.service)
+        source = Path(self.temp.name) / "values.csv"
+        source.write_text("Value\n1\n")
+        request = {"records": [{"id": "reference", "path": self.temp.name, "csvTables": {"2045/Azone": [str(source)]}},
+                               {"id": "comparison", "path": self.temp.name}],
+                   "variables": [], "year": "2045", "filterField": "", "filterValues": []}
+        self.service.scan_request = lambda *args: request
+        key = manager._cache_key(request)
+        result = {"summaryVersion": 1, "summaries": [], "results": [], "skipped": []}
+        write_json(manager.root / "cache" / f"{key}.json", result)
+        with patch("backend.workbench.comparison.subprocess.Popen", side_effect=AssertionError("must not scan again")):
+            self.assertEqual(manager.summaries("reference", "comparison", "2045"), result)
+        for field, value in [("year", "2024"), ("filterField", "County"), ("filterValues", ["x"])]:
+            self.assertNotEqual(manager._cache_key({**request, field: value}), key)
+        changed = {**request, "records": [{**request["records"][0], "id": "different"}, request["records"][1]]}
+        self.assertNotEqual(manager._cache_key(changed), key)
+        source.write_text("Value\n1234\n")
+        self.assertNotEqual(manager._cache_key(request), key)
+
+    def test_chart_and_find_all_join_the_same_active_scan(self):
+        manager = ComparisonScanManager(self.service)
+        self.service.scan_request = lambda *args: {"records": [], "variables": [], "year": "2045"}
+        with patch("backend.workbench.comparison.threading.Thread") as thread:
+            first = manager.start("reference", ["comparison"], "2045")
+            second = manager.start("reference", ["comparison"], "2045")
+        self.assertEqual(first["id"], second["id"])
+        self.assertEqual(thread.return_value.start.call_count, 1)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.service = FakeComparison(self.temp.name)
@@ -186,6 +241,8 @@ class ComparisonTests(unittest.TestCase):
         self.service.compare = lambda *args, **kwargs: {
             "changedRows": 1,
             "totalRows": 2,
+            "referenceSummary": {"sum": 10},
+            "comparisonSummaries": [{"sum": 11}],
             "stats": [{"label": "Comparison"}],
         }
 
@@ -272,6 +329,9 @@ class ComparisonTests(unittest.TestCase):
         self.assertEqual(bzone["options"], [{"value": "510010001001", "label": "Alpha County · 510010001001"}])
 
     def test_dashboard_filters_household_and_worker_outputs_by_bzone(self):
+        self.service.scan_helper.touch()
+        self.service.scan_manager = Mock()
+        self.service.scan_manager.summaries.side_effect = AssertionError("Bzone assignment must not reuse a generic scan")
         variables = [
             {"table": "Household", "name": "Income", "years": ["2045"], "units": "USD"},
             {"table": "Worker", "name": "Dvmt", "years": ["2045"], "units": "miles"},
@@ -334,6 +394,16 @@ class ComparisonTests(unittest.TestCase):
         self.assertTrue(without_zero["hideZero"])
         self.assertEqual(len(extremes["sourceRows"]), 4)
         self.assertEqual(len(without_zero["sourceRows"]), 4)
+
+    def test_dashboard_hide_zero_matches_percentage_precision_without_changing_totals(self):
+        rows = [{"table": "Azone", "variable": str(i), "label": str(i), "percentChange": value}
+                for i, value in enumerate([0, -0.0, 0.0049, -0.0049, 0.005, -0.005, 0.01])]
+        self.service.dashboard_snapshots["precision-test"] = {"rows": rows}
+        shown = self.service.dashboard_display("precision-test", hide_zero=True)
+        self.assertEqual([row["percentChange"] for row in shown["rows"]], [0.005, -0.005, 0.01])
+        self.assertEqual(shown["sourceRows"], rows)
+        with patch.object(self.service.workspace, "settings", return_value={"numericPrecision": {"default": 2, "percentage": 3}}):
+            self.assertEqual(len(self.service.dashboard_display("precision-test", hide_zero=True)["rows"]), 5)
 
     def test_comparison_map_uses_independent_all_row_geographic_means(self):
         self.service._variable_files = lambda root: [

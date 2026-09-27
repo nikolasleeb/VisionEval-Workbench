@@ -109,6 +109,7 @@
           </div>
           <div id="regionBuilderForm" class="stack" hidden>
             <label id="regionPackageField">Develop source<select id="regionPackage"></select></label>
+            <label id="regionSourceLibraryField">Input data source<select id="regionSourceLibrary"></select><small>The Virginia MPO package includes its own statewide input files. Only libraries covering the selected region are shown.</small></label>
             <section id="officialRegionGeographyView" class="region-geography-mode-panel">
               <label><span id="regionSelectorLabel">Region</span><select id="regionDefinition"></select></label>
               <p class="muted">Use the regional package's official MPO boundary rule.</p>
@@ -120,7 +121,6 @@
             <details id="regionOutputOptions" class="region-builder-options">
               <summary>Output options</summary>
               <div class="region-builder-grid">
-                <label>Source model package<select id="regionSourceLibrary"></select></label>
                 <label class="region-name-field">Region name<input id="regionName"><small>The name shown in Workbench and used for the generated assets.</small></label>
                 <label>State abbreviation<input id="regionState" maxlength="8"></label>
               </div>
@@ -429,13 +429,13 @@
           <aside id="hypercubeCellDetails" class="hypercube-cell-details" hidden></aside>
         </section>
         <section class="panel hypercube-discovery-panel">
-          <div class="section-title"><div><h3>Find All Changes</h3><p class="muted">Scan every eligible output across every completed Hypercube case, then rank outputs or scenarios by their deviation from the common baseline.</p></div><div class="actions"><button id="discoverHypercubeOutputs" class="secondary" aria-describedby="hypercubeDiscoveryHelp" title="Scans every eligible output across all completed Hypercube cases. An 81-case regional Hypercube scan is often around 10 minutes on Apple Silicon; larger or uncached scans can take longer. You can cancel it, and repeating an identical scan reuses cached results.">Find All Changes</button><button id="cancelHypercubeDiscovery" class="danger" hidden>Cancel</button></div></div>
+          <div class="section-title"><div><h3>Find All Changes</h3><p class="muted">Scan every eligible output across every completed Hypercube case, then rank outputs or scenarios by their deviation from the common baseline.</p></div><div class="actions"><button id="discoverHypercubeOutputs" class="secondary" aria-describedby="hypercubeDiscoveryHelp" title="Scans every eligible output across all completed Hypercube cases. Time depends on this computer, model size, and the number of cases. You can cancel it, and repeating an identical scan reuses cached results.">Find All Changes</button><button id="cancelHypercubeDiscovery" class="danger" hidden>Cancel</button></div></div>
           <div class="hypercube-discovery-request-controls">
             <label>Year<select id="hypercubeDiscoveryYear" aria-describedby="hypercubeDiscoveryScopeHelp"></select></label>
             <label>Aggregation<select id="hypercubeDiscoveryAggregation" aria-describedby="hypercubeDiscoveryScopeHelp"><option value="median" selected>Median</option><option value="mean">Mean</option><option value="sum">Sum</option><option value="min">Minimum</option><option value="max">Maximum</option></select></label>
           </div>
           <p id="hypercubeDiscoveryScopeHelp" class="muted">These settings apply only to Find All Changes. The scan covers every eligible output and every verified completed case; Response Matrix selections do not constrain it.</p>
-          <p id="hypercubeDiscoveryHelp" class="muted">An 81-case regional Hypercube scan is often around 10 minutes on Apple Silicon; larger or uncached scans can take longer. You can cancel it, and repeating an identical scan reuses cached results.</p>
+          <p id="hypercubeDiscoveryHelp" class="muted">Scan time depends on this computer, model size, and the number of cases. You can cancel it, and repeating an identical scan reuses cached results.</p>
           <details class="hypercube-reading-guide"><summary>How to read these results</summary><div id="hypercubeReadingGuideContent"></div></details>
           <div id="hypercubeDiscoveryStatus" class="muted">Find All Changes has not been run.</div>
           <div id="hypercubeDiscoveryResults"></div>
@@ -529,7 +529,7 @@
             <p>On computers with <strong>less than 16 GB of RAM</strong>, use small matrices and close other memory-intensive applications. This is guidance, not a block.</p>
             <p>A <strong>9 × 9 matrix creates 81 complete scenario runs</strong> and 81 serialized execution waves.</p>
             <div id="hypercubeSafetyEstimate" class="hypercube-safety-estimate" role="status" aria-live="polite">Calculating a planning estimate from comparable completed runs…</div>
-            <p class="muted">Runtime varies with model stages, population, years, outputs, computer performance, and resource contention. A future verified container or cloud runtime may support parallel cases; parallel execution is not available in Windows 2.0.</p>
+            <p class="muted">Runtime varies with model stages, population, years, outputs, computer performance, and resource contention. Windows runs one case at a time through the native runtime.</p>
           </div>
         </div>
       </section>
