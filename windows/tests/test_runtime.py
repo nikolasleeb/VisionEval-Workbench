@@ -441,7 +441,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertIn("Workbench closed", job["message"])
 
     def test_log_chunks_are_offset_based(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
             workspace = Workspace(directory)
             job_dir = workspace.runs / "run-log"
             job_dir.mkdir()
@@ -525,14 +525,14 @@ class RuntimeTests(unittest.TestCase):
             validation = {"valid": True, "errors": [], "warnings": []}
             with patch.object(runtime, "validate_project", return_value=validation), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
                 standard = runtime.create_batch("standard", ["scenario"], False, "queued")
-            self.assertEqual(standard["jobs"][0]["resultRetentionMode"], "datastore_only")
+            self.assertEqual(standard["jobs"][0]["resultRetentionMode"], "datastore_and_csv")
 
             write_json(workspace.runs / standard["jobs"][0]["id"] / "job.json", {**standard["jobs"][0], "state": "succeeded", "finishedAt": "2026-01-01T00:01:00Z"})
             workspace.update_settings({"retainFullExports": True})
             with patch.object(runtime, "validate_project", return_value=validation), patch.object(runtime, "image_digest", return_value="sha256:fixture"):
                 cube = runtime.create_batch("hypercube", ["scenario"], False, "queued")
             self.assertEqual(cube["jobs"][0]["resultRetentionMode"], "datastore_only")
-            self.assertEqual(json.loads((workspace.runs / standard["jobs"][0]["id"] / "job.json").read_text())["resultRetentionMode"], "datastore_only")
+            self.assertEqual(json.loads((workspace.runs / standard["jobs"][0]["id"] / "job.json").read_text())["resultRetentionMode"], "datastore_and_csv")
 
     def test_parallel_mode_lock_is_shared_by_projects_and_survives_restart(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):
@@ -819,10 +819,13 @@ class RuntimeTests(unittest.TestCase):
             with patch.object(runtime, "validate_project", return_value={"valid": True, "errors": [], "warnings": []}), patch.object(runtime, "image_digest", return_value=runtime_digest):
                 reused = runtime.create_batch(project_id, ["scenario"], True, "parallel")
                 forced = runtime.create_batch(project_id, ["scenario"], True, "parallel", ["scenario"])
+                baseline_forced = runtime.create_batch(project_id, [], True, "queued", ["baseline"])
             self.assertEqual(reused["jobs"], [])
             self.assertEqual({item["variationId"] for item in reused["reusedResults"]}, {"baseline", "scenario"})
             self.assertEqual([item["variationId"] for item in forced["jobs"]], ["scenario"])
             self.assertEqual([item["variationId"] for item in forced["reusedResults"]], ["baseline"])
+            self.assertEqual([item["variationId"] for item in baseline_forced["jobs"]], ["baseline"])
+            self.assertEqual(baseline_forced["reusedResults"], [])
 
     def test_remove_history_deletes_record_and_log_but_preserves_completed_results(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(RuntimeManager, "_dispatch_loop", return_value=None):

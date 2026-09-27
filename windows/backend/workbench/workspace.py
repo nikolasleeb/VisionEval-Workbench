@@ -92,6 +92,9 @@ def now_iso() -> str:
 def make_id(prefix: str, label: str = "") -> str:
     slug = SAFE_ID.sub("-", label.strip().lower()).strip("-")[:36]
     token = uuid.uuid4().hex[:10]
+    # Display labels live in metadata, not repeated nested Windows paths.
+    if os.name == "nt":
+        slug = ""
     return f"{prefix}-{slug}-{token}" if slug else f"{prefix}-{token}"
 
 
@@ -106,7 +109,14 @@ def asset_display_name(value: Any) -> str:
     return LEGACY_ASSET_DISPLAY_NAMES.get(text, text)
 
 
+def is_workspace_data(path: Path) -> bool:
+    """Exclude external-drive housekeeping without hiding real dotfiles."""
+    return not any(part.startswith("._") or part == ".DS_Store" for part in path.parts)
+
+
 def read_json(path: Path, default: Any = None) -> Any:
+    if not is_workspace_data(path):
+        return default
     # Antivirus and concurrent os.replace calls can make a Windows path
     # momentarily unavailable even though the update itself is atomic.
     for attempt in range(6):
@@ -120,6 +130,10 @@ def read_json(path: Path, default: Any = None) -> Any:
 
 
 def write_json(path: Path, payload: Any) -> None:
+    if os.name == "nt":
+        length = len(str(path.absolute()).encode("utf-16-le")) // 2
+        if length > 240:
+            raise WorkspaceError("The generated Windows path exceeds the safe 240-character budget. Choose a shorter workspace location; no file was written.")
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
@@ -145,7 +159,7 @@ def fingerprint_tree(root: Path, relative_paths: list[str] | None = None) -> str
     digest = hashlib.sha256()
     paths = [root / item for item in relative_paths] if relative_paths else sorted(p for p in root.rglob("*") if p.is_file())
     for path in paths:
-        if not path.is_file():
+        if not path.is_file() or not is_workspace_data(path):
             continue
         digest.update(str(path.relative_to(root)).encode())
         with path.open("rb") as handle:
@@ -333,7 +347,15 @@ class Workspace:
                         return new + value[len(old):]
             return value
 
-        candidates = list(self.internal.rglob("*.json"))
+        # Generated scan results, caches and maps can be hundreds of MB.
+        # Migrate only persistent path-bearing metadata, never those payloads.
+        candidates = list(self.internal.glob("*.json"))
+        candidates.extend(self.runs.glob("*.json"))
+        candidates.extend(self.runs.glob("*/job.json"))
+        for name in ("operation.json", "request.json"):
+            candidates.extend(self.exchange.glob(f"*/*/{name}"))
+        candidates.append(self.exchange / "system" / "runtime-profile.json")
+        candidates.extend((self.internal / "archive").glob("*/*/.asset-archive.json"))
         candidates.append(self.catalog_path)
         candidates.extend(self.projects.glob("*/project.json"))
         candidates.extend(self.removed_projects.glob("*/project.json"))
@@ -755,11 +777,12 @@ class Workspace:
         except (AttributeError, OSError, ValueError):
             # Windows does not expose os.pathconf. Leave enough headroom for
             # VisionEval's generated files under the common long-path limit.
-            name_max, path_max = 255, 32_767 if os.name == "nt" else 1024
+            name_max, path_max = 255, 368 if os.name == "nt" else 1024
         oversized = next((part for part in path.parts if len(part.encode("utf-8")) > max(1, name_max - 32)), "")
         if oversized:
             raise WorkspaceError(f"A managed path component is too long: {oversized[:48]}")
-        if len(os.fsencode(str(path))) > max(1, path_max - 128):
+        length = len(str(path).encode("utf-16-le")) // 2 if os.name == "nt" else len(os.fsencode(str(path)))
+        if length > max(1, path_max - 128):
             raise WorkspaceError("The workspace path is too long for safe VisionEval file creation. Move the workspace closer to your home folder.")
         return path
 
@@ -827,7 +850,7 @@ class Workspace:
                 if isinstance(asset, dict) and asset.get("kind") == "input-library" and asset.get("id"):
                     registered_names[str(asset["id"])] = str(asset.get("name") or asset["id"])
         for path in sorted((p for p in self.input_library.iterdir() if p.is_dir()), key=lambda p: p.name.lower()):
-            files = sorted(p.name for p in path.glob("*.csv"))
+            files = sorted(p.name for p in path.glob("*.csv") if is_workspace_data(p))
             manifest = read_json(path / "region_builder_manifest.json", {})
             pairing = self.input_library_pairing(path.name)
             output.append({
@@ -907,7 +930,7 @@ class Workspace:
     def validate_template(path: Path) -> dict[str, Any]:
         required = ["visioneval.cnf", "scripts/run_model.R", "defs", "inputs"]
         missing = [name for name in required if not (path / name).exists()]
-        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv")) if (path / "inputs").is_dir() else []
+        csv_files = sorted(p.name for p in (path / "inputs").glob("*.csv") if is_workspace_data(p)) if (path / "inputs").is_dir() else []
         errors = ([f"Missing {name}" for name in missing] + ([] if csv_files else ["No input CSV files found"]))
         config = (path / "visioneval.cnf").read_text(encoding="utf-8", errors="replace") if (path / "visioneval.cnf").is_file() else ""
         for field in ("ScriptsDir", "InputDir", "ParamDir", "GeoFile", "ModelParamFile", "Years"):
@@ -1303,6 +1326,13 @@ class Workspace:
     ) -> str:
         if record.get("verification") != "verified":
             return "unproven"
+        run_id = str(record.get("runId", ""))
+        if run_id:
+            job_path = self.runs / run_id / "job.json"
+            if job_path.exists():
+                job = read_json(job_path)
+                if job.get("state") and job["state"] != "succeeded":
+                    return "unproven"
         recorded_input = self._record_input_fingerprint(record, project)
         if not recorded_input:
             return "unproven"
@@ -1337,7 +1367,10 @@ class Workspace:
         catalog = {item.get("id"): item for item in self.catalog().get("datastores", [])}
         results: dict[str, list[dict[str, Any]]] = {}
         links = {item.get("datastoreId"): item for item in project.get("resultLinks", [])}
-        for datastore_id in self.project_result_ids(project):
+        baseline_id = str((project.get("baseline") or {}).get("datastoreId", ""))
+        if baseline_id:
+            links.setdefault(baseline_id, {"role": "baseline", "variationId": ""})
+        for datastore_id in dict.fromkeys(self.project_result_ids(project) + ([baseline_id] if baseline_id else [])):
             record = catalog.get(datastore_id)
             if not record:
                 continue
@@ -3220,6 +3253,20 @@ class Workspace:
             if not variation:
                 raise WorkspaceError("Unknown variation")
         target = self.models / run_id
+        if os.name == "nt" and len(str(target.resolve())) > 160:
+            raise WorkspaceError("The workspace path is too long for native VisionEval output. Move the workspace to a shorter location (for example C:\\VEWorkspace) before running. No model was started.")
+        # Validate all known inputs before replacing or copying a model. Required
+        # input filenames cannot be renamed without changing the model contract.
+        library = self.input_library / project["inputLibrary"]["id"]
+        for source in template_path.rglob("*"):
+            relative = source.relative_to(template_path)
+            if source.is_file() and "results" not in relative.parts:
+                self.validate_managed_path(target / relative)
+        for source in library.iterdir():
+            if source.is_file():
+                self.validate_managed_path(target / "inputs" / source.name)
+        for overlay in variation.get("overlays", []):
+            self.validate_managed_path(target / "inputs" / overlay["fileName"])
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(

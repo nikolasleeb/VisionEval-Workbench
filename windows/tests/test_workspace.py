@@ -50,6 +50,15 @@ class WorkspaceTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_reopen_workspace_ignores_binary_appledouble_metadata(self):
+        metadata = self.workspace.internal / "._settings.json"
+        metadata.write_bytes(b"\x00\x05\x16\x07\xb0\xff")
+        self.assertIsNone(read_json(metadata, None))
+        reopened = Workspace(self.workspace.root)
+        self.assertEqual(reopened.root, self.workspace.root)
+        self.assertTrue(reopened.settings()["retainFullExports"])
+        self.assertEqual(metadata.read_bytes(), b"\x00\x05\x16\x07\xb0\xff")
+
     def test_workspace_marker_settings_and_storage_contract(self):
         marker = read_json(self.workspace.root / ".visioneval-workspace.json", {})
         self.assertEqual(marker["formatVersion"], 2)
@@ -121,6 +130,18 @@ class WorkspaceTests(unittest.TestCase):
         cache = read_json(migrated.exchange / "comparison-cache" / "nested" / "request.json", {})
         self.assertEqual(cache["records"][0]["path"], str(migrated.models / "run-one" / "Datastore"))
         Workspace(legacy_root)
+
+    def test_startup_path_migration_never_reads_generated_scan_results_or_maps(self):
+        result = self.workspace.exchange / "comparison-scans" / "scan-one" / "result.json"
+        cache = self.workspace.exchange / "comparison-scans" / "cache" / "huge.json"
+        map_path = self.workspace.exchange / "system" / "region-maps" / "region" / "statewide.json"
+        for path in (result, cache, map_path):
+            write(path, '{"payload":"' + "x" * 100000 + '"}')
+        with patch("backend.workbench.workspace.read_json", wraps=read_json) as reader:
+            Workspace(self.workspace.root)
+        paths = {call.args[0] for call in reader.call_args_list}
+        self.assertTrue(paths.isdisjoint({result, cache, map_path}))
+        self.assertEqual(cache.stat().st_size, 100014)
 
     def test_hypercube_metadata_migrates_active_archived_and_mixed_projects(self):
         active = self.workspace.projects / "legacy-active" / "project.json"
@@ -1443,6 +1464,27 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(self.workspace.result_reuse_status(current, record, "baseline", digest, other_home), "runtime_differs")
         (result / "DatastoreListing.Rda").unlink()
         self.assertEqual(self.workspace.result_reuse_status(current, record, "baseline", digest, home), "runtime_differs")
+
+    def test_linked_baseline_status_agrees_with_reuse_and_failed_job_is_not_reusable(self):
+        _, project = self.setup_project()
+        result = self.workspace.models / "baseline-fixture" / "Datastore"
+        write(result / "DatastoreListing.Rda", "fixture")
+        fingerprint = self.workspace.scenario_input_fingerprint(project, "baseline")
+        digest = "sha256:fixture"
+        record = self.workspace.register_datastore({
+            "id": "linked-baseline", "path": str(result), "role": "baseline",
+            "verification": "verified", "runId": "baseline-fixture",
+            "inputStateFingerprint": fingerprint, "runtimeImageDigest": digest,
+        })
+        project["datastoreIds"] = []
+        project["resultLinks"] = []
+        project["baseline"] = {"strategy": "existing", "datastoreId": record["id"]}
+        write_json(self.workspace.runs / "baseline-fixture" / "job.json", {"state": "succeeded"})
+        self.assertIsNotNone(self.workspace.current_result(project, "baseline", digest))
+        self.assertEqual(self.workspace.result_statuses(project, digest)["baseline"][0]["status"], "current")
+        write_json(self.workspace.runs / "baseline-fixture" / "job.json", {"state": "failed"})
+        self.assertIsNone(self.workspace.current_result(project, "baseline", digest))
+        self.assertEqual(self.workspace.result_statuses(project, digest)["baseline"][0]["status"], "unproven")
 
     def test_project_validation_checks_years_and_geography(self):
         _, project = self.setup_project()

@@ -15,7 +15,7 @@ from typing import Any
 
 from .region_packages import RegionPackageService, safe_package_path
 from .transit_inputs import TRANSIT_NORMALIZATION_RULE, normalize_virginia_transit_inputs
-from .workspace import Workspace, WorkspaceError, asset_display_name, fingerprint_tree, make_id, now_iso, read_json, write_json
+from .workspace import Workspace, WorkspaceError, asset_display_name, fingerprint_tree, is_workspace_data, make_id, now_iso, read_json, write_json
 
 
 SAFE_ASSET_NAME = re.compile(r"[^A-Za-z0-9 _.-]+")
@@ -682,10 +682,15 @@ class RegionBuilderService:
                 "id": f"workspace:{library['id']}", "name": library["name"], "kind": "workspace",
                 "fileCount": library["fileCount"], "pairedTemplateId": model_source["templateId"],
             }]}
-        root, manifest, _, _ = self._package_context(package_id)
+        root, manifest, _, crosswalk = self._package_context(package_id)
         input_config = manifest["inputLibrary"]
         packaged = safe_package_path(root, str(input_config["path"]))
         required = {str(item) for item in input_config.get("requiredFiles", [])}
+        region_bzones = {
+            region_id: {str(bzone) for bzone in region.get("bzones", [])}
+            for region_id, region in crosswalk.get("regions", {}).items()
+            if isinstance(region, dict) and region.get("bzones")
+        }
         sources: list[dict[str, Any]] = [{
             "id": f"package:{package_id}",
             "name": str(input_config.get("name") or f"{manifest['coverage']} InputLibrary"),
@@ -695,11 +700,25 @@ class RegionBuilderService:
         for item in self.workspace.list_input_libraries():
             library_path = self.workspace.input_library / item["id"]
             if all((library_path / filename).is_file() for filename in required):
+                supported_regions = None
+                if region_bzones:
+                    bzone_path = library_path / "bzone_lat_lon.csv"
+                    available = set()
+                    if bzone_path.is_file():
+                        with bzone_path.open("r", encoding="utf-8-sig", newline="") as handle:
+                            available = {str(row.get("Geo") or "").strip() for row in csv.DictReader(handle)}
+                    supported_regions = [
+                        region_id for region_id, bzones in region_bzones.items()
+                        if bzones.issubset(available)
+                    ]
+                    if not supported_regions:
+                        continue
                 sources.append({
                     "id": f"workspace:{item['id']}",
                     "name": f"{item['name']} (workspace)",
                     "kind": "workspace",
                     "fileCount": item["fileCount"],
+                    **({"supportedRegionIds": supported_regions} if supported_regions is not None else {}),
                 })
         return {"packageId": package_id, "sources": sources}
 
@@ -747,6 +766,30 @@ class RegionBuilderService:
                 and str(row.get("COUNTYFP") or "").strip()
                 and str(row.get("COUNTYNAME") or "").strip()
             }
+
+    @staticmethod
+    def _input_locality_names(input_path: Path, names: dict[str, str]) -> dict[str, str]:
+        """Use the Input Library's exact Geo spelling, not Census display casing."""
+        wanted = {name.casefold() for name in names.values()}
+        canonical: dict[str, str] = {}
+        for pattern in ("marea_*.csv", "azone_*.csv"):
+            for path in sorted(input_path.glob(pattern)):
+                if not is_workspace_data(path):
+                    continue
+                with path.open("r", encoding="utf-8-sig", newline="") as handle:
+                    reader = csv.DictReader(handle)
+                    if "Geo" not in (reader.fieldnames or []):
+                        continue
+                    for row in reader:
+                        value = str(row.get("Geo") or "").strip()
+                        key = value.casefold()
+                        if key in wanted and key not in canonical:
+                            canonical[key] = value
+                if len(canonical) == len(wanted):
+                    break
+            if len(canonical) == len(wanted):
+                break
+        return {fips: canonical.get(name.casefold(), name) for fips, name in names.items()}
 
     def geography_options(self, package_id: str, source_library_id: str, region_id: str) -> dict[str, Any]:
         if self._model_bundle_source(package_id):
@@ -802,6 +845,7 @@ class RegionBuilderService:
         for fips, name in locality_names.items():
             if fips in available_fips:
                 fips_to_azone.setdefault(fips, name)
+        fips_to_azone = self._input_locality_names(input_path, fips_to_azone)
         by_fips: dict[str, set[str]] = {fips: set() for fips in fips_to_azone}
         for row in rows:
             bzone = str(row.get("Geo", "")).strip()
@@ -942,7 +986,7 @@ class RegionBuilderService:
             "azone": selection["azones"],
             "marea": selection["mareas"],
         }
-        for source in sorted((path for path in inputs.iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+        for source in sorted((path for path in inputs.iterdir() if path.is_file() and is_workspace_data(path)), key=lambda path: path.name.lower()):
             if not source.name.lower().endswith(".csv"):
                 plan.append({"file": source.name, "action": "copy", "rowsBefore": None, "rowsAfter": None, "level": ""})
                 continue
@@ -976,7 +1020,7 @@ class RegionBuilderService:
         plan: list[dict[str, Any]] = []
         errors: list[str] = []
         selected_by_level = {"bzone": selection["bzones"], "azone": selection["azones"], "marea": selection["mareas"]}
-        for source in sorted((path for path in inputs.iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+        for source in sorted((path for path in inputs.iterdir() if path.is_file() and is_workspace_data(path)), key=lambda path: path.name.lower()):
             if source.name == "region_builder_manifest.json":
                 continue
             if not source.name.lower().endswith(".csv"):
@@ -1016,6 +1060,8 @@ class RegionBuilderService:
     def _years_from_library(input_path: Path) -> set[str]:
         years: set[str] = set()
         for path in input_path.glob("*.csv"):
+            if not is_workspace_data(path):
+                continue
             fields, rows = read_csv_dicts(path)
             if "Year" in fields:
                 years.update(str(row.get("Year", "")).strip() for row in rows if str(row.get("Year", "")).strip())
@@ -1043,6 +1089,7 @@ class RegionBuilderService:
             for fips, name in locality_names.items():
                 if fips in available_fips:
                     fips_to_azone.setdefault(fips, name)
+        fips_to_azone = self._input_locality_names(input_path, fips_to_azone)
         eligible_bzones = {value for value in available_bzones if value[:prefix_length] in official_fips}
         statewide = region.get("regionType") == "statewide"
         if statewide:
@@ -1280,7 +1327,7 @@ class RegionBuilderService:
             write_csv_dicts(template_stage / "defs" / "geo.csv", geo_fields, selection["geoRows"])
 
             plan_by_file = {item["file"]: item for item in input_plan}
-            for source in sorted((path for path in source_inputs.iterdir() if path.is_file() and path.name != "region_builder_manifest.json"), key=lambda path: path.name.lower()):
+            for source in sorted((path for path in source_inputs.iterdir() if path.is_file() and is_workspace_data(path) and path.name != "region_builder_manifest.json"), key=lambda path: path.name.lower()):
                 library_output = library_stage / source.name
                 template_output = template_stage / "inputs" / source.name
                 item = plan_by_file[source.name]
@@ -1449,7 +1496,7 @@ class RegionBuilderService:
             library_stage.mkdir(parents=True, exist_ok=True)
             write_csv_dicts(template_stage / "defs" / "geo.csv", ["Azone", "Bzone", "Czone", "Marea"], selection["geoRows"])
 
-            output_files = sorted({path.name for path in input_path.iterdir() if path.is_file() and path.name != "region_builder_manifest.json"} | default_files, key=str.lower)
+            output_files = sorted({path.name for path in input_path.iterdir() if path.is_file() and is_workspace_data(path) and path.name != "region_builder_manifest.json"} | default_files, key=str.lower)
             for filename in output_files:
                 source_file = input_path / filename
                 self._write_filtered_or_default(source_file, filename, [library_stage / filename, template_stage / "inputs" / filename], selection, input_path, manifest_defaults)

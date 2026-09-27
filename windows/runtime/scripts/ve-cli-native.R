@@ -170,7 +170,20 @@ if (command %in% c("run", "export")) {
     if (is.null(mode)) model$run() else model$run(mode)
     cat("Model run finished:", model_name, "\n")
   } else {
-    results <- model$results(); results$export(); cat("Model export finished:", model_name, "\n")
+    results <- model$results()
+    if (native) {
+      # Avoid repeating long model labels in VE's CSV directory name.
+      model$modelName <- "r"
+      index <- results$list(details = TRUE)
+      if (.Platform$OS.type == "windows" && nrow(index)) {
+        longest <- max(nchar(as.character(index$Table)) + nchar(as.character(index$Scenario)) +
+                       nchar(as.character(index$Group)), na.rm = TRUE)
+        if (nchar(model$exportPath()) + longest + 24 > 240)
+          stop("CSV export path exceeds the Windows safe path budget. Move the workspace to a shorter path before retrying export.")
+      }
+      results$export("csv", connection = list(Directory = "CSV", Timestamp = "none"))
+    } else results$export()
+    cat("Model export finished:", model_name, "\n")
   }
   quit(save = "no", status = 0L)
 }

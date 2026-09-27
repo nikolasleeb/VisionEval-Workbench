@@ -15,6 +15,7 @@ class FakeComparisonService:
     def __init__(self, workspace, records):
         self.workspace = workspace
         self.records = records
+        self.scan_helper = Path(__file__)
         self.runtime = type("Runtime", (), {"adapter": "docker"})()
 
     def scan_request(self, reference_id, comparison_ids, year, filter_field="", filter_values=None):
@@ -79,10 +80,11 @@ class ComparisonScanTests(unittest.TestCase):
         self.assertEqual(status["progress"]["total"], 1)
         self.assertEqual(status["result"], expected)
 
-    def test_native_scan_uses_package_free_workspace_scanner(self):
+    def test_native_scan_falls_back_when_batch_helper_is_unavailable(self):
         expected = {"year": "2045", "scanned": 1, "changedVariables": 1, "results": [{"table": "Azone", "variable": "Value"}], "skipped": [], "filterField": "Azone", "filterValues": ["51001"]}
         service = self.manager.service
         service.runtime.adapter = "native"
+        service.scan_helper = self.workspace.root / "missing-scan-helper.R"
         service.scan_request = lambda *args, **kwargs: {
             "year": "2045", "filterField": "Azone", "filterValues": ["51001"], "records": self.records,
             "variables": [{"table": "Azone", "name": "Value", "years": ["2045"]}],
