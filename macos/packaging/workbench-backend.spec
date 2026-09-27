@@ -45,6 +45,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    codesign_identity=os.environ.get("WORKBENCH_CODESIGN_IDENTITY") or None,
     # This binary is a background HTTP sidecar, not a second macOS GUI app.
     # The windowed bootloader calls TransformProcessType/RegisterApplication
     # and can abort when the Tauri app launches it as a child process.

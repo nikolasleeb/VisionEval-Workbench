@@ -5287,7 +5287,8 @@ function number(value, column = "", context = "output") {
   if (typeof value !== "number") return String(value);
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: precisionFor(context) }).format(value);
 }
-function percentage(value) { return number(value, "", "percentage"); }
+function percentageIsZero(value) { return Number.isFinite(Number(value)) && Math.abs(Number(value)) < 0.5 * 10 ** -precisionFor("percentage"); }
+function percentage(value) { return number(percentageIsZero(value) ? 0 : value, "", "percentage"); }
 function metric(label, value, {title="",className=""}={}) { return `<article class="metric ${escapeHtml(className)}"${title?` title="${escapeHtml(title)}"`:""}><small>${escapeHtml(label)}</small><strong>${escapeHtml(number(value))}</strong></article>`; }
 
 function comparisonValuesDiffer(left, right) {
@@ -6245,7 +6246,28 @@ document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeWorks
 document.querySelectorAll("[data-reveal-workspace-location]").forEach(button=>button.addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:button.dataset.revealWorkspaceLocation}).catch(error=>notify(String(error),"error"))));
 $("revealWorkspaceRoot").addEventListener("click",()=>window.__TAURI_INTERNALS__.invoke("reveal_workspace_location",{location:"root"}).catch(error=>notify(String(error),"error")));
 $("switchWorkspace").addEventListener("click",async()=>{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)changeWorkspace(path)});
-$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(!path)return;await window.__TAURI_INTERNALS__.invoke("move_workspace",{destination:path});const url=await window.__TAURI_INTERNALS__.invoke("start_backend");window.location.replace(url)}catch(error){notify(String(error),"error")}});
+async function moveWorkspaceWithProgress(path){
+  const invoke=window.__TAURI_INTERNALS__.invoke,dialog=document.createElement('dialog');
+  dialog.className='workspace-move-dialog';
+  dialog.innerHTML='<h2>Moving workspace</h2><p data-move-message role="status">Preparing the move…</p><progress data-move-progress max="100"></progress><p data-move-count class="muted"></p><p>Keep the SSD connected. Workbench will verify the new copy before switching to it and removing the old copy. Please do not force quit.</p>';
+  dialog.addEventListener('cancel',event=>event.preventDefault());document.body.appendChild(dialog);dialog.showModal();
+  state.workspaceMoving=true;
+  const priorQuit=window.requestWorkbenchQuit;
+  window.requestWorkbenchQuit=()=>{dialog.querySelector('[data-move-message]').textContent='The workspace move is still running. Please wait before quitting.';};
+  let polling=false;
+  const poll=async()=>{if(polling)return;polling=true;try{
+    const status=await invoke('workspace_move_status');
+    dialog.querySelector('[data-move-message]').textContent=status.message||'Preparing the move…';
+    const progress=dialog.querySelector('[data-move-progress]');
+    if(status.totalBytes&&['copying','verifying'].includes(status.phase))progress.value=Math.min(100,status.bytes/status.totalBytes*100);else progress.removeAttribute('value');
+    dialog.querySelector('[data-move-count]').textContent=status.totalFiles?`${status.phase==='verifying'?'Verified':'Copied'} ${number(status.files)} of ${number(status.totalFiles)} files · ${humanBytes(status.bytes)} of ${humanBytes(status.totalBytes)}`:'';
+  }catch(_error){}finally{polling=false;}};
+  const timer=setInterval(poll,500);
+  try{await invoke('move_workspace',{destination:path});const url=await invoke('start_backend');window.location.replace(url);}
+  catch(error){try{await invoke('start_backend');await refreshState({quiet:true});}catch(_restartError){}notify(String(error),'error');}
+  finally{clearInterval(timer);state.workspaceMoving=false;window.requestWorkbenchQuit=priorQuit;dialog.close();dialog.remove();}
+}
+$("moveWorkspace").addEventListener("click",async()=>{try{const path=await window.__TAURI_INTERNALS__.invoke("choose_folder");if(path)await moveWorkspaceWithProgress(path);}catch(error){notify(String(error),"error")}});
 $("settingsVerifyRuntime").addEventListener("click",event=>verifyRuntimeFromSetup(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsInstallRuntime"))$("settingsInstallRuntime").addEventListener("click",event=>installAndSaveRuntime(event.currentTarget).then(()=>openSettings("settingsRuntime")).catch(()=>{}));
 if($("settingsStartDocker"))$("settingsStartDocker").addEventListener("click",event=>startDockerAndVerify(event.currentTarget));
@@ -6957,8 +6979,25 @@ $("selectDashboardVariables").addEventListener("click",()=>{document.querySelect
 $("clearDashboardVariables").addEventListener("click",()=>{document.querySelectorAll("[data-dashboard-variable]").forEach((box)=>{box.checked=false;});updateDashboardVariableSummary();setDashboardDirty();});
 function dashboardParams(){const params=new URLSearchParams({reference:$("dashboardReference").value,comparison:$("dashboardComparison").value,year:$("dashboardYear").value});const selected=[...document.querySelectorAll("[data-dashboard-variable]:checked")].map((box)=>box.dataset.dashboardVariable);if(selected.length)params.set("variableKey",selected.join("|"));if(state.dashboardFilterField&&state.dashboardFilterValues.size){params.set("filterField",state.dashboardFilterField);params.set("filterValue",[...state.dashboardFilterValues].join("|"));}return params;}
 function dashboardDisplaySettings(){const mode=$("dashboardDisplayMode").value,value=Number($("dashboardDisplayValue").value)||0;return{sortBy:$("dashboardSort").value,displayMode:mode,threshold:mode==="threshold"?Math.max(0,value):0,count:mode==="extremes"?Math.max(1,Math.floor(value||5)):5,hideZero:$("dashboardHideZero").checked};}
-function dashboardDisplayRows(){const source=[...(state.dashboardPayload?.rows||[])],settings=dashboardDisplaySettings();let rows=source;if(settings.displayMode==="threshold")rows=source.filter((row)=>Math.abs(row.percentChange)>=settings.threshold);else if(settings.displayMode==="extremes"){const increases=source.filter((row)=>row.percentChange>0).sort((a,b)=>b.percentChange-a.percentChange).slice(0,settings.count),decreases=source.filter((row)=>row.percentChange<0).sort((a,b)=>a.percentChange-b.percentChange).slice(0,settings.count),keys=new Set([...increases,...decreases].map((row)=>`${row.table}/${row.variable}`));rows=source.filter((row)=>keys.has(`${row.table}/${row.variable}`));}if(settings.hideZero)rows=rows.filter((row)=>row.percentChange!==0);if(settings.sortBy==="value_desc")rows.sort((a,b)=>b.percentChange-a.percentChange);else if(settings.sortBy==="value_asc")rows.sort((a,b)=>a.percentChange-b.percentChange);else if(settings.sortBy==="magnitude")rows.sort((a,b)=>Math.abs(b.percentChange)-Math.abs(a.percentChange));else rows.sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true}));return rows;}
-$("generateDashboard").addEventListener("click",async()=>{const params=dashboardParams();try{state.dashboardPayload=await withCompareActivity("Generating chart","Scanning selected numeric variables.",()=>request(`/api/comparison/dashboard?${params}`,{signal:state.compareController.signal}));state.dashboardInputSignature=params.toString();state.dashboardDirty=false;$("dashboardStaleMessage").hidden=true;setDashboardVariablesExpanded(false);renderDashboard(state.dashboardPayload);setDashboardExportAvailability();syncMenuContext();}catch(error){if(error.name!=="AbortError")notify(error.message,"error");}});
+function dashboardDisplayRows(){const source=[...(state.dashboardPayload?.rows||[])],settings=dashboardDisplaySettings();let rows=source;if(settings.displayMode==="threshold")rows=source.filter((row)=>Math.abs(row.percentChange)>=settings.threshold);else if(settings.displayMode==="extremes"){const increases=source.filter((row)=>row.percentChange>0).sort((a,b)=>b.percentChange-a.percentChange).slice(0,settings.count),decreases=source.filter((row)=>row.percentChange<0).sort((a,b)=>a.percentChange-b.percentChange).slice(0,settings.count),keys=new Set([...increases,...decreases].map((row)=>`${row.table}/${row.variable}`));rows=source.filter((row)=>keys.has(`${row.table}/${row.variable}`));}if(settings.hideZero)rows=rows.filter((row)=>!percentageIsZero(row.percentChange));if(settings.sortBy==="value_desc")rows.sort((a,b)=>b.percentChange-a.percentChange);else if(settings.sortBy==="value_asc")rows.sort((a,b)=>a.percentChange-b.percentChange);else if(settings.sortBy==="magnitude")rows.sort((a,b)=>Math.abs(b.percentChange)-Math.abs(a.percentChange));else rows.sort((a,b)=>a.label.localeCompare(b.label,undefined,{numeric:true}));return rows;}
+async function sharedDashboardScan(params) {
+  const field=params.get("filterField")||"", values=(params.get("filterValue")||"").split("|").filter(Boolean);
+  if(field==="Bzone"&&values.length)return;
+  const operation=await post("/api/comparison/scans/start",{reference:params.get("reference"),comparisons:[params.get("comparison")],year:params.get("year"),filterField:field,filterValues:values});
+  state.comparisonScanOperationId=operation.id;
+  try {
+    let status=operation;
+    while(["waiting","running"].includes(status.state)) {
+      if(state.compareController.signal.aborted)throw new DOMException("Stopped","AbortError");
+      const progress=status.progress||{};
+      setCompareActivityPhase("Generating chart",progress.phase==="finalizing"?"Finalizing shared scan…":progress.total?`Scanning ${progress.completed||0} of ${progress.total}`:status.message||"Preparing shared scan…");
+      await new Promise(resolve=>setTimeout(resolve,500));
+      status=await request(`/api/comparison/scans/status?id=${encodeURIComponent(operation.id)}`,{signal:state.compareController.signal});
+    }
+    if(status.state!=="succeeded")throw new Error(status.message||"Shared scan stopped");
+  } finally {state.comparisonScanOperationId="";}
+}
+$("generateDashboard").addEventListener("click",async()=>{const params=dashboardParams();try{state.dashboardPayload=await withCompareActivity("Generating chart","Checking the shared scan.",async()=>{await sharedDashboardScan(params);return request(`/api/comparison/dashboard?${params}`,{signal:state.compareController.signal});});state.dashboardInputSignature=params.toString();state.dashboardDirty=false;$("dashboardStaleMessage").hidden=true;setDashboardVariablesExpanded(false);renderDashboard(state.dashboardPayload);setDashboardExportAvailability();syncMenuContext();}catch(error){if(error.name!=="AbortError")notify(error.message,"error");}});
 function renderDashboard(payload){const rows=dashboardDisplayRows(),unavailable=(payload.unavailable||[]),notChartedTitle=unavailable.length?unavailable.map((item)=>`${item.table} / ${item.variable}: ${item.reason}`).join("\n"):"Outputs are not charted when they are nonnumeric, have no numeric rows in the selected location scope, have a zero reference total, or cannot be read safely.";$("dashboardMetrics").innerHTML=metric("Displayed bars",rows.length)+metric("Chartable outputs",payload.availableRows)+metric("Not charted",payload.unavailableRows,{title:notChartedTitle})+metric("Year",payload.year);const max=Math.max(1,...rows.map((row)=>Math.abs(row.percentChange)));$("dashboardDetails").className="dashboard-chart";$("dashboardDetails").innerHTML=`<p class="dashboard-scope"><strong>Scope:</strong> ${escapeHtml(payload.scopeLabel||"All locations")}</p>`+(rows.map((row)=>{const width=Math.abs(row.percentChange)/max*50,left=row.percentChange<0?50-width:50;return `<div class="dashboard-row"><div><strong>${escapeHtml(row.label)}</strong><small>${escapeHtml(row.units||"")}</small></div><div class="dashboard-track"><span class="dashboard-zero"></span><span class="dashboard-bar ${row.percentChange<0?"negative":"positive"}" style="left:${left}%;width:${width}%"></span></div><strong>${percentage(row.percentChange)}%</strong></div>`;}).join("")||`<p class="muted">No generated variables match this display filter.</p>`);}
 function updateDashboardDisplayControl(){const mode=$("dashboardDisplayMode").value,label=$("dashboardDisplayValueLabel");label.hidden=mode==="all";document.querySelector(".dashboard-view-controls").classList.toggle("has-display-value",mode!=="all");if(mode==="threshold"){$("dashboardDisplayValueText").textContent="Minimum magnitude (%)";$("dashboardDisplayValue").min="0";$("dashboardDisplayValue").step="0.1";$("dashboardDisplayValue").title="Show changes at or above this percentage in either direction.";}else if(mode==="extremes"){$("dashboardDisplayValueText").textContent="Bars per direction";$("dashboardDisplayValue").min="1";$("dashboardDisplayValue").step="1";$("dashboardDisplayValue").title="Show up to this many largest increases and this many largest decreases.";}if(state.dashboardPayload)renderDashboard(state.dashboardPayload);}
 $("dashboardSort").addEventListener("change",()=>state.dashboardPayload&&renderDashboard(state.dashboardPayload));
@@ -7084,12 +7123,17 @@ async function loadHypercubeAnalysisProject(){
     renderHypercubeAnalysisProject();await loadHypercubeAnalysisGeography();await restoreCachedHypercubeDiscovery();
   }catch(error){$('hypercubeAnalysisCoverage').textContent=error.message;notify(error.message,'error');}
 }
+function hypercubeDiscoveryYears(options){
+  // Discovery scans outputs available in the selected year, not only outputs
+  // whose years overlap every other variable (some are base-year-only).
+  return [...new Set([...(options.years||[]),...(options.variables||[]).flatMap((item)=>item.years||[])].map(String))].sort((a,b)=>Number(a)-Number(b)||a.localeCompare(b));
+}
 function renderHypercubeAnalysisProject(){
   const options=state.hypercubeAnalysis.options;if(!options)return;const variables=options.variables||[],tables=[...new Set(variables.map((item)=>item.table))].sort(),axes=options.hypercube?.axes||[];
   $('hypercubeAnalysisCoverage').textContent=`${options.completedCases} of ${options.caseCount} cases complete${options.missingCases?` · ${options.missingCases} missing`:''}.`;
   $('hypercubeAnalysisWarnings').innerHTML=(options.warnings||[]).map((message)=>`<p class="notice warning-notice">${escapeHtml(message)}</p>`).join('');
   $('hypercubeAnalysisTable').innerHTML=tables.map((table)=>`<option value="${escapeHtml(table)}">${escapeHtml(table)}</option>`).join('');renderHypercubeAnalysisVariables();
-  const variableYearSets=variables.map((item)=>new Set((item.years||[]).map(String))).filter((years)=>years.size),commonDiscoveryYears=variableYearSets.length?[...variableYearSets[0]].filter((year)=>variableYearSets.every((years)=>years.has(year))):[],discoveryYears=[...new Set((commonDiscoveryYears.length?commonDiscoveryYears:options.years||[]).map(String))].sort((a,b)=>Number(a)-Number(b)||a.localeCompare(b)),discoveryYear=$('hypercubeDiscoveryYear'),priorDiscoveryYear=discoveryYear.value;
+  const discoveryYears=hypercubeDiscoveryYears(options),discoveryYear=$('hypercubeDiscoveryYear'),priorDiscoveryYear=discoveryYear.value;
   discoveryYear.innerHTML=discoveryYears.map((year)=>`<option value="${escapeHtml(year)}">${escapeHtml(year)}</option>`).join('');
   discoveryYear.value=discoveryYears.includes(priorDiscoveryYear)?priorDiscoveryYear:(discoveryYears.includes('2045')?'2045':discoveryYears.at(-1)||'');
   if(!$('hypercubeDiscoveryAggregation').value)$('hypercubeDiscoveryAggregation').value='median';

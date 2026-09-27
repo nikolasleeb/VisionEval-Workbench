@@ -15,7 +15,7 @@ from typing import Any
 
 from .region_packages import RegionPackageService, safe_package_path
 from .transit_inputs import TRANSIT_NORMALIZATION_RULE, normalize_virginia_transit_inputs
-from .workspace import Workspace, WorkspaceError, asset_display_name, fingerprint_tree, make_id, now_iso, read_json, write_json
+from .workspace import Workspace, WorkspaceError, asset_display_name, fingerprint_tree, is_workspace_data, make_id, now_iso, read_json, write_json
 
 
 SAFE_ASSET_NAME = re.compile(r"[^A-Za-z0-9 _.-]+")
@@ -774,6 +774,8 @@ class RegionBuilderService:
         canonical: dict[str, str] = {}
         for pattern in ("marea_*.csv", "azone_*.csv"):
             for path in sorted(input_path.glob(pattern)):
+                if not is_workspace_data(path):
+                    continue
                 with path.open("r", encoding="utf-8-sig", newline="") as handle:
                     reader = csv.DictReader(handle)
                     if "Geo" not in (reader.fieldnames or []):
@@ -984,7 +986,7 @@ class RegionBuilderService:
             "azone": selection["azones"],
             "marea": selection["mareas"],
         }
-        for source in sorted((path for path in inputs.iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+        for source in sorted((path for path in inputs.iterdir() if path.is_file() and is_workspace_data(path)), key=lambda path: path.name.lower()):
             if not source.name.lower().endswith(".csv"):
                 plan.append({"file": source.name, "action": "copy", "rowsBefore": None, "rowsAfter": None, "level": ""})
                 continue
@@ -1018,7 +1020,7 @@ class RegionBuilderService:
         plan: list[dict[str, Any]] = []
         errors: list[str] = []
         selected_by_level = {"bzone": selection["bzones"], "azone": selection["azones"], "marea": selection["mareas"]}
-        for source in sorted((path for path in inputs.iterdir() if path.is_file()), key=lambda path: path.name.lower()):
+        for source in sorted((path for path in inputs.iterdir() if path.is_file() and is_workspace_data(path)), key=lambda path: path.name.lower()):
             if source.name == "region_builder_manifest.json":
                 continue
             if not source.name.lower().endswith(".csv"):
@@ -1058,6 +1060,8 @@ class RegionBuilderService:
     def _years_from_library(input_path: Path) -> set[str]:
         years: set[str] = set()
         for path in input_path.glob("*.csv"):
+            if not is_workspace_data(path):
+                continue
             fields, rows = read_csv_dicts(path)
             if "Year" in fields:
                 years.update(str(row.get("Year", "")).strip() for row in rows if str(row.get("Year", "")).strip())
@@ -1323,7 +1327,7 @@ class RegionBuilderService:
             write_csv_dicts(template_stage / "defs" / "geo.csv", geo_fields, selection["geoRows"])
 
             plan_by_file = {item["file"]: item for item in input_plan}
-            for source in sorted((path for path in source_inputs.iterdir() if path.is_file() and path.name != "region_builder_manifest.json"), key=lambda path: path.name.lower()):
+            for source in sorted((path for path in source_inputs.iterdir() if path.is_file() and is_workspace_data(path) and path.name != "region_builder_manifest.json"), key=lambda path: path.name.lower()):
                 library_output = library_stage / source.name
                 template_output = template_stage / "inputs" / source.name
                 item = plan_by_file[source.name]
@@ -1492,7 +1496,7 @@ class RegionBuilderService:
             library_stage.mkdir(parents=True, exist_ok=True)
             write_csv_dicts(template_stage / "defs" / "geo.csv", ["Azone", "Bzone", "Czone", "Marea"], selection["geoRows"])
 
-            output_files = sorted({path.name for path in input_path.iterdir() if path.is_file() and path.name != "region_builder_manifest.json"} | default_files, key=str.lower)
+            output_files = sorted({path.name for path in input_path.iterdir() if path.is_file() and is_workspace_data(path) and path.name != "region_builder_manifest.json"} | default_files, key=str.lower)
             for filename in output_files:
                 source_file = input_path / filename
                 self._write_filtered_or_default(source_file, filename, [library_stage / filename, template_stage / "inputs" / filename], selection, input_path, manifest_defaults)

@@ -1,4 +1,5 @@
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -37,6 +38,43 @@ def pair_assets(workspace: Workspace, library_id: str, template_id: str, registr
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_startup_does_not_parse_derived_json(self):
+        workspace = Workspace(self.root / "metadata-only")
+        derived = workspace.exchange / "hypercube-analysis/cache/huge-result.json"
+        write(derived, "{invalid-derived-json")
+        calls = []
+        def tracked(path, *args, **kwargs):
+            calls.append(Path(path))
+            return read_json(path, *args, **kwargs)
+        with patch("backend.workbench.workspace.read_json", side_effect=tracked):
+            Workspace(workspace.root)
+        self.assertNotIn(derived, calls)
+
+    def test_moved_workspace_rebases_registered_results_and_jobs(self):
+        source = Path(tempfile.mkdtemp(dir=self.root))
+        original = Workspace(source)
+        datastore = source / "Results/Models/run-one/results/Datastore"
+        write(datastore / "DatastoreListing.Rda", "retained")
+        write(original.catalog_path, json.dumps({"datastores": [{"path": str(datastore)}]}))
+        write(original.internal / "runs/run-one/job.json", json.dumps({"modelPath": str(datastore.parent.parent)}))
+        marker = read_json(original.marker_path)
+        marker.pop("rootPath", None)  # Recover an already-moved older v2 workspace.
+        write(original.marker_path, json.dumps(marker))
+        target = self.root / "moved"
+        shutil.copytree(source, target)
+        relocated = Workspace(target)
+        expected = relocated.root / datastore.relative_to(source)
+        self.assertEqual(read_json(relocated.catalog_path)["datastores"][0]["path"], str(expected))
+        self.assertEqual(read_json(relocated.internal / "runs/run-one/job.json")["modelPath"], str(expected.parent.parent))
+        self.assertEqual(read_json(relocated.marker_path)["rootPath"], str(relocated.root))
+        self.assertEqual((expected / "DatastoreListing.Rda").read_text(), "retained")
+        self.assertEqual(read_json(Workspace(target).catalog_path), read_json(relocated.catalog_path))
+        second = self.root / "moved-again"
+        shutil.copytree(target, second)
+        reopened = Workspace(second)
+        self.assertEqual(read_json(reopened.catalog_path)["datastores"][0]["path"],
+                         str(reopened.root / datastore.relative_to(source)))
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
@@ -49,6 +87,15 @@ class WorkspaceTests(unittest.TestCase):
 
     def tearDown(self):
         self.temp.cleanup()
+
+    def test_reopen_workspace_ignores_binary_appledouble_metadata(self):
+        metadata = self.workspace.internal / "._settings.json"
+        metadata.write_bytes(b"\x00\x05\x16\x07\xb0\xff")
+        self.assertIsNone(read_json(metadata, None))
+        reopened = Workspace(self.workspace.root)
+        self.assertEqual(reopened.root, self.workspace.root)
+        self.assertTrue(reopened.settings()["retainFullExports"])
+        self.assertEqual(metadata.read_bytes(), b"\x00\x05\x16\x07\xb0\xff")
 
     def test_workspace_marker_settings_and_storage_contract(self):
         marker = read_json(self.workspace.root / ".visioneval-workspace.json", {})

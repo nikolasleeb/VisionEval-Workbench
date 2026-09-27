@@ -8,6 +8,28 @@ progress_path <- args[[3]]
 keys_by_table <- list(Household="HhId", Vehicle="VehId", Worker="WkrId", Azone="Azone", Bzone="Bzone", Marea="Marea")
 key_cache <- new.env(parent=emptyenv(), hash=TRUE)
 
+summary_values <- function(values) {
+  if (is.numeric(values)) {
+    valid <- values[is.finite(values)]
+    return(list(count=length(valid), missing=sum(!is.finite(values)), sum=if(length(valid)) sum(valid) else NULL,
+                mean=if(length(valid)) mean(valid) else NULL))
+  }
+  counts <- sort(table(as.character(values), useNA="no"), decreasing=TRUE)
+  list(count=sum(counts), missing=sum(is.na(values)), distinctCategories=length(counts),
+       categoriesTruncated=length(counts)>50,
+       categories=as.list(head(counts,50)), topCategories=as.list(head(counts,10)))
+}
+
+aggregate_pair <- function(left, right) {
+  a <- summary_values(left); b <- summary_values(right)
+  numeric <- is.numeric(left) && is.numeric(right)
+  changed <- if(numeric) !isTRUE(all.equal(sort(left), sort(right), tolerance=1e-5)) else
+    !identical(sort(table(as.character(left))), sort(table(as.character(right))))
+  list(rowsCompared=max(length(left),length(right)), rowsChanged=if(changed) 1 else 0,
+       reference=a, comparison=b, identitySemantics="run_local_synthetic",
+       totalPercentChange=if(numeric && !is.null(a$sum) && a$sum != 0) (b$sum-a$sum)/abs(a$sum)*100 else NULL)
+}
+
 write_progress <- function(done, total, table="", variable="", phase="scanning") {
   write_json(list(completed=done, total=total, table=table, variable=variable, phase=phase), progress_path, auto_unbox=TRUE, pretty=TRUE)
 }
@@ -79,12 +101,13 @@ summarize_pair <- function(reference, comparison, keys) {
   left_sum <- if(length(left_num)) sum(left_num) else NA_real_; right_sum <- if(length(right_num)) sum(right_num) else NA_real_
   list(rowsCompared=length(keys), rowsChanged=sum(changed), rowsIncreased=sum(delta>0), rowsDecreased=sum(delta<0),
        rowsUnchanged=sum(delta==0), netChange=if(length(delta)) sum(delta) else NA_real_,
-       totalPercentChange=if(!is.na(left_sum) && left_sum != 0 && !is.na(right_sum)) (right_sum-left_sum)/left_sum*100 else NA_real_,
+       reference=summary_values(left), comparison=summary_values(right),
+       totalPercentChange=if(!is.na(left_sum) && left_sum != 0 && !is.na(right_sum)) (right_sum-left_sum)/abs(left_sum)*100 else NA_real_,
        rowsChangedPercent=if(length(keys)) sum(changed)/length(keys)*100 else NA_real_,
        averageRowPercentChange=if(any(left_num != 0)) mean((right_num[left_num != 0]-left_num[left_num != 0])/abs(left_num[left_num != 0])*100) else NA_real_)
 }
 
-results <- list(); skipped <- list(); total <- length(request$variables); write_progress(0, total, phase="loading_metadata")
+results <- list(); skipped <- list(); summaries <- list(); total <- length(request$variables); write_progress(0, total, phase="loading_metadata")
 for (i in seq_along(request$variables)) {
   item <- request$variables[[i]]; write_progress(i-1, total, item$table, item$name, "scanning")
   tryCatch({
@@ -97,13 +120,25 @@ for (i in seq_along(request$variables)) {
     }
     pairs <- list(); changed_rows <- 0
     for (j in 2:length(columns)) {
-      pair <- summarize_pair(columns[[1]]$values, columns[[j]]$values, keys); pair$label <- request$records[[j]]$label
+      if(item$table %in% c("Household","Vehicle","Worker")) {
+        local <- lapply(seq_along(columns), function(k) {
+          selected <- location_keys(request$records[[k]], item$table, columns[[k]]$order, request$filterField, request$filterValues)
+          unname(columns[[k]]$values[selected])
+        })
+        pair <- aggregate_pair(local[[1]], local[[j]])
+      } else {
+        pair <- summarize_pair(columns[[1]]$values, columns[[j]]$values, keys)
+      }
+      pair$label <- request$records[[j]]$label
       pairs[[length(pairs)+1]] <- pair; changed_rows <- max(changed_rows, pair$rowsChanged)
     }
-    if (changed_rows > 0) results[[length(results)+1]] <- list(table=item$table, variable=item$name, changedRows=changed_rows, totalRows=length(keys), percentRowsChanged=if(length(keys)) changed_rows/length(keys)*100 else 0, units=item$units, description=item$description, pairStats=pairs)
+    summary <- list(table=item$table, variable=item$name, changedRows=changed_rows, totalRows=length(keys), percentRowsChanged=if(length(keys)) changed_rows/length(keys)*100 else 0, units=item$units, description=item$description, pairStats=pairs)
+    summaries[[length(summaries)+1]] <- summary
+    if (changed_rows > 0) results[[length(results)+1]] <- summary
   }, error=function(error) skipped[[length(skipped)+1]] <<- list(table=item$table, variable=item$name, reason=conditionMessage(error)))
   write_progress(i, total, item$table, item$name, "scanning")
 }
+write_progress(total,total,phase="finalizing")
 results <- results[order(vapply(results, function(x) -x$changedRows, numeric(1)))]
-write_json(list(year=request$year, scanned=total, changedVariables=length(results), results=results, skipped=skipped,
-                filterField=request$filterField, filterValues=request$filterValues), output_path, auto_unbox=TRUE, pretty=TRUE, na="null", digits=NA)
+write_json(list(scannerVersion=4, summaryVersion=1, summaries=summaries, year=request$year, scanned=total, changedVariables=length(results), results=results, skipped=skipped,
+                filterField=request$filterField, filterValues=request$filterValues), output_path, auto_unbox=TRUE, pretty=TRUE, na="null", null="null", digits=NA)

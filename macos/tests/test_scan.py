@@ -52,7 +52,7 @@ class ComparisonScanTests(unittest.TestCase):
     def test_cached_scan_is_reconnectable_and_immediate(self):
         request = self.manager.service.scan_request("result-0", ["result-1"], "2045")
         cache_key = self.manager._cache_key(request)
-        expected = {"year": "2045", "scanned": 0, "changedVariables": 0, "results": [], "skipped": []}
+        expected = {"scannerVersion":4, "summaryVersion":1, "summaries":[], "year": "2045", "scanned": 0, "changedVariables": 0, "results": [], "skipped": []}
         write_json(self.manager.root / "cache" / f"{cache_key}.json", expected)
         started = self.manager.start("result-0", ["result-1"], "2045")
         self.assertEqual(started["state"], "succeeded")
