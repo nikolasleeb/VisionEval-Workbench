@@ -27,6 +27,12 @@ VisionEval Workbench is an unofficial desktop application that brings model inpu
 
 ## Popular destinations
 
+### Apple Silicon Mac 2.0
+
+The four illustrated [Mac 2.0 guides](Tutorials-and-Walkthroughs) cover installation, scenario editing and comparisons, [Hypercube](macOS-Hypercube), and [workspaces/resources](macOS-Workspaces-and-Resources). Start analysis with Find All Changes, then explore individual variables and maps. Earlier Mac guides remain in [Legacy guides for earlier versions](Legacy-Guides).
+
+### General links
+
 - **Learn by doing:** [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs)
 - **Download Workbench and packages:** [Latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest)
 - **Install regional assets:** [Regional Packages](Regional-Packages)

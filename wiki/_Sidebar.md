@@ -2,6 +2,7 @@
 
 - [Home](Home)
 - [Tutorials and Walkthroughs](Tutorials-and-Walkthroughs)
+- [Legacy guides for earlier versions](Legacy-Guides)
 - [Latest release](https://github.com/nikolasleeb/VisionEval-Workbench/releases/latest)
 
 **Windows 11 x64**
@@ -16,6 +17,8 @@
 - [Overview](macOS-Overview)
 - [Installation and Runtime](macOS-Installation-and-Runtime)
 - [Using Workbench](Using-Workbench-on-macOS)
+- [Hypercube](macOS-Hypercube)
+- [Workspaces and Resources](macOS-Workspaces-and-Resources)
 - [Building the App](Building-the-macOS-App)
 
 **Intel macOS**

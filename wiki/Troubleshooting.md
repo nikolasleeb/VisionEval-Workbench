@@ -23,6 +23,14 @@ Open **Settings → Diagnostics** and review application, workspace, package, an
 
 ## 3. Report the issue
 
+### Mac 2.0 workflow checks
+
+- For region coverage errors, use the Virginia regional package's statewide InputLibrary rather than a different region's PlanRVA inputs.
+- In Hypercube Find All Changes, choose an available completed output year, such as 2045 for the walkthrough. A dated input column label is not the analysis year. Start with Find All Changes, then explore individual variables.
+- After moving a workspace, check Current workspace, quit/reopen with the SSD attached, and load existing completed analysis. Preserve both copies if verification or startup fails; do not delete files to clear an error.
+
+See [Mac 2.0 guides](Tutorials-and-Walkthroughs) for the illustrated instructions.
+
 [Open a GitHub Issue](https://github.com/nikolasleeb/VisionEval-Workbench/issues) and include:
 
 - Operating system and processor architecture
