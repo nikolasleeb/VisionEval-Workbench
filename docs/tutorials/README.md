@@ -1,10 +1,18 @@
 # Tutorials and walkthroughs
 
-These files are VisionEval Workbench tutorial documents. Use the PDF for reading and printing, or the editable Word copy when a guide needs to be adapted. The Windows installation guide remains accurate for version 1.0.1; the [Windows User Guide](../../windows/UserGuide.md) provides additional operating and troubleshooting detail.
+These files are VisionEval Workbench tutorial documents. Use the PDF for reading and printing, or an editable Word copy when one is provided. For current Windows setup, use the [Windows 2.0 installation and upgrade quick-start](windows-v2.0/Windows-2.0-Installation-and-Upgrade-Quick-Start.pdf) and the [complete Windows User Guide](../../windows/docs/user/VisionEval-Workbench-2.0-Windows-User-Guide.pdf).
+
+## Windows 2.0
+
+| Guide | What it covers | PDF |
+|---|---|---|
+| Installation and upgrade quick-start | New installations, older R and VisionEval versions, preserving an earlier runtime, and verification. | [Read/download PDF](windows-v2.0/Windows-2.0-Installation-and-Upgrade-Quick-Start.pdf) |
+
+The older Windows installation guide below describes version 1.0.1; keep it only for earlier releases.
 
 | Platform or workflow | Purpose | PDF | Editable Word |
 |---|---|---|---|
-| Windows 11 x64 | Illustrated installation and first-launch setup | [PDF](VisionEval-Workbench-Installation-Windows-x64.pdf) | [DOCX](VisionEval-Workbench-Installation-Windows-x64.docx) |
+| Windows 11 x64 (legacy 1.0.1) | Earlier installation and first-launch setup | [PDF](VisionEval-Workbench-Installation-Windows-x64.pdf) | [DOCX](VisionEval-Workbench-Installation-Windows-x64.docx) |
 | macOS — Intel | Install Workbench, Docker Desktop, and the managed AMD64 runtime | [View PDF](VisionEval-Workbench-Installation-macOS-Intel.pdf) | [Edit DOCX](VisionEval-Workbench-Installation-macOS-Intel.docx) |
 
 ## Mac 2.0 Guides and Walkthroughs

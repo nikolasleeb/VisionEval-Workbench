@@ -50,7 +50,9 @@ Do not unzip these packages. In Workbench, open **Settings → Assets**, choose 
 
 ## Tutorials
 
-The v2.0 applications include their current User Guide and What's New documents under **Settings → Documentation**. The illustrated [Mac 2.0 guides](docs/tutorials/macOS-v2.0/README.md) are available as PDFs and editable Word documents:
+The v2.0 applications include their current User Guide and What's New documents under **Settings → Documentation**. For Windows, start with the [Windows 2.0 installation and upgrade quick-start](docs/tutorials/windows-v2.0/Windows-2.0-Installation-and-Upgrade-Quick-Start.pdf). It explains what happens when you already have an older R or VisionEval installation. The [complete Windows User Guide](windows/docs/user/VisionEval-Workbench-2.0-Windows-User-Guide.pdf) covers the rest of the workflow.
+
+The illustrated [Mac 2.0 guides](docs/tutorials/macOS-v2.0/README.md) are available as PDFs and editable Word documents:
 
 - [Installation and Setup](docs/tutorials/macOS-v2.0/Mac-2.0-Installation-and-Setup.pdf)
 - [Project and Scenario Walkthrough](docs/tutorials/macOS-v2.0/Mac-2.0-Project-and-Scenario-Walkthrough.pdf)
