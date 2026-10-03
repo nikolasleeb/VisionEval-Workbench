@@ -7085,12 +7085,14 @@ function enqueueArtifactExport(label,kind,override={}){
   const snapshot=override.request?structuredClone(override.request):structuredClone(workbookRequest(kind,override));
   enqueueExport(label,()=>exportArtifact(kind,{...override,request:snapshot}));
 }
-function enqueueComparisonMapExport(kind){
+async function enqueueComparisonMapExport(kind){
   setComparisonMapExportOpen(false);
   try{
     let task;
     if(["pdf","png","svg"].includes(kind)){
-      const snapshot=snapshotComparisonMapVisual(kind);task={label:kind.toUpperCase(),run:()=>exportComparisonMapVisual(snapshot)};
+      const snapshot=state.comparisonMapMode==='3d'?
+        await snapshotComparisonMap3dVisual(kind):snapshotComparisonMapVisual(kind);
+      task={label:kind.toUpperCase(),run:()=>exportComparisonMapVisual(snapshot)};
     }else if(kind==="csv"){
       const params=new URLSearchParams(comparisonMapExportParams().toString()),filename=compareExportFilename("comparison map data","csv");
       task={label:"CSV",run:()=>saveBackendExport("comparison-map-csv",params,filename)};
@@ -7102,6 +7104,14 @@ function enqueueComparisonMapExport(kind){
   }catch(error){notify(error.message||String(error),"error");}
 }
 
+async function snapshotComparisonMap3dVisual(format){
+  if(!state.comparisonMapScene||state.mapDirty)throw new Error('Generate the map before exporting it.');
+  const map=state.comparisonMap3d;
+  if(!map||!state.comparisonMap3dScene)throw new Error('The 3D map is not ready to export.');
+  const image=await window.WorkbenchMap3dExport.capture(map,state.comparisonMap3dMarkers,format);
+  return{format,...image,filename:compareExportFilename('comparison map 3d',format)};
+}
+
 function comparisonMapExportParams() {
   const ids=[...comparisonMapScopeIds()];
   const scopeIds=state.mapPayload?.geographyLevel==='marea'?ids.flatMap((id)=>state.mapPayload?.mareaBzones?.[id]||[]):ids;
@@ -7110,9 +7120,6 @@ function comparisonMapExportParams() {
 
 function snapshotComparisonMapVisual(format) {
   if(!state.comparisonMapScene||state.mapDirty)throw new Error('Generate the map before exporting it.');
-  if(format==='png'&&state.comparisonMapMode==='3d'){
-    const canvas=state.comparisonMap3d?.getCanvas();if(!canvas)throw new Error('The 3D map is not ready to export.');return{format:'png',content:canvas.toDataURL('image/png'),filename:compareExportFilename('comparison map 3d','png'),width:canvas.width,height:canvas.height};
-  }
   const source=state.comparisonMapScene.svg.cloneNode(true),view=state.comparisonMapView,scale=comparisonMapScale(),metric=$('mapMetric').selectedOptions[0]?.textContent||'Map value',scope='Project geography';
   const inner=[...source.children].map((child)=>new XMLSerializer().serializeToString(child)).join(''),width=1600,height=1120,mapHeight=850;
   const range=scale.kind==='diverging'?`${number(-scale.limit)} to ${number(scale.limit)}`:`${number(scale.min)} to ${number(scale.max)}`;
