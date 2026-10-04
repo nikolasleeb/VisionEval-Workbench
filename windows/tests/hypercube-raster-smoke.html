@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Hypercube raster smoke</title>
+<body><output id="result">pending</output>
+<script src="../public/hypercube-visual-export.js"></script>
+<script>
+(async () => {
+  const result = document.getElementById('result');
+  const visual = WorkbenchHypercubeVisualExport.render({
+    title: 'Fuel Cost & Tax', subtitle: 'Percent change · 10 cases',
+    headers: ['Tax / cost', '10%', '25%'],
+    rows: [{cells: ['0%', '2%', '-1%']}, {cells: ['50%', '4%', '8%']}],
+    mode: 'heatmap',
+  });
+  const url = URL.createObjectURL(new Blob([visual.svgText], {type: 'image/svg+xml'}));
+  try {
+    const image = new Image();
+    await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; image.src = url; });
+    const canvas = document.createElement('canvas');
+    canvas.width = visual.width;
+    canvas.height = visual.height;
+    canvas.getContext('2d').drawImage(image, 0, 0);
+    const png = canvas.toDataURL('image/png');
+    const jpeg = canvas.toDataURL('image/jpeg');
+    result.textContent = png.startsWith('data:image/png;base64,') && jpeg.startsWith('data:image/jpeg;base64,') ? 'PASS: PNG and PDF capture' : 'FAIL: image encoding';
+  } catch (error) { result.textContent = `FAIL: ${error.message}`; }
+  finally { URL.revokeObjectURL(url); }
+})();
+</script>
+</body></html>
