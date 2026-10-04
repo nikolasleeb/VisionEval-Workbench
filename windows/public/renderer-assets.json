@@ -9,6 +9,7 @@
     {"path": "renderer-assets.json", "mime": ["application/json"]},
     {"path": "map3d-smoke.html", "mime": ["text/html"]},
     {"path": "map3d-smoke.js", "mime": ["text/javascript", "application/javascript"]},
+    {"path": "hypercube-visual-export.js", "mime": ["text/javascript", "application/javascript"]},
     {"path": "extrusion-borders.js", "mime": ["text/javascript", "application/javascript"]}
   ]
 }
