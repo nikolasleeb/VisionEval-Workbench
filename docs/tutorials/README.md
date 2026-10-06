@@ -2,7 +2,17 @@
 
 These files are VisionEval Workbench tutorial documents. Use the PDF for reading and printing, or an editable Word copy when one is provided. For current Windows setup, use the [Windows 2.0 installation and upgrade quick-start](windows-v2.0/Windows-2.0-Installation-and-Upgrade-Quick-Start.pdf) and the [complete Windows User Guide](../../windows/docs/user/VisionEval-Workbench-2.0-Windows-User-Guide.pdf).
 
-## Windows 2.0
+## Windows 2.0 Guides and Walkthroughs
+
+| Guide | What it covers | PDF | Editable Word |
+|---|---|---|---|
+| Installation and Setup | Install Workbench, select a workspace, reuse or install the native RC7 runtime, verify it, and install asset packages. | [Read/download PDF](windows-v2.0/Windows-2.0-Installation-and-Setup.pdf) | [Download Word](windows-v2.0/Windows-2.0-Installation-and-Setup.docx) |
+| Project and Scenario | Build regional assets, create and review scenarios, queue runs, compare results, inspect maps, and export. | [Read/download PDF](windows-v2.0/Windows-2.0-Project-and-Scenario-Walkthrough.pdf) | [Download Word](windows-v2.0/Windows-2.0-Project-and-Scenario-Walkthrough.docx) |
+| Hypercube | Build the nine-case fuel-cost and tax matrix, queue native runs, analyze outputs, inspect maps, and export. | [Read/download PDF](windows-v2.0/Windows-2.0-Hypercube-Walkthrough.pdf) | [Download Word](windows-v2.0/Windows-2.0-Hypercube-Walkthrough.docx) |
+| Workspaces and Resources | Check Windows resource guidance, back up the complete workspace, open existing workspaces, and move to an SSD. | [Read/download PDF](windows-v2.0/Windows-2.0-Workspaces-and-Resources.pdf) | [Download Word](windows-v2.0/Windows-2.0-Workspaces-and-Resources.docx) |
+
+The [Windows guide index](windows-v2.0/README.md) includes tutorial videos and supplementary documentation.
+
 
 | Guide | What it covers | PDF |
 |---|---|---|
